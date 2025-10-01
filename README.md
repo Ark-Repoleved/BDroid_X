@@ -56,9 +56,6 @@ Before you can start installing mods, you need to complete a one-time authorizat
 *   **Q: What should I do if the installation fails?**
     *   A: The most common reason is providing the wrong original `__data` file in step 3. Please make sure the file you provide matches the `hashed_name` prompted by the app.
 
-*   **Q: My mods stopped working after a game update?**
-    *   A: This is normal. Game updates can change the `hashed_name`. The app attempts to automatically download the latest mapping file (`characters.json`) from the community server on each launch. If you still have issues shortly after an update, please be patient and wait for the community to update the data.
-
 ---
 
 ## Credits
