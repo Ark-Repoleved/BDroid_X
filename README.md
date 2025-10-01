@@ -56,6 +56,9 @@ Before you can start installing mods, you need to complete a one-time authorizat
 *   **Q: What should I do if the installation fails?**
     *   A: The most common reason is providing the wrong original `__data` file in step 3. Please make sure the file you provide matches the `hashed_name` prompted by the app.
 
+*   **Q: What if the graphics are corrupted after installing a mod and entering the game?**
+    *   A: This is likely because the mod is missing the `.skel` file. A complete mod requires `.png`, `.atlas`, and `.skel` files to function correctly.
+
 ---
 
 ## Credits
