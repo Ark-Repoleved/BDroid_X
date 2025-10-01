@@ -18,7 +18,6 @@ No need for a PC to unpack and repack.
 
 *   Android 11 or higher.
 *   The latest official version of Brown Dust 2 installed.
-*   Sufficient storage space for temporary files.
 
 ## Installation
 
