@@ -67,4 +67,4 @@ The development of this application would not have been possible without the con
 
 *   **[browndust2-repacker-android](https://codeberg.org/kxdekxde/browndust2-repacker-android)**: Provided the core techniques for repacking `__data` files, including handling ASTC texture compression and LZ4 compression.
 *   **[UnityPy](https://github.com/K0lb3/UnityPy)**: A Python library that is fundamental for reading, modifying, and saving Unity game assets.
-*   **[ARM-software/astc-encoder](https://github.com/ARM-software/astc-encoder)**: The official ASTC texture encoder from ARM, used to convert mod textures into a format compatible with the Android system.
+*   **[ARM-software/astc-encoder](https://github.com/ARM-software/astc-encoder)**: The official ASTC texture encoder from ARM, used to convert mod textures into a format compatible with the game system.
