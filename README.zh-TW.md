@@ -2,7 +2,7 @@
 
 ---
 
-# Brown Dust 2 Android 模組管理器
+# BrownDust 2 Android 模組管理器
 
 解包封包不用跑電腦上了。
 
