@@ -36,4 +36,4 @@ jobs:
           tag_name: ${{ github.event.inputs.tag }}
           files: app/build/outputs/apk/release/*.apk
         env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
