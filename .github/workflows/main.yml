@@ -1,12 +1,10 @@
 name: Manual Build & Publish Release APK
 
-# 設定為手動觸發
 on:
   workflow_dispatch:
-    # 新增一個輸入欄位，讓您在執行時可以填寫版本標籤
     inputs:
       tag:
-        description: '1.0.0'
+        description: '版本號'
         required: true
         type: string
 
@@ -14,11 +12,9 @@ jobs:
   build-and-release:
     runs-on: ubuntu-latest
     steps:
-      # 步驟 1: 取得您的程式碼
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 步驟 2: 設定 Java 環境 (JDK 11)
       - name: Setup JDK
         uses: actions/setup-java@v4
         with:
@@ -26,23 +22,16 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      # 步驟 3: 給予 gradlew 執行權限
       - name: Make Gradle executable
         run: chmod +x ./gradlew
 
-      # 步驟 4: 建置正式版的 APK
       - name: Build Release APK
         run: ./gradlew assembleRelease
 
-      # 步驟 5: 建立 Release 並上傳 APK
       - name: Create Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
-          # 使用您在手動觸發時輸入的 tag 作為 Release 的標籤
           tag_name: ${{ github.event.inputs.tag }}
-          # 指向您要上傳的 APK 檔案路徑
-          # 路徑可能會因您的專案設定而異，請確認 app/build/outputs/apk/release/ 下的 APK 檔名
           files: app/build/outputs/apk/release/app-release.apk
         env:
-          # GITHUB_TOKEN 是由 GitHub Actions 自動提供的，有權限建立 Release
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
