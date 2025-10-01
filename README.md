@@ -23,8 +23,7 @@ No need for a PC to unpack and repack.
 ## Installation
 
 1.  Download the `.apk` file for this application.
-2.  In your Android system settings, find "Security" or "Apps" and allow "Install unknown apps".
-3.  Tap the downloaded `.apk` file to install.
+2.  Tap the downloaded `.apk` file to install.
 
 ## First-Time Setup
 
