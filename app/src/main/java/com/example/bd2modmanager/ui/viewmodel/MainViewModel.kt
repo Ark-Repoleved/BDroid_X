@@ -39,7 +39,7 @@ data class ModInfo(
 // Data class for the character lookup map
 data class CharacterInfo(val character: String, val costume: String, val type: String, val hashedName: String)
 
-data class ModDetails(val fileId: String?, val type: String)
+data class ModDetails(val fileId: String?, val fileNames: List<String>)
 
 // Data class for a batch repack job
 data class RepackJob(val hashedName: String, val modsToInstall: List<ModInfo>)
@@ -227,28 +227,58 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             _groupedMods.value = emptyMap()
             val modsList = withContext(Dispatchers.IO) {
                 DocumentFile.fromTreeUri(context, dirUri)?.listFiles()?.mapNotNull { file ->
-                    when {
-                        file.isFile && file.name?.endsWith(".zip", ignoreCase = true) == true -> {
-                            val modName = file.name!!.removeSuffix(".zip")
-                            val modDetails = extractModDetailsFromUri(context, file.uri)
-                            val characterEntries = characterLut[modDetails.fileId]
-                            val specificEntry = characterEntries?.find { it.type == modDetails.type }
-                            ModInfo(modName, specificEntry?.character ?: "Unknown", specificEntry?.costume ?: "Unknown", modDetails.type, false, file.uri, specificEntry?.hashedName, false)
-                        }
-                        file.isDirectory -> {
-                            val modName = file.name!!
-                            val modDetails = extractModDetailsFromDirectory(context, file.uri)
-                            val characterEntries = characterLut[modDetails.fileId]
-                            val specificEntry = characterEntries?.find { it.type == modDetails.type }
-                            ModInfo(modName, specificEntry?.character ?: "Unknown", specificEntry?.costume ?: "Unknown", modDetails.type, false, file.uri, specificEntry?.hashedName, true)
-                        }
-                        else -> null
+                    val modName = file.name?.removeSuffix(".zip") ?: ""
+                    val isDirectory = file.isDirectory
+
+                    val modDetails = if (isDirectory) {
+                        extractModDetailsFromDirectory(context, file.uri)
+                    } else {
+                        extractModDetailsFromUri(context, file.uri)
                     }
+
+                    val bestMatch = findBestMatch(modDetails.fileId, modDetails.fileNames)
+
+                    ModInfo(
+                        name = modName,
+                        character = bestMatch?.character ?: "Unknown",
+                        costume = bestMatch?.costume ?: "Unknown",
+                        type = bestMatch?.type ?: "idle",
+                        isEnabled = false, // This needs proper logic later
+                        uri = file.uri,
+                        targetHashedName = bestMatch?.hashedName,
+                        isDirectory = isDirectory
+                    )
                 } ?: emptyList()
             }
             _groupedMods.value = modsList.sortedBy { it.name }.groupBy { it.targetHashedName ?: "Unknown" }
             _selectedMods.value = emptySet() // Clear selection on refresh
         }
+    }
+
+    private fun findBestMatch(fileId: String?, fileNames: List<String>): CharacterInfo? {
+        if (fileId == null) return null
+
+        val candidates = characterLut[fileId] ?: return null
+        if (candidates.size == 1) return candidates.first()
+        if (candidates.isEmpty()) return null
+
+        // Rule A: Keyword Priority
+        val hasCutsceneKeyword = fileNames.any { it.contains("cutscene", ignoreCase = true) }
+        if (hasCutsceneKeyword) {
+            candidates.find { it.type == "cutscene" }?.let { return it }
+        }
+
+        // Rule B: Unique Valid Hash
+        val validHashCandidates = candidates.filter { !it.hashedName.isNullOrBlank() }
+        if (validHashCandidates.size == 1) {
+            return validHashCandidates.first()
+        }
+
+        // Rule C: Default to Idle
+        candidates.find { it.type == "idle" }?.let { return it }
+
+        // Final fallback
+        return candidates.first()
     }
 
     private fun saveFileToDownloads(context: Context, file: File): Uri? {
@@ -272,36 +302,37 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     private fun extractModDetailsFromUri(context: Context, zipUri: Uri): ModDetails {
+        val fileNames = mutableListOf<String>()
         var fileId: String? = null
-        var modType = "idle"
         try {
             context.contentResolver.openInputStream(zipUri)?.use { ZipInputStream(it).use { zis ->
                 var entry = zis.nextEntry
                 while (entry != null) {
+                    fileNames.add(entry.name)
                     if (fileId == null) fileId = extractFileId(entry.name)
-                    if (entry.name.contains("cutscene", ignoreCase = true)) modType = "cutscene"
                     entry = zis.nextEntry
                 }
             }}
         } catch (e: Exception) { e.printStackTrace() }
-        return ModDetails(fileId, modType)
+        return ModDetails(fileId, fileNames)
     }
 
     private fun extractModDetailsFromDirectory(context: Context, dirUri: Uri): ModDetails {
+        val fileNames = mutableListOf<String>()
         var fileId: String? = null
-        var modType = "idle"
         fun findDetails(currentDir: DocumentFile) {
             currentDir.listFiles().forEach { file ->
-                if (file.isDirectory) findDetails(file)
-                else {
-                    val entryName = file.name ?: ""
+                val entryName = file.name ?: ""
+                fileNames.add(entryName) // Store all names for keyword matching
+                if (file.isDirectory) {
+                    findDetails(file)
+                } else {
                     if (fileId == null) fileId = extractFileId(entryName)
-                    if (entryName.contains("cutscene", ignoreCase = true)) modType = "cutscene"
                 }
             }
         }
         try { DocumentFile.fromTreeUri(context, dirUri)?.let { findDetails(it) } } catch (e: Exception) { e.printStackTrace() }
-        return ModDetails(fileId, modType)
+        return ModDetails(fileId, fileNames)
     }
 
     private fun copyDirectoryToCache(context: Context, sourceDir: DocumentFile, destinationDir: File) {
@@ -335,11 +366,12 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     }
                 } catch (e: Exception) { e.printStackTrace() }
             }
+
             lut
         }
     }
 
     private fun extractFileId(entryName: String): String? {
-        return "(char\\d{6}|illust_\\w+|npc\\d+)".toRegex(RegexOption.IGNORE_CASE).find(entryName)?.value?.lowercase()
+        return "(char\\d{6}|illust_dating\\d+|illust_special\\d+|npc\\d+|specialillust\\w+|storypack\\w+|RhythmHitAnim)".toRegex(RegexOption.IGNORE_CASE).find(entryName)?.value?.lowercase()
     }
 }
