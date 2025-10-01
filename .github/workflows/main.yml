@@ -3,7 +3,7 @@ name: Build & Publish Release APK
 on:
   push:
     tags:
-      - '*'
+      - '1.0.0'
 
 jobs:
   Gradle:
