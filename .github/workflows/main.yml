@@ -1,0 +1,12 @@
+name: build apk
+
+on:
+    workflow_dispatch:
+
+jobs:
+    build:
+        name: build
+        runs-on: ubuntu-latest
+        steps:
+            - name: Build and Release APK
+              uses: sangatdesai/release-apk@V1.0
