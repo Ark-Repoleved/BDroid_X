@@ -2,7 +2,7 @@
 
 ---
 
-# Brown Dust 2 Android Mod Manager
+# BrownDust 2 Android Mod Manager
 
 No need for a PC to unpack and repack.
 
@@ -17,7 +17,7 @@ No need for a PC to unpack and repack.
 ## System Requirements
 
 *   Android 11 or higher.
-*   The latest official version of Brown Dust 2 installed.
+*   The latest official version of BrownDust 2 installed.
 
 ## Installation
 
