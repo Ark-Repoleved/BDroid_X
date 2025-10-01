@@ -1,68 +1,72 @@
-# Brown Dust 2 Android 模組管理器
-
-解包封包不用跑電腦上了。
+[English](./README.md) | [繁體中文](./README.zh-TW.md)
 
 ---
 
-## 功能介紹
+# Brown Dust 2 Android Mod Manager
 
-*   **自動掃描與分組**: 自動掃描您指定的模組資料夾，並根據模組要修改的遊戲檔案進行智慧分組。
-*   **批次安裝**: 您可以一次選擇同一個分組內的多個模組，應用程式會將它們合併處理。
-*   **裝置上打包**: 無需連接電腦，直接在您的手機上完成模組的解包、資源轉換 (ASTC) 和重新打包。
-
-## 系統需求
-
-*   Android 11 或更高版本。
-*   已安裝《棕色塵埃2》官方最新版本。
-*   足夠的儲存空間用於處理暫存檔案。
-
-## 安裝教學
-
-1.  下載本應用程式的 `.apk` 檔案。
-2.  在您的 Android 系統設定中，找到「安全性」或「應用程式」選項，允許「安裝未知的應用程式」。
-3.  點擊下載的 `.apk` 檔案進行安裝。
-
-## 首次使用設定
-
-在您開始安裝模組前，需要先完成一個授權步驟：
-
-1.  開啟 App，您會看到一個歡迎畫面。
-2.  點擊 **「Select Mod Source Folder」** 按鈕。
-3.  在跳出的檔案選擇器中，導覽至您存放模組檔案 (例如 `.zip` 壓縮檔或已經解壓縮的資料夾) 的位置，然後點擊 **「使用這個資料夾」**。
-    *   *建議：* 您可以在手機儲存空間中建立一個名為 `BD2_Mods` 的資料夾，將所有下載的模組都放在這裡。
-
-## 如何安裝模組
-
-1.  **選擇模組**: 在主畫面的列表中，勾選您想要安裝的一或多個模組。請注意，您只能選擇屬於同一個分組 (Target) 的模組進行批次安裝。
-2.  **開始打包**: 點擊右下角的 **打勾 (✓)** 浮動按鈕。
-3.  **提供原始檔案**:
-    *   應用程式會跳出一個對話框，提示它需要哪個 `hashed_name` 資料夾下的原始 `__data` 檔案。
-    *   使用第三方檔案管理器 (需要特殊權限) 找到原始 `__data` 檔案並複製到模組資料夾。
-    *   點擊 **「Select __data File」**。
-    *   在檔案選擇器中，找到並選擇對應的原始 `__data` 檔案，並開始進行修改。
-4.  **等待處理**: 應用程式會自動在背景執行解包、壓縮和重新打包的過程。請耐心等候。
-5.  **手動替換檔案 (目前版本)**:
-    *   安裝成功後，一個新的、修改過的 `__data` 檔案會被儲存到您手機的 **`Download` (下載)** 資料夾中，檔名為 `__[hashed_name]`。
-    *   **您需要手動將這個檔案複製或移動到遊戲的對應資料夾中，覆蓋掉原始的 `__data` 檔案。**
-    *   您可以使用第三方檔案管理器 (需要特殊權限) 來完成此操作。對話框中會提供一鍵複製的 ADB 指令，可以透過 Shizuku 在手機中執行自動替換指令。
-
-## 常見問題
-
-*   **Q: 為什麼 App 沒顯示我的模組？**
-    *   A: 請確認您已正確選擇了存放模組的「模組來源資料夾」。同時，請確保您的模組是 `.zip` 格式或已解壓縮的資料夾。
-
-*   **Q: 安裝失敗了怎麼辦？**
-    *   A: 最常見的原因是您在步驟 3 中提供了錯誤的原始 `__data` 檔案。請確保您提供的檔案與 App 提示的 `hashed_name` 相符。
-
-*   **Q: 遊戲更新後模組失效了？**
-    *   A: 這是正常現象。遊戲更新會改變 `hashed_name`。本 App 會在每次啟動時嘗試從社群伺服器自動下載最新的對應表 (`characters.json`)。如果更新後短時間內仍有問題，請耐心等待社群更新資料。
+No need for a PC to unpack and repack.
 
 ---
 
-## 致謝
+## Features
 
-本應用程式的開發離不開以下開源專案和工具的貢獻，特此感謝：
+*   **Automatic Scan & Grouping**: Automatically scans your specified mod folder and intelligently groups mods based on the game files they modify.
+*   **Batch Installation**: You can select and process multiple mods from the same group at once.
+*   **On-Device Repacking**: Unpack, convert resources (ASTC), and repack mods directly on your phone without needing a computer.
 
-*   **[browndust2-repacker-android](https://codeberg.org/kxdekxde/browndust2-repacker-android)**: 提供了在 Android 平台上重新打包 `__data` 檔案的核心技術，包括 ASTC 紋理壓縮和 LZ4 壓縮的處理方法。
-*   **[UnityPy](https://github.com/K0lb3/UnityPy)**: 強大的 Python 函式庫，是讀取、修改和儲存 Unity 遊戲資產的基礎。
-*   **[ARM-software/astc-encoder](https://github.com/ARM-software/astc-encoder)**: ARM 官方提供的 ASTC 紋理編碼器，用於將模組紋理轉換為 Android 系統相容的格式。
+## System Requirements
+
+*   Android 11 or higher.
+*   The latest official version of Brown Dust 2 installed.
+*   Sufficient storage space for temporary files.
+
+## Installation
+
+1.  Download the `.apk` file for this application.
+2.  In your Android system settings, find "Security" or "Apps" and allow "Install unknown apps".
+3.  Tap the downloaded `.apk` file to install.
+
+## First-Time Setup
+
+Before you can start installing mods, you need to complete a one-time authorization step:
+
+1.  Open the app, and you will see a welcome screen.
+2.  Tap the **"Select Mod Source Folder"** button.
+3.  In the file picker that appears, navigate to where you store your mod files (e.g., `.zip` archives or extracted folders), and then tap **"Use this folder"**.
+    *   *Recommendation:* Create a folder named `BD2_Mods` in your phone's storage and place all your downloaded mods there.
+
+## How to Install Mods
+
+1.  **Select Mods**: On the main screen list, check the one or more mods you want to install. Note that you can only batch-install mods belonging to the same group (Target).
+2.  **Start Repacking**: Tap the floating action button with the **check mark (✓)** at the bottom right.
+3.  **Provide the Original File**:
+    *   The app will show a dialog box, prompting for the original `__data` file from a specific `hashed_name` folder.
+    *   Use a third-party file manager (which may require special permissions) to find the original `__data` file and copy it to the mod folder.
+    *   Tap **"Select __data File"**.
+    *   In the file picker, find and select the corresponding original `__data` file to begin the modification process.
+4.  **Wait for Processing**: The app will automatically perform the unpacking, compression, and repacking process in the background. Please wait patiently.
+5.  **Manually Replace the File (Current Version)**:
+    *   After a successful installation, a new, modified `__data` file will be saved to your phone's **`Download`** folder with the filename `__[hashed_name]`.
+    *   **You need to manually copy or move this file to the corresponding game folder, overwriting the original `__data` file.**
+    *   You can use a third-party file manager (with special permissions) to do this. The dialog will provide a one-click ADB command that can be executed via Shizuku to automate the replacement.
+
+## FAQ
+
+*   **Q: Why aren't my mods showing up in the app?**
+    *   A: Please ensure you have correctly selected the "Mod Source Folder". Also, make sure your mods are in `.zip` format or are unzipped folders.
+
+*   **Q: What should I do if the installation fails?**
+    *   A: The most common reason is providing the wrong original `__data` file in step 3. Please make sure the file you provide matches the `hashed_name` prompted by the app.
+
+*   **Q: My mods stopped working after a game update?**
+    *   A: This is normal. Game updates can change the `hashed_name`. The app attempts to automatically download the latest mapping file (`characters.json`) from the community server on each launch. If you still have issues shortly after an update, please be patient and wait for the community to update the data.
+
+---
+
+## Credits
+
+The development of this application would not have been possible without the contributions of the following open-source projects and tools. Special thanks to:
+
+*   **[browndust2-repacker-android](https://codeberg.org/kxdekxde/browndust2-repacker-android)**: Provided the core techniques for repacking `__data` files on Android, including handling ASTC texture compression and LZ4 compression.
+*   **[UnityPy](https://github.com/K0lb3/UnityPy)**: A Python library that is fundamental for reading, modifying, and saving Unity game assets.
+*   **[ARM-software/astc-encoder](https://github.com/ARM-software/astc-encoder)**: The official ASTC texture encoder from ARM, used to convert mod textures into a format compatible with the Android system.
