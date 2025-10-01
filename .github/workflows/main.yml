@@ -1,7 +1,7 @@
 name: Build & Publish Release APK
 
 on:
-  push:
+  workflow_dispatch:
     tags:
       - '1.0.0'
 
