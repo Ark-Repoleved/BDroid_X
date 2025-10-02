@@ -360,7 +360,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     val jsonArray = JSONArray(jsonString)
                     for (i in 0 until jsonArray.length()) {
                         val obj = jsonArray.getJSONObject(i)
-                        val fileId = obj.getString("file_id")
+                        val fileId = obj.getString("file_id").lowercase()
                         val charInfo = CharacterInfo(obj.getString("character"), obj.getString("costume"), obj.getString("type"), obj.getString("hashed_name"))
                         lut.getOrPut(fileId) { mutableListOf() }.add(charInfo)
                     }
