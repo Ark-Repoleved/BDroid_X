@@ -39,7 +39,7 @@ Before you can start installing mods, you need to complete a one-time authorizat
 2.  **Start Repacking**: Tap the floating action button with the **check mark (✓)** at the bottom right.
 3.  **Provide the Original File**:
     *   The app will show a dialog box, prompting for the original `__data` file from a specific `hashed_name` folder.
-    *   Use system file manager to navigate to the game's data folder at `Android/data/com.neowiz.game.browndust2.android/files/UnityCache/Shared/[hashed_name]/`, find the original `__data` file, and copy it to your mod folder.
+    *   Use system file manager to navigate to the game's data folder at `Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/[hashed_name]/`, find the original `__data` file, and copy it to your mod folder.
     *   Tap **"Select __data File"**.
     *   In the file picker, find and select the corresponding original `__data` file to begin the modification process.
 4.  **Wait for Processing**: The app will automatically perform the unpacking, compression, and repacking process in the background. Please wait patiently.
