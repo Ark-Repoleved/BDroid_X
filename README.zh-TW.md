@@ -39,7 +39,7 @@
 2.  **開始打包**: 點擊右下角的 **打勾 (✓)** 浮動按鈕。
 3.  **提供原始檔案**:
     *   應用程式會跳出一個對話框，提示它需要哪個 `hashed_name` 資料夾下的原始 `__data` 檔案。
-    *   使用第系統檔案管理器 (需要特殊權限) 前往遊戲資料夾 `Android/data/com.neowiz.game.browndust2.android/files/UnityCache/Shared/[hashed_name]/`，找到原始 `__data` 檔案並將其複製到您的模組資料夾。
+    *   使用第系統檔案管理器 (需要特殊權限) 前往遊戲資料夾 `Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/[hashed_name]/`，找到原始 `__data` 檔案並將其複製到您的模組資料夾。
     *   點擊 **「Select __data File」**。
     *   在檔案選擇器中，找到並選擇對應的原始 `__data` 檔案，並開始進行修改。
 4.  **等待處理**: 應用程式會自動在背景執行解包、壓縮和重新打包的過程。請耐心等候。
