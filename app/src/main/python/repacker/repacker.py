@@ -1,7 +1,10 @@
+# -*- coding: utf-8 -*-
+
 from PIL import Image
 import os
 import ctypes
 from ctypes import c_uint, c_float, c_void_p, c_char_p, c_size_t, c_int, POINTER, Structure, c_ubyte, byref
+import gc # 引入垃圾回收模組
 
 # The following two lines are crucial for running in Chaquopy
 from UnityPy.helpers import TypeTreeHelper
@@ -92,15 +95,6 @@ if astcenc:
 def get_error_string(status):
     return astcenc.astcenc_get_error_string(status).decode('utf-8')
 
-def find_modded_asset(folder: str, filename: str) -> str:
-    """Recursively search for a file in a directory, ignoring case."""
-    search_filename_lower = filename.lower()
-    for root, dirs, files in os.walk(folder):
-        for f in files:
-            if f.lower() == search_filename_lower:
-                return os.path.join(root, f)
-    return None
-
 def compress_image_astc(image_bytes, width, height, block_x, block_y):
     """Compresses an RGBA image using libastcenc."""
     if not astcenc:
@@ -110,7 +104,6 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
     config = astcenc_config()
     quality = ASTCENC_PRE_MEDIUM
     profile = ASTCENC_PRF_LDR_SRGB
-    # IMPORTANT: Add flags based on reference script
     flags = ASTCENC_FLG_USE_DECODE_UNORM8
     status = astcenc.astcenc_config_init(profile, block_x, block_y, 1, quality, flags, byref(config))
     if status != ASTCENC_SUCCESS:
@@ -118,7 +111,8 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
 
     # 2. Allocate context
     context = c_void_p()
-    thread_count = 1
+    # 優化：使用所有可用的 CPU 核心來加速壓縮
+    thread_count = os.cpu_count() or 1
     status = astcenc.astcenc_context_alloc(byref(config), thread_count, byref(context))
     if status != ASTCENC_SUCCESS:
         return None, f"astcenc_context_alloc failed: {get_error_string(status)}"
@@ -127,12 +121,7 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
     image_data_p = (c_void_p * 1)()
     image_data_p[0] = ctypes.cast(image_bytes, c_void_p)
 
-    image = astcenc_image()
-    image.dim_x = width
-    image.dim_y = height
-    image.dim_z = 1
-    image.data_type = ASTCENC_TYPE_U8
-    image.data = image_data_p
+    image = astcenc_image(dim_x=width, dim_y=height, dim_z=1, data_type=ASTCENC_TYPE_U8, data=image_data_p)
 
     # 4. Prepare swizzle
     swizzle = astcenc_swizzle(r=0, g=1, b=2, a=3) # R, G, B, A
@@ -145,7 +134,7 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
 
     # 6. Compress
     status = astcenc.astcenc_compress_image(context, byref(image), byref(swizzle), comp_buf, buf_size, 0)
-    
+
     # 7. Free context
     astcenc.astcenc_context_free(context)
 
@@ -154,76 +143,97 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
 
     return bytes(comp_buf), None
 
+def create_mod_asset_map(folder: str) -> dict:
+    """
+    優化：預先掃描 mod 資料夾，建立一個從資產名到檔案路徑的對應表。
+    這樣可以避免在主迴圈中重複、低效地搜尋檔案。
+    """
+    asset_map = {}
+    for root, _, files in os.walk(folder):
+        for f in files:
+            # 取得不含副檔名的檔名，並轉為小寫以實現不區分大小寫的匹配
+            asset_name = os.path.splitext(f)[0]
+            asset_map[asset_name.lower()] = os.path.join(root, f)
+    return asset_map
 
 def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_path: str):
     """Repacks a Unity bundle with assets from a specified mod folder."""
+    env = None
     try:
         env = UnityPy.load(original_bundle_path)
         edited = False
+        
+        # 優化：在處理前，一次性建立 mod 檔案的查詢地圖
+        mod_asset_map = create_mod_asset_map(modded_assets_folder)
 
         for obj in env.objects:
             try:
+                # 跳過沒有 m_Name 屬性的物件
+                if not hasattr(obj, 'm_Name'):
+                    continue
+
+                asset_name_lower = obj.m_Name.lower()
+                # 優化：使用字典進行快速查找
+                modded_file_path = mod_asset_map.get(asset_name_lower)
+
+                if not modded_file_path:
+                    continue
+
                 if obj.type.name == "Texture2D":
                     data = obj.read()
-                    file_name = data.m_Name + ".png"
-                    
-                    modded_file_path = find_modded_asset(modded_assets_folder, file_name)
-                    
-                    if modded_file_path:
-                        print(f"Replacing Texture2D: {data.m_Name} in {os.path.basename(original_bundle_path)}")
+                    print(f"Replacing Texture2D: {data.m_Name} in {os.path.basename(original_bundle_path)}")
 
-                        pil_img = Image.open(modded_file_path).convert("RGBA")
-                        
-                        # IMPORTANT: Flip the image vertically to match OpenGL/Unity coordinate system
-                        flipped_img = pil_img.transpose(Image.FLIP_TOP_BOTTOM)
+                    pil_img = Image.open(modded_file_path).convert("RGBA")
+                    # 更新：使用 Image.Transpose.FLIP_TOP_BOTTOM 避免 DeprecationWarning
+                    flipped_img = pil_img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+                    img_bytes = flipped_img.tobytes()
 
-                        # Match block size from reference script
-                        block_x, block_y = 4, 4
-                        
-                        # Compress the image to ASTC
-                        compressed_data, err = compress_image_astc(flipped_img.tobytes(), pil_img.width, pil_img.height, block_x, block_y)
+                    block_x, block_y = 4, 4
+                    compressed_data, err = compress_image_astc(img_bytes, pil_img.width, pil_img.height, block_x, block_y)
 
-                        if err:
-                            print(f"ERROR: ASTC compression failed for {file_name}: {err}")
-                            continue
+                    if err:
+                        print(f"ERROR: ASTC compression failed for {data.m_Name}: {err}")
+                        # 記憶體管理：即使出錯也要清理記憶體
+                        del pil_img, flipped_img, img_bytes
+                        gc.collect()
+                        continue
 
-                        # Update Texture2D object with compressed data
-                        data.m_Width, data.m_Height = pil_img.size
-                        # 48 is the integer value for ASTC_4x4_UNORM_SRGB
-                        data.m_TextureFormat = 48
-                        data.image_data = compressed_data
-                        data.m_CompleteImageSize = len(compressed_data)
-                        data.m_MipCount = 1
-                        data.m_StreamData.offset = 0
-                        data.m_StreamData.size = 0
-                        data.m_StreamData.path = ""
+                    data.m_Width, data.m_Height = pil_img.size
+                    data.m_TextureFormat = 48 # ASTC_4x4
+                    data.image_data = compressed_data
+                    data.m_CompleteImageSize = len(compressed_data)
+                    data.m_MipCount = 1
+                    data.m_StreamData.offset = 0
+                    data.m_StreamData.size = 0
+                    data.m_StreamData.path = ""
+                    data.save()
+                    edited = True
 
-                        data.save()
-                        edited = True
+                    # 記憶體管理：處理完一個大檔案後，立即釋放所有相關的大型變數
+                    del data, pil_img, flipped_img, img_bytes, compressed_data
+                    gc.collect()
 
                 elif obj.type.name == "TextAsset":
                     data = obj.read()
-                    file_name = data.m_Name
-                    
-                    modded_file_path = find_modded_asset(modded_assets_folder, file_name)
+                    print(f"Replacing TextAsset: {data.m_Name} in {os.path.basename(original_bundle_path)}")
+                    with open(modded_file_path, "rb") as f:
+                        script_bytes = f.read()
+                    data.m_Script = script_bytes.decode("utf-8", "surrogateescape")
+                    data.save()
+                    edited = True
+                    # 記憶體管理：保持良好習慣
+                    del data, script_bytes
+                    gc.collect()
 
-                    if modded_file_path:
-                        print(f"Replacing TextAsset: {file_name} in {os.path.basename(original_bundle_path)}")
-                        with open(modded_file_path, "rb") as f:
-                            data.m_Script = f.read().decode("utf-8", "surrogateescape")
-                        data.save()
-                        edited = True
-
-            except Exception as e:
+            except Exception:
                 import traceback
                 print(f"Error processing asset in {os.path.basename(original_bundle_path)}: {traceback.format_exc()}")
 
         if edited:
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             try:
-                with open(output_path, "wb") as f:
-                    bundle_data = env.file.save(packer="lz4")
-                    f.write(bundle_data)
+                # 記憶體管理關鍵優化：直接將修改後的內容儲存到檔案，而不是先在記憶體中建立副本
+                env.file.save(dest=output_path, packer="lz4")
                 print(f"Saved modified bundle to {output_path}")
                 return True
             except Exception as e:
@@ -233,7 +243,12 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
             print("No modifications were made.")
             return False
 
-    except Exception as e:
+    except Exception:
         import traceback
         print(f"Error processing bundle {os.path.basename(original_bundle_path)}: {traceback.format_exc()}")
         return False
+    finally:
+        # 記憶體管理：無論成功或失敗，都確保 UnityPy 環境物件被清理
+        if env:
+            del env
+        gc.collect()
