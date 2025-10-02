@@ -46,7 +46,7 @@ Before you can start installing mods, you need to complete a one-time authorizat
 5.  **Manually Replace the File (Current Version)**:
     *   After a successful installation, a new, modified `__data` file will be saved to your phone's **`Download`** folder with the filename `__[hashed_name]`.
     *   **You need to manually copy or move this file to the corresponding game folder, overwriting the original `__data` file.**
-    *   You can use a third-party file manager (with special permissions) to do this. The dialog will provide a one-click ADB command that can be executed via Shizuku to automate the replacement.
+    *   You can use a third-party file manager (with special permissions) to do this. The dialog will provide a one-click ADB command that can be executed via [Shizuku](https://github.com/RikkaApps/Shizuku) to automate the replacement.
 
 ## FAQ
 
