@@ -120,13 +120,30 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     private suspend fun updateCharacterData(context: Context) {
         withContext(Dispatchers.IO) {
-            val localFile = File(context.filesDir, CHARACTERS_JSON_FILENAME)
             try {
-                localFile.writeText(URL(CHARACTERS_JSON_URL).readText())
-                println("Successfully downloaded and saved characters.json")
+                if (!Python.isStarted()) {
+                    Python.start(com.chaquo.python.android.AndroidPlatform(context))
+                }
+                val py = Python.getInstance()
+                val mainScript = py.getModule("main_script")
+                val result = mainScript.callAttr("update_character_data", context.filesDir.absolutePath).asList()
+                val success = result[0].toBoolean()
+                val message = result[1].toString()
+
+                if (success) {
+                    println("Successfully ran scraper and saved characters.json")
+                    // Invalidate the mod cache to force re-identification of mods
+                    val cacheFile = File(context.cacheDir, MOD_CACHE_FILENAME)
+                    if (cacheFile.exists()) {
+                        cacheFile.delete()
+                        println("Deleted mod cache to force re-scan.")
+                    }
+                } else {
+                    println("Scraper script failed: $message. Will use local version if available.")
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
-                println("Failed to download characters.json, will use local version.")
+                println("Failed to execute scraper python script, will use local version. Error: ${e.message}")
             }
             characterLut = parseCharacterJson(context)
         }
