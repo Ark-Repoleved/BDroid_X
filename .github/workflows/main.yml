@@ -33,14 +33,7 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Build Debug APK
-        run: |
-          if [ -f "${{ runner.temp }}/debug.keystore" ]; then
-            echo "Signing with provided debug key."
-            ./gradlew assembleDebug -Pandroid.injected.signing.store.file=${{ runner.temp }}/debug.keystore -Pandroid.injected.signing.store.password=android -Pandroid.injected.signing.key.alias=androiddebugkey -Pandroid.injected.signing.key.password=android
-          else
-            echo "No debug key provided. Building with default debug key."
-            ./gradlew assembleDebug
-          fi
+        run: ./gradlew assembleDebug -Pandroid.injected.signing.store.file=${{ runner.temp }}/debug.keystore -Pandroid.injected.signing.store.password=android -Pandroid.injected.signing.key.alias=androiddebugkey -Pandroid.injected.signing.key.password=android
 
       - name: Create Release and Upload APK
         uses: softprops/action-gh-release@v2
