@@ -1,5 +1,6 @@
 package com.example.bd2modmanager
 
+import android.app.DownloadManager
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
@@ -126,22 +127,39 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
                             )
                         }
                         Spacer(Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                clipboardManager.setText(AnnotatedString(command))
-                                Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.align(Alignment.End)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
                         ) {
-                            Text("Copy Command")
+                            Button(onClick = {
+                                try {
+                                    context.startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                    Toast.makeText(context, "Could not open downloads app.", Toast.LENGTH_SHORT).show()
+                                }
+                            }) {
+                                Text("Open Downloads")
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Button(
+                                onClick = {
+                                    clipboardManager.setText(AnnotatedString(command))
+                                    Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                                }
+                            ) {
+                                Text("Copy Command")
+                            }
                         }
                     }
                 }
                 is InstallState.Failed -> Text(state.error)
                 is InstallState.Installing -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                     CircularProgressIndicator()
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
                     Text("Processing group: ${state.job.hashedName}")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(state.progressMessage, textAlign = TextAlign.Center)
                 }
                 else -> {}
             }
@@ -168,7 +186,8 @@ fun ModScreen(
     onSelectModSource: () -> Unit
 ) {
     val modSourceDirectoryUri by viewModel.modSourceDirectoryUri.collectAsState()
-    val groupedMods by viewModel.groupedMods.collectAsState()
+    val modsList by viewModel.modsList.collectAsState()
+    val groupedMods = modsList.groupBy { it.targetHashedName ?: "Unknown" }
     val selectedMods by viewModel.selectedMods.collectAsState()
 
     Scaffold(
