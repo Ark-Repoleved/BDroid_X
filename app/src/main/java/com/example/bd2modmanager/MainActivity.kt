@@ -18,7 +18,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -92,88 +95,88 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        // Icon and Title
+        icon = {
+            when (state) {
+                is InstallState.AwaitingOriginalFile -> Icon(Icons.Default.Info, contentDescription = "Info")
+                is InstallState.Finished -> Icon(Icons.Default.CheckCircle, contentDescription = "Success", tint = MaterialTheme.colorScheme.primary)
+                is InstallState.Failed -> Icon(Icons.Default.Error, contentDescription = "Error", tint = MaterialTheme.colorScheme.error)
+                is InstallState.Installing -> CircularProgressIndicator(modifier = Modifier.size(24.dp))
+            }
+        },
         title = {
             val text = when (state) {
                 is InstallState.AwaitingOriginalFile -> "Original File Needed"
                 is InstallState.Finished -> "Repack Successful!"
                 is InstallState.Failed -> "Installation Failed"
                 is InstallState.Installing -> "Installing..."
-                else -> ""
             }
             Text(text)
         },
+        // Content
         text = {
-            when (state) {
-                is InstallState.AwaitingOriginalFile ->
-                    Text("Please provide the original __data file for group: \n${state.job.hashedName}")
-                is InstallState.Finished -> {
-                    val hash = state.job.hashedName
-                    val command = "mv -f /sdcard/Download/__$hash /sdcard/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hash/*/__data"
-
-                    Column {
-                        Text("New file for group '$hash' saved to your Downloads folder.")
-                        Spacer(Modifier.height(16.dp))
-                        Text("For advanced users, run the following command in a root shell to move the file:")
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                when (state) {
+                    is InstallState.AwaitingOriginalFile -> {
+                        Text("Please provide the original __data file for group:", textAlign = TextAlign.Center)
                         Spacer(Modifier.height(8.dp))
-
+                        SelectionContainer {
+                            Text(
+                                text = state.job.hashedName,
+                                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                                modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp)).padding(8.dp)
+                            )
+                        }
+                    }
+                    is InstallState.Finished -> {
+                        val hash = state.job.hashedName
+                        val command = "mv -f /sdcard/Download/__$hash /sdcard/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hash/*/__data"
+                        Text("New file saved to your Downloads folder.", textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(16.dp))
+                        Text("For advanced users, use this command to move the file:", textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                        Spacer(Modifier.height(8.dp))
                         SelectionContainer {
                             Text(
                                 text = command,
                                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp))
-                                    .padding(8.dp)
-                                    .fillMaxWidth()
+                                modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp)).padding(8.dp).fillMaxWidth()
                             )
                         }
-                        Spacer(Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            Button(onClick = {
-                                try {
-                                    context.startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
-                                } catch (e: Exception) {
-                                    e.printStackTrace()
-                                    Toast.makeText(context, "Could not open downloads app.", Toast.LENGTH_SHORT).show()
-                                }
-                            }) {
-                                Text("Open Downloads")
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            Button(
-                                onClick = {
-                                    clipboardManager.setText(AnnotatedString(command))
-                                    Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
-                                }
-                            ) {
-                                Text("Copy Command")
-                            }
+                    }
+                    is InstallState.Failed -> {
+                        SelectionContainer {
+                            Text(state.error, textAlign = TextAlign.Center)
                         }
                     }
+                    is InstallState.Installing -> {
+                        Text("Processing group: ${state.job.hashedName}", style = MaterialTheme.typography.bodyLarge)
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(state.progressMessage, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
-                is InstallState.Failed -> Text(state.error)
-                is InstallState.Installing -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    CircularProgressIndicator()
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Processing group: ${state.job.hashedName}")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(state.progressMessage, textAlign = TextAlign.Center)
-                }
-                else -> {}
             }
         },
+        // Buttons
         confirmButton = {
             when (state) {
-                is InstallState.AwaitingOriginalFile -> Button(onClick = onProvideFile) { Text("Select __data File") }
-                is InstallState.Finished, is InstallState.Failed -> Button(onClick = onDismiss) { Text("OK") }
-                else -> {}
+                is InstallState.AwaitingOriginalFile -> Button(onClick = onProvideFile) { Text("Select File") }
+                is InstallState.Finished -> {
+                    Button(onClick = {
+                        clipboardManager.setText(AnnotatedString("mv -f /sdcard/Download/__${state.job.hashedName} /sdcard/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/${state.job.hashedName}/*/__data"))
+                        Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                    }) {
+                        Text("Copy Command")
+                    }
+                }
+                is InstallState.Failed -> Button(onClick = onDismiss) { Text("OK") }
+                else -> {} // No confirm button while installing
             }
         },
         dismissButton = {
             if (state !is InstallState.Installing) {
-                Button(onClick = onDismiss) { Text("Cancel") }
+                Button(onClick = onDismiss) {
+                    Text(if (state is InstallState.Finished) "Done" else "Cancel")
+                }
             }
         }
     )
