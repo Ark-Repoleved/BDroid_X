@@ -63,6 +63,8 @@ chaquopy {
             install("brotli")
             install("fsspec")
             install("attrs")
+            install("requests")
+            install("beautifulsoup4")
         }
     }
 }
