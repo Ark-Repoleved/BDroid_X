@@ -1,6 +1,5 @@
 package com.example.bd2modmanager
 
-import android.app.DownloadManager
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
@@ -144,19 +143,25 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
                 is InstallState.Failed -> Text(state.error)
                 is InstallState.Installing -> Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                        .padding(16.dp)
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    CircularProgressIndicator()
-                    Spacer(modifier = Modifier.height(16.dp))
                     Text("Processing group: ${state.job.hashedName}")
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(state.progressMessage, textAlign = TextAlign.Center)
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(16.dp)
+                    ) {
+                        CircularProgressIndicator()
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(state.progressMessage, textAlign = TextAlign.Center)
+                    }
                 }
                 else -> {}
             }
