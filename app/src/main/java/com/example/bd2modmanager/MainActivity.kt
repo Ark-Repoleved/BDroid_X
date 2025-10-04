@@ -100,9 +100,8 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
             when (state) {
                 is InstallState.AwaitingOriginalFile -> Icon(Icons.Default.Info, contentDescription = "Info")
                 is InstallState.Finished -> Icon(Icons.Default.CheckCircle, contentDescription = "Success", tint = MaterialTheme.colorScheme.primary)
-                is InstallState.Failed -> Icon(Icons.Default.Info, contentDescription = "Error", tint = MaterialTheme.colorScheme.error) // Use Info icon tinted red
+                is InstallState.Failed -> Icon(Icons.Default.Error, contentDescription = "Error", tint = MaterialTheme.colorScheme.error)
                 is InstallState.Installing -> CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                is InstallState.Idle -> {}
             }
         },
         title = {
@@ -111,7 +110,6 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
                 is InstallState.Finished -> "Repack Successful!"
                 is InstallState.Failed -> "Installation Failed"
                 is InstallState.Installing -> "Installing..."
-                is InstallState.Idle -> ""
             }
             Text(text)
         },
@@ -155,7 +153,6 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(state.progressMessage, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
                     }
-                    is InstallState.Idle -> {}
                 }
             }
         },
@@ -172,7 +169,7 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
                     }
                 }
                 is InstallState.Failed -> Button(onClick = onDismiss) { Text("OK") }
-                else -> {} // No confirm button while installing or idle
+                else -> {} // No confirm button while installing
             }
         },
         dismissButton = {
