@@ -24,19 +24,16 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Decode Debug Keystore
-        if: secrets.DEBUG_KEYSTORE_BASE64 != ''
-        run: |
-          echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 --decode > ${{ runner.temp }}/debug.keystore
-
       - name: Make Gradle executable
         run: chmod +x ./gradlew
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug -Pandroid.injected.signing.store.file=${{ runner.temp }}/debug.keystore -Pandroid.injected.signing.store.password=android -Pandroid.injected.signing.key.alias=androiddebugkey -Pandroid.injected.signing.key.password=android
+      - name: Build Release APK
+        run: ./gradlew assembleDebug
 
       - name: Create Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag }}
           files: app/build/outputs/apk/debug/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
