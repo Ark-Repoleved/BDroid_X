@@ -155,87 +155,85 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
     return bytes(comp_buf), None
 
 
-def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_path: str, progress_callback=None):
+def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_path: str):
     """Repacks a Unity bundle with assets from a specified mod folder."""
-    def report_progress(message):
-        if progress_callback:
-            progress_callback(message)
-        print(message)
-
     try:
-        report_progress("Loading original game file...")
         env = UnityPy.load(original_bundle_path)
         edited = False
 
-        report_progress("Scanning for moddable assets...")
-        # Pre-scan for all assets to replace to give better feedback
-        assets_to_mod = []
         for obj in env.objects:
-            if obj.type.name in ["Texture2D", "TextAsset"]:
-                data = obj.read()
-                file_name = data.m_Name + ".png" if obj.type.name == "Texture2D" else data.m_Name
-                modded_file_path = find_modded_asset(modded_assets_folder, file_name)
-                if modded_file_path:
-                    assets_to_mod.append((obj, data, file_name, modded_file_path))
-
-        total_assets = len(assets_to_mod)
-        for i, (obj, data, file_name, modded_file_path) in enumerate(assets_to_mod):
             try:
-                current_progress = f"({i+1}/{total_assets}) "
                 if obj.type.name == "Texture2D":
-                    report_progress(f"{current_progress}Replacing texture: {data.m_Name}")
+                    data = obj.read()
+                    file_name = data.m_Name + ".png"
                     
-                    pil_img = Image.open(modded_file_path).convert("RGBA")
-                    flipped_img = pil_img.transpose(Image.FLIP_TOP_BOTTOM)
+                    modded_file_path = find_modded_asset(modded_assets_folder, file_name)
                     
-                    report_progress(f"{current_progress}Compressing texture: {data.m_Name}")
-                    block_x, block_y = 4, 4
-                    compressed_data, err = compress_image_astc(flipped_img.tobytes(), pil_img.width, pil_img.height, block_x, block_y)
+                    if modded_file_path:
+                        print(f"Replacing Texture2D: {data.m_Name} in {os.path.basename(original_bundle_path)}")
 
-                    if err:
-                        report_progress(f"ERROR: ASTC compression failed for {file_name}: {err}")
-                        continue
+                        pil_img = Image.open(modded_file_path).convert("RGBA")
+                        
+                        # IMPORTANT: Flip the image vertically to match OpenGL/Unity coordinate system
+                        flipped_img = pil_img.transpose(Image.FLIP_TOP_BOTTOM)
 
-                    data.m_Width, data.m_Height = pil_img.size
-                    data.m_TextureFormat = 48
-                    data.image_data = compressed_data
-                    data.m_CompleteImageSize = len(compressed_data)
-                    data.m_MipCount = 1
-                    data.m_StreamData.offset = 0
-                    data.m_StreamData.size = 0
-                    data.m_StreamData.path = ""
-                    data.save()
-                    edited = True
+                        # Match block size from reference script
+                        block_x, block_y = 4, 4
+                        
+                        # Compress the image to ASTC
+                        compressed_data, err = compress_image_astc(flipped_img.tobytes(), pil_img.width, pil_img.height, block_x, block_y)
+
+                        if err:
+                            print(f"ERROR: ASTC compression failed for {file_name}: {err}")
+                            continue
+
+                        # Update Texture2D object with compressed data
+                        data.m_Width, data.m_Height = pil_img.size
+                        # 48 is the integer value for ASTC_4x4_UNORM_SRGB
+                        data.m_TextureFormat = 48
+                        data.image_data = compressed_data
+                        data.m_CompleteImageSize = len(compressed_data)
+                        data.m_MipCount = 1
+                        data.m_StreamData.offset = 0
+                        data.m_StreamData.size = 0
+                        data.m_StreamData.path = ""
+
+                        data.save()
+                        edited = True
 
                 elif obj.type.name == "TextAsset":
-                    report_progress(f"{current_progress}Replacing asset: {file_name}")
-                    with open(modded_file_path, "rb") as f:
-                        data.m_Script = f.read().decode("utf-8", "surrogateescape")
-                    data.save()
-                    edited = True
+                    data = obj.read()
+                    file_name = data.m_Name
+                    
+                    modded_file_path = find_modded_asset(modded_assets_folder, file_name)
+
+                    if modded_file_path:
+                        print(f"Replacing TextAsset: {file_name} in {os.path.basename(original_bundle_path)}")
+                        with open(modded_file_path, "rb") as f:
+                            data.m_Script = f.read().decode("utf-8", "surrogateescape")
+                        data.save()
+                        edited = True
 
             except Exception as e:
                 import traceback
-                report_progress(f"Error processing asset {file_name}: {traceback.format_exc()}")
+                print(f"Error processing asset in {os.path.basename(original_bundle_path)}: {traceback.format_exc()}")
 
         if edited:
-            report_progress("Saving modified game file...")
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             try:
                 with open(output_path, "wb") as f:
                     bundle_data = env.file.save(packer="lz4")
                     f.write(bundle_data)
-                report_progress("Saved successfully!")
+                print(f"Saved modified bundle to {output_path}")
                 return True
             except Exception as e:
-                report_progress(f"Error saving bundle: {e}")
+                print(f"Error saving bundle: {e}")
                 return False
         else:
-            report_progress("No modifications were made.")
+            print("No modifications were made.")
             return False
 
     except Exception as e:
         import traceback
-        message = f"Error processing bundle: {traceback.format_exc()}"
-        report_progress(message)
+        print(f"Error processing bundle {os.path.basename(original_bundle_path)}: {traceback.format_exc()}")
         return False
