@@ -6,19 +6,18 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "vendor"))
 
 from repacker.repacker import repack_bundle
 
-def main(original_bundle_path: str, modded_assets_folder: str, output_path: str, progress_callback=None):
+def main(original_bundle_path: str, modded_assets_folder: str, output_path: str):
     """
     Main entry point to be called from Kotlin.
     Returns a tuple: (success: Boolean, message: String)
     """
     try:
-        # The progress callback will handle printing, so we can remove the print statements here.
-        success = repack_bundle(
-            original_bundle_path=original_bundle_path,
-            modded_assets_folder=modded_assets_folder,
-            output_path=output_path,
-            progress_callback=progress_callback
-        )
+        print(f"Starting repack process...")
+        print(f"Original Bundle: {original_bundle_path}")
+        print(f"Modded Assets: {modded_assets_folder}")
+        print(f"Output Path: {output_path}")
+        
+        success = repack_bundle(original_bundle_path, modded_assets_folder, output_path)
         
         if success:
             message = "Repack process completed successfully."
