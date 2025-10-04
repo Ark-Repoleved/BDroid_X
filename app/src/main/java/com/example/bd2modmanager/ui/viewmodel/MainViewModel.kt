@@ -12,6 +12,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.chaquo.python.Python
 import com.example.bd2modmanager.service.ModdingService
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,6 +38,18 @@ data class ModInfo(
     val isDirectory: Boolean // Flag to indicate if the mod is a directory
 )
 
+// Data class for storing mod metadata in a cache
+data class ModCacheInfo(
+    val uriString: String,
+    val lastModified: Long,
+    val name: String,
+    val character: String,
+    val costume: String,
+    val type: String,
+    val targetHashedName: String?,
+    val isDirectory: Boolean
+)
+
 // Data class for the character lookup map
 data class CharacterInfo(val character: String, val costume: String, val type: String, val hashedName: String)
 
@@ -48,7 +62,7 @@ data class RepackJob(val hashedName: String, val modsToInstall: List<ModInfo>)
 sealed class InstallState {
     object Idle : InstallState()
     data class AwaitingOriginalFile(val job: RepackJob) : InstallState()
-    data class Installing(val job: RepackJob) : InstallState()
+    data class Installing(val job: RepackJob, val progressMessage: String = "Initializing...") : InstallState()
     data class Finished(val publicUri: Uri, val job: RepackJob) : InstallState()
     data class Failed(val error: String) : InstallState()
 }
@@ -58,13 +72,16 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     companion object {
         private const val CHARACTERS_JSON_URL = "https://codeberg.org/kxdekxde/browndust2-mod-manager/raw/branch/main/characters.json"
         private const val CHARACTERS_JSON_FILENAME = "characters.json"
+        private const val MOD_CACHE_FILENAME = "mod_cache.json"
     }
+
+    private val gson = Gson()
 
     // --- STATE FLOWS ---
     val modSourceDirectoryUri: StateFlow<Uri?> = savedStateHandle.getStateFlow("mod_source_dir_uri", null)
 
-    private val _groupedMods = MutableStateFlow<Map<String, List<ModInfo>>>(emptyMap())
-    val groupedMods: StateFlow<Map<String, List<ModInfo>>> = _groupedMods.asStateFlow()
+    private val _modsList = MutableStateFlow<List<ModInfo>>(emptyList())
+    val modsList: StateFlow<List<ModInfo>> = _modsList.asStateFlow()
 
     private val _selectedMods = MutableStateFlow<Set<Uri>>(emptySet())
     val selectedMods: StateFlow<Set<Uri>> = _selectedMods.asStateFlow()
@@ -129,7 +146,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     fun initiateBatchRepack() {
-        val allMods = _groupedMods.value.values.flatten()
+        val allMods = _modsList.value
         val jobs = _selectedMods.value
             .mapNotNull { uri -> allMods.find { it.uri == uri } }
             .filter { !it.targetHashedName.isNullOrBlank() }
@@ -185,7 +202,12 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
                     // Repack using Python script
                     val repackedDataCache = File(cacheDir, "__${job.hashedName}")
-                    val (success, message) = ModdingService.repackBundle(originalDataCache.absolutePath, modAssetsDir.absolutePath, repackedDataCache.absolutePath)
+                    val (success, message) = ModdingService.repackBundle(originalDataCache.absolutePath, modAssetsDir.absolutePath, repackedDataCache.absolutePath) { progress ->
+                        // Update progress on the main thread
+                        viewModelScope.launch(Dispatchers.Main) {
+                            _installState.value = InstallState.Installing(job, progress)
+                        }
+                    }
 
                     // Cleanup
                     originalDataCache.delete()
@@ -223,35 +245,103 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     // --- PRIVATE HELPERS ---
     private fun scanModSourceDirectory(context: Context, dirUri: Uri) {
-        viewModelScope.launch {
-            _groupedMods.value = emptyMap()
-            val modsList = withContext(Dispatchers.IO) {
-                DocumentFile.fromTreeUri(context, dirUri)?.listFiles()?.mapNotNull { file ->
+        viewModelScope.launch(Dispatchers.IO) {
+            // Clear lists and selections at the beginning of the scan
+            withContext(Dispatchers.Main) {
+                _modsList.value = emptyList()
+                _selectedMods.value = emptySet()
+            }
+
+            val existingCache = loadModCache(context)
+            val newCache = mutableMapOf<String, ModCacheInfo>()
+            val files = DocumentFile.fromTreeUri(context, dirUri)?.listFiles() ?: emptyArray()
+
+            files.forEach { file ->
+                val uriString = file.uri.toString()
+                val lastModified = file.lastModified()
+                val cachedInfo = existingCache[uriString]
+
+                val modInfo = if (cachedInfo != null && cachedInfo.lastModified == lastModified) {
+                    // Cache hit and file is unchanged
+                    newCache[uriString] = cachedInfo // Keep the valid cache entry
+                    ModInfo(
+                        name = cachedInfo.name,
+                        character = cachedInfo.character,
+                        costume = cachedInfo.costume,
+                        type = cachedInfo.type,
+                        isEnabled = false,
+                        uri = file.uri,
+                        targetHashedName = cachedInfo.targetHashedName,
+                        isDirectory = cachedInfo.isDirectory
+                    )
+                } else {
+                    // Cache miss or file was modified
                     val modName = file.name?.removeSuffix(".zip") ?: ""
                     val isDirectory = file.isDirectory
-
                     val modDetails = if (isDirectory) {
                         extractModDetailsFromDirectory(context, file.uri)
                     } else {
                         extractModDetailsFromUri(context, file.uri)
                     }
-
                     val bestMatch = findBestMatch(modDetails.fileId, modDetails.fileNames)
+
+                    // Create new cache entry
+                    val newCacheInfo = ModCacheInfo(
+                        uriString = uriString,
+                        lastModified = lastModified,
+                        name = modName,
+                        character = bestMatch?.character ?: "Unknown",
+                        costume = bestMatch?.costume ?: "Unknown",
+                        type = bestMatch?.type ?: "idle",
+                        targetHashedName = bestMatch?.hashedName,
+                        isDirectory = isDirectory
+                    )
+                    newCache[uriString] = newCacheInfo
 
                     ModInfo(
                         name = modName,
                         character = bestMatch?.character ?: "Unknown",
                         costume = bestMatch?.costume ?: "Unknown",
                         type = bestMatch?.type ?: "idle",
-                        isEnabled = false, // This needs proper logic later
+                        isEnabled = false,
                         uri = file.uri,
                         targetHashedName = bestMatch?.hashedName,
                         isDirectory = isDirectory
                     )
-                } ?: emptyList()
+                }
+
+                // Append the new mod to the list, triggering a UI update
+                withContext(Dispatchers.Main) {
+                    _modsList.value = (_modsList.value + modInfo).sortedBy { it.name }
+                }
             }
-            _groupedMods.value = modsList.sortedBy { it.name }.groupBy { it.targetHashedName ?: "Unknown" }
-            _selectedMods.value = emptySet() // Clear selection on refresh
+
+            // Save the updated cache to disk
+            saveModCache(context, newCache)
+        }
+    }
+
+    private fun loadModCache(context: Context): Map<String, ModCacheInfo> {
+        val cacheFile = File(context.cacheDir, MOD_CACHE_FILENAME)
+        if (!cacheFile.exists()) return emptyMap()
+
+        return try {
+            val json = cacheFile.readText()
+            val type = object : TypeToken<Map<String, ModCacheInfo>>() {}.type
+            gson.fromJson(json, type) ?: emptyMap()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyMap()
+        }
+    }
+
+    private fun saveModCache(context: Context, cache: Map<String, ModCacheInfo>) {
+        try {
+            val cacheFile = File(context.cacheDir, MOD_CACHE_FILENAME)
+            val json = gson.toJson(cache)
+            cacheFile.writeText(json)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
