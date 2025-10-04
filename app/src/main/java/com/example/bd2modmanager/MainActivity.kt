@@ -52,7 +52,6 @@ class MainActivity : ComponentActivity() {
                     contract = SafManager.PickDirectoryWithSpecialAccess(),
                     onResult = { uri ->
                         if (uri != null) {
-                            // The Activity now correctly handles persisting the permission
                             contentResolver.takePersistableUriPermission(
                                 uri,
                                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
@@ -131,17 +130,6 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.End
                         ) {
-                            Button(onClick = {
-                                try {
-                                    context.startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
-                                } catch (e: Exception) {
-                                    e.printStackTrace()
-                                    Toast.makeText(context, "Could not open downloads app.", Toast.LENGTH_SHORT).show()
-                                }
-                            }) {
-                                Text("Open Downloads")
-                            }
-                            Spacer(Modifier.width(8.dp))
                             Button(
                                 onClick = {
                                     clipboardManager.setText(AnnotatedString(command))
@@ -154,7 +142,16 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
                     }
                 }
                 is InstallState.Failed -> Text(state.error)
-                is InstallState.Installing -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                is InstallState.Installing -> Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .padding(16.dp)
+                ) {
                     CircularProgressIndicator()
                     Spacer(modifier = Modifier.height(16.dp))
                     Text("Processing group: ${state.job.hashedName}")
@@ -200,7 +197,9 @@ fun ModScreen(
         }
     ) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             if (modSourceDirectoryUri == null) {
@@ -221,8 +220,11 @@ fun ModScreen(
                             stickyHeader {
                                 Text(
                                     text = "Target: ${hash.take(12)}...",
-                                    modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.secondaryContainer).padding(horizontal = 16.dp, vertical = 8.dp),
-                                    style = MaterialTheme.typography.titleSmall, 
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(MaterialTheme.colorScheme.secondaryContainer)
+                                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
