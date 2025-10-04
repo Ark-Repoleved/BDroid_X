@@ -51,7 +51,6 @@ class MainActivity : ComponentActivity() {
                     contract = SafManager.PickDirectoryWithSpecialAccess(),
                     onResult = { uri ->
                         if (uri != null) {
-                            // The Activity now correctly handles persisting the permission
                             contentResolver.takePersistableUriPermission(
                                 uri,
                                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
@@ -126,22 +125,43 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
                             )
                         }
                         Spacer(Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                clipboardManager.setText(AnnotatedString(command))
-                                Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.align(Alignment.End)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
                         ) {
-                            Text("Copy Command")
+                            Button(
+                                onClick = {
+                                    clipboardManager.setText(AnnotatedString(command))
+                                    Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                                }
+                            ) {
+                                Text("Copy Command")
+                            }
                         }
                     }
                 }
                 is InstallState.Failed -> Text(state.error)
-                is InstallState.Installing -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    CircularProgressIndicator()
-                    Spacer(modifier = Modifier.height(8.dp))
+                is InstallState.Installing -> Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Text("Processing group: ${state.job.hashedName}")
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(16.dp)
+                    ) {
+                        CircularProgressIndicator()
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(state.progressMessage, textAlign = TextAlign.Center)
+                    }
                 }
                 else -> {}
             }
@@ -168,7 +188,8 @@ fun ModScreen(
     onSelectModSource: () -> Unit
 ) {
     val modSourceDirectoryUri by viewModel.modSourceDirectoryUri.collectAsState()
-    val groupedMods by viewModel.groupedMods.collectAsState()
+    val modsList by viewModel.modsList.collectAsState()
+    val groupedMods = modsList.groupBy { it.targetHashedName ?: "Unknown" }
     val selectedMods by viewModel.selectedMods.collectAsState()
 
     Scaffold(
@@ -181,7 +202,9 @@ fun ModScreen(
         }
     ) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             if (modSourceDirectoryUri == null) {
@@ -202,8 +225,11 @@ fun ModScreen(
                             stickyHeader {
                                 Text(
                                     text = "Target: ${hash.take(12)}...",
-                                    modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.secondaryContainer).padding(horizontal = 16.dp, vertical = 8.dp),
-                                    style = MaterialTheme.typography.titleSmall, 
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(MaterialTheme.colorScheme.secondaryContainer)
+                                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
