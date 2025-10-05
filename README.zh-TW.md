@@ -21,7 +21,7 @@
 
 ## 安裝教學
 
-1.  下載本應用程式的 `.apk` 檔案。
+1.  [下載](https://github.com/Ark-Repoleved/bd2-android-mod-manager/releases)本應用程式的 `.apk` 檔案。
 2.  點擊下載的 `.apk` 檔案進行安裝。
 
 ## 首次使用設定
