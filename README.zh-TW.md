@@ -66,5 +66,6 @@
 本應用程式的開發離不開以下開源專案和工具的貢獻，特此感謝：
 
 *   **[browndust2-repacker-android](https://codeberg.org/kxdekxde/browndust2-repacker-android)**: 提供重新打包 `__data` 檔案的核心技術，包括 ASTC 紋理壓縮和 LZ4 壓縮的處理方法。
+*   **[ReDustX](https://github.com/Jelosus2/ReDustX)**: 提供將 `.json` 轉換成 `.skel` 與從伺服器下載原始 `__data` 檔案的核心技術。
 *   **[UnityPy](https://github.com/K0lb3/UnityPy)**: Python 函式庫，是讀取、修改和儲存 Unity 遊戲資產的基礎。
 *   **[ARM-software/astc-encoder](https://github.com/ARM-software/astc-encoder)**: ARM 官方提供的 ASTC 紋理編碼器，用於將模組紋理轉換為與遊戲相容的格式。
