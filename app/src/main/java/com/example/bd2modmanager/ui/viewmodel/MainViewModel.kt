@@ -175,10 +175,42 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         }
     }
 
-    fun proceedWithInstall(context: Context, originalDataUri: Uri) {
+    fun downloadOriginalData(context: Context) {
         val currentState = _installState.value
         if (currentState !is InstallState.AwaitingOriginalFile) return
         val job = currentState.job
+
+        viewModelScope.launch {
+            _installState.value = InstallState.Installing(job, "Starting download...")
+            val (success, messageOrPath) = withContext(Dispatchers.IO) {
+                if (!Python.isStarted()) {
+                    Python.start(com.chaquo.python.android.AndroidPlatform(context))
+                }
+                ModdingService.downloadBundle(job.hashedName, "HD", context.cacheDir.absolutePath) { progress ->
+                    viewModelScope.launch(Dispatchers.Main) {
+                        _installState.value = InstallState.Installing(job, progress)
+                    }
+                }
+            }
+
+            if (success) {
+                val downloadedFile = File(messageOrPath)
+                proceedWithInstall(context, Uri.fromFile(downloadedFile), true)
+            } else {
+                _installState.value = InstallState.Failed(messageOrPath)
+            }
+        }
+    }
+
+    fun proceedWithInstall(context: Context, originalDataUri: Uri, isDownloaded: Boolean = false) {
+        val currentState = _installState.value
+        if (currentState !is InstallState.AwaitingOriginalFile && currentState !is InstallState.Installing) return
+
+        val job = when (currentState) {
+            is InstallState.AwaitingOriginalFile -> currentState.job
+            is InstallState.Installing -> currentState.job
+            else -> return
+        }
 
         viewModelScope.launch {
             _installState.value = InstallState.Installing(job)
@@ -197,7 +229,13 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     modAssetsDir.mkdirs()
 
                     // Copy original __data file
-                    context.contentResolver.openInputStream(originalDataUri)?.use { it.copyTo(originalDataCache.outputStream()) }
+                    if (isDownloaded) {
+                        // If it's a downloaded file, its URI is a file URI, so we can get the path directly
+                        File(originalDataUri.path!!).copyTo(originalDataCache, true)
+                    } else {
+                        // If it's from the user, it's a content URI and needs the content resolver
+                        context.contentResolver.openInputStream(originalDataUri)?.use { it.copyTo(originalDataCache.outputStream()) }
+                    }
 
                     // Extract all selected mods for this job
                     job.modsToInstall.forEach { modInfo ->
