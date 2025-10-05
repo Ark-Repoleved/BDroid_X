@@ -6,6 +6,48 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "vendor"))
 
 from repacker.repacker import repack_bundle
 import character_scraper
+import cdn_downloader
+
+def download_bundle(hashed_name, quality, output_dir, progress_callback=None):
+    """
+    Entry point for Kotlin to download a bundle from the CDN.
+    Returns a tuple: (success: Boolean, message_or_path: String)
+    """
+    def report_progress(message):
+        if progress_callback:
+            progress_callback(message)
+        print(message)
+
+    try:
+        report_progress(f"Fetching CDN version for {quality} quality...")
+        version = cdn_downloader.get_cdn_version(quality)
+        if not version:
+            return False, "Failed to get CDN version."
+        
+        report_progress(f"Latest version is {version}. Checking catalog...")
+        catalog_path, error = cdn_downloader.download_catalog(output_dir, quality, version, progress_callback)
+        if error:
+            return False, error
+
+        report_progress(f"Searching for bundle {hashed_name} in catalog...")
+        output_file_path, error = cdn_downloader.find_and_download_bundle(
+            version=version,
+            quality=quality,
+            hashed_name=hashed_name,
+            output_dir=output_dir,
+            progress_callback=progress_callback
+        )
+
+        if error:
+            return False, error
+        
+        return True, output_file_path
+
+    except Exception as e:
+        import traceback
+        error_message = traceback.format_exc()
+        report_progress(f"A critical error occurred: {error_message}")
+        return False, error_message
 
 def update_character_data(output_dir: str):
     """
