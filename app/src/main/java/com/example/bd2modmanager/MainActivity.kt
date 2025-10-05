@@ -73,16 +73,19 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val installState by viewModel.installState.collectAsState()
-                InstallDialog(state = installState, onDismiss = { viewModel.resetInstallState() }) {
-                    originalDataLauncher.launch("*/*")
-                }
+                InstallDialog(
+                    state = installState,
+                    onDismiss = { viewModel.resetInstallState() },
+                    onProvideFile = { originalDataLauncher.launch("*/*") },
+                    onDownload = { viewModel.downloadOriginalData(context = this) }
+                )
             }
         }
     }
 }
 
 @Composable
-fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () -> Unit) {
+fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () -> Unit, onDownload: () -> Unit) {
     if (state is InstallState.Idle) return
 
     val clipboardManager = LocalClipboardManager.current
@@ -95,7 +98,7 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
                 is InstallState.AwaitingOriginalFile -> "Original File Needed"
                 is InstallState.Finished -> "Repack Successful!"
                 is InstallState.Failed -> "Installation Failed"
-                is InstallState.Installing -> "Installing..."
+                is InstallState.Installing -> "Processing..."
                 else -> ""
             }
             Text(text)
@@ -103,13 +106,19 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
         text = {
             when (state) {
                 is InstallState.AwaitingOriginalFile ->
-                    Text("Please provide the original __data file for group: \n${state.job.hashedName}")
+                    Column {
+                        Text("To repack mods for group ")
+                        SelectionContainer { Text(state.job.hashedName, fontWeight = FontWeight.Bold) }
+                        Spacer(Modifier.height(8.dp))
+                        Text("Please provide the original __data file.")
+                    }
+
                 is InstallState.Finished -> {
                     val hash = state.job.hashedName
-                    val command = "mv -f /sdcard/Download/__$hash /sdcard/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hash/*/__data"
+                    val command = "mv -f /sdcard/Download/__${hash} /sdcard/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hash/*/__data"
 
                     Column {
-                        Text("New file for group '$hash' saved to your Downloads folder.")
+                        Text("New file for group '$hash' saved to your Downloads folder as __${hash}.")
                         Spacer(Modifier.height(16.dp))
                         Text("For advanced users, run the following command in a root shell to move the file:")
                         Spacer(Modifier.height(8.dp))
@@ -168,16 +177,20 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
         },
         confirmButton = {
             when (state) {
-                is InstallState.AwaitingOriginalFile -> Button(onClick = onProvideFile) { Text("Select __data File") }
+                is InstallState.AwaitingOriginalFile -> {
+                    Column(horizontalAlignment = Alignment.End, modifier = Modifier.fillMaxWidth()) {
+                        Button(onClick = onDownload) { Text("Download from Server") }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(onClick = onProvideFile) { Text("Select File Manually") }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(onClick = onDismiss) { Text("Cancel") }
+                    }
+                }
                 is InstallState.Finished, is InstallState.Failed -> Button(onClick = onDismiss) { Text("OK") }
                 else -> {}
             }
         },
-        dismissButton = {
-            if (state !is InstallState.Installing) {
-                Button(onClick = onDismiss) { Text("Cancel") }
-            }
-        }
+        dismissButton = null
     )
 }
 
