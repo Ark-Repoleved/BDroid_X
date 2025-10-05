@@ -38,10 +38,10 @@ Before you can start installing mods, you need to complete a one-time authorizat
 1.  **Select Mods**: On the main screen list, check the one or more mods you want to install. Note that you can only batch-install mods belonging to the same group (Target).
 2.  **Start Repacking**: Tap the floating action button with the **check mark (✓)** at the bottom right.
 3.  **Provide the Original File**:
-    *   The app will show a dialog box, prompting for the original `__data` file from a specific `hashed_name` folder.
-    *   Use system file manager to navigate to the game's data folder at `Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/[hashed_name]/`, find the original `__data` file, and copy it to your mod folder.
-    *   Tap **"Select __data File"**.
-    *   In the file picker, find and select the corresponding original `__data` file to begin the modification process.
+    *   A dialog will appear asking for the original `__data` file.
+    *   You now have two options:
+        *   **Download from Server (Recommended)**: Tap this button, and the app will automatically download the correct, latest version of the `__data` file from the game's official servers.
+        *   **Select File Manually**: If you prefer, you can still manually locate the original `__data` file on your device and select it using the file picker.
 4.  **Wait for Processing**: The app will automatically perform the unpacking, compression, and repacking process in the background. Please wait patiently.
 5.  **Manually Replace the File (Current Version)**:
     *   After a successful installation, a new, modified `__data` file will be saved to your phone's **`Download`** folder with the filename `__[hashed_name]`.
