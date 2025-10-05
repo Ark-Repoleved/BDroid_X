@@ -9,7 +9,7 @@ import androidx.activity.result.contract.ActivityResultContract
 class SafManager {
 
     companion object {
-        private const val BD2_SHARED_FOLDER_URI_STRING = "content://com.android.externalstorage.documents/tree/primary%3AAndroid%2Fdata%2Fcom.neowiz.game.browndust2.android%2Ffiles%2FUnityCache%2FShared/document/primary%3AAndroid%2Fdata%2Fcom.neowiz.game.browndust2.android%2Ffiles%2FUnityCache%2FShared"
+        private const val BD2_SHARED_FOLDER_URI_STRING = "content://com.android.externalstorage.documents/tree/primary%3AAndroid%2Fdata%2Fcom.neowizgames.game.browndust2%2Ffiles%2FUnityCache%2FShared/document/primary%3AAndroid%2Fdata%2Fcom.neowizgames.game.browndust2%2Ffiles%2FUnityCache%2FShared"
 
         fun createAccessIntent(): Intent {
             val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
