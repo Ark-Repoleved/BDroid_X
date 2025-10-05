@@ -21,7 +21,7 @@ No need for a PC to unpack and repack.
 
 ## Installation
 
-1.  Download the `.apk` file for this application.
+1.  [Download](https://github.com/Ark-Repoleved/bd2-android-mod-manager/releases) the `.apk` file for this application.
 2.  Tap the downloaded `.apk` file to install.
 
 ## First-Time Setup
