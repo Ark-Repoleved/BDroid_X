@@ -41,7 +41,7 @@ Before you can start installing mods, you need to complete a one-time authorizat
     *   A dialog will appear asking for the original `__data` file.
     *   You now have two options:
         *   **Download from Server (Recommended)**: Tap this button, and the app will automatically download the correct, latest version of the `__data` file from the game's official servers.
-        *   **Select File Manually**: If you prefer, you can still manually locate the original `__data` file on your device and select it using the file picker.
+        *   **Select File Manually**: If you prefer, you can still manually locate the original `Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/[hashed_name]/*/__data` file, copy it to your mod folder and select it using the file picker.
 4.  **Wait for Processing**: The app will automatically perform the unpacking, compression, and repacking process in the background. Please wait patiently.
 5.  **Manually Replace the File (Current Version)**:
     *   After a successful installation, a new, modified `__data` file will be saved to your phone's **`Download`** folder with the filename `__[hashed_name]`.
@@ -57,7 +57,7 @@ Before you can start installing mods, you need to complete a one-time authorizat
     *   A: The most common reason is providing the wrong original `__data` file in step 3. Please make sure the file you provide matches the `hashed_name` prompted by the app.
 
 *   **Q: What if the graphics are corrupted after installing a mod and entering the game?**
-    *   A: This is likely because the mod is missing the `.skel` file. A complete mod requires `.png`, `.atlas`, and `.skel` files to function correctly.
+    *   A: This is likely because the mod is missing the `.skel` or `.json` file. A complete mod requires `.png`, `.atlas`, and `.skel` or `.json` files to function correctly.
 
 ---
 
