@@ -65,6 +65,8 @@ chaquopy {
             install("attrs")
             install("requests")
             install("beautifulsoup4")
+            install("protobuf")
+            install("tqdm")
         }
     }
 }
