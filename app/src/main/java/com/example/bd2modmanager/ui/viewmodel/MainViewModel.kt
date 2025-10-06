@@ -67,6 +67,14 @@ sealed class InstallState {
     data class Failed(val error: String) : InstallState()
 }
 
+// Represents the state of the uninstall process
+sealed class UninstallState {
+    object Idle : UninstallState()
+    data class Downloading(val hashedName: String, val progressMessage: String = "Initializing...") : UninstallState()
+    data class Finished(val command: String) : UninstallState()
+    data class Failed(val error: String) : UninstallState()
+}
+
 class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel() {
 
     companion object {
@@ -91,6 +99,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     private val _installState = MutableStateFlow<InstallState>(InstallState.Idle)
     val installState: StateFlow<InstallState> = _installState.asStateFlow()
+
+    private val _uninstallState = MutableStateFlow<UninstallState>(UninstallState.Idle)
+    val uninstallState: StateFlow<UninstallState> = _uninstallState.asStateFlow()
 
     private val _repackQueue = MutableStateFlow<List<RepackJob>>(emptyList())
 
@@ -272,7 +283,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     modAssetsDir.deleteRecursively()
 
                     if (success) {
-                        val publicUri = saveFileToDownloads(context, repackedDataCache)
+                        val publicUri = saveFileToDownloads(context, repackedDataCache, "__${job.hashedName}")
                         repackedDataCache.delete()
                         if (publicUri != null) {
                             _installState.value = InstallState.Finished(publicUri, job)
@@ -299,6 +310,43 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             _repackQueue.value = emptyList()
         }
         _installState.value = InstallState.Idle
+    }
+
+    fun initiateUninstall(context: Context, hashedName: String) {
+        if (_uninstallState.value !is UninstallState.Idle) return // Prevent multiple operations
+
+        viewModelScope.launch {
+            _uninstallState.value = UninstallState.Downloading(hashedName, "Starting download...")
+            val (success, messageOrPath) = withContext(Dispatchers.IO) {
+                if (!Python.isStarted()) {
+                    Python.start(com.chaquo.python.android.AndroidPlatform(context))
+                }
+                ModdingService.downloadBundle(hashedName, "HD", context.cacheDir.absolutePath) { progress ->
+                    viewModelScope.launch(Dispatchers.Main) {
+                        _uninstallState.value = UninstallState.Downloading(hashedName, progress)
+                    }
+                }
+            }
+
+            if (success) {
+                val downloadedFile = File(messageOrPath)
+                val publicUri = saveFileToDownloads(context, downloadedFile, "__${hashedName}")
+                downloadedFile.delete() // Clean up cache
+
+                if (publicUri != null) {
+                    val command = "mv -f /sdcard/Download/__${hashedName} /sdcard/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hashedName/*/__data"
+                    _uninstallState.value = UninstallState.Finished(command)
+                } else {
+                    _uninstallState.value = UninstallState.Failed("Failed to save original file to Downloads folder.")
+                }
+            } else {
+                _uninstallState.value = UninstallState.Failed(messageOrPath)
+            }
+        }
+    }
+
+    fun resetUninstallState() {
+        _uninstallState.value = UninstallState.Idle
     }
 
     // --- PRIVATE HELPERS ---
@@ -402,7 +450,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             val cacheFile = File(context.cacheDir, MOD_CACHE_FILENAME)
             val json = gson.toJson(cache)
             cacheFile.writeText(json)
-        } catch (e: Exception) {
+        }
+        catch (e: Exception) {
             e.printStackTrace()
         }
     }
@@ -433,10 +482,10 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         return candidates.first()
     }
 
-    private fun saveFileToDownloads(context: Context, file: File): Uri? {
+    private fun saveFileToDownloads(context: Context, file: File, displayName: String): Uri? {
         val resolver = context.contentResolver
         val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, file.name)
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
             put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
             put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
         }
