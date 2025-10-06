@@ -256,15 +256,17 @@ fun ModScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                             }
-                            items(modsInGroup) {
-                                ModCard(
-                                    modInfo = it,
-                                    isSelected = it.uri in selectedMods,
-                                    onToggleSelection = { viewModel.toggleModSelection(it.uri) }
-                                )
-                                HorizontalDivider()
-                            }
-                        }
+                                            items(
+                                                items = modsInGroup,
+                                                key = { mod -> mod.uri.toString() } // Use URI as a stable key
+                                            ) { modInfo ->
+                                                ModCard(
+                                                    modInfo = modInfo,
+                                                    isSelected = modInfo.uri in selectedMods,
+                                                    onToggleSelection = { viewModel.toggleModSelection(modInfo.uri) }
+                                                )
+                                                HorizontalDivider()
+                                            }                        }
                     }
                 }
             }
