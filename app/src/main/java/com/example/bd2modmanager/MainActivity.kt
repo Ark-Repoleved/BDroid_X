@@ -204,6 +204,7 @@ fun ModScreen(
     val modsList by viewModel.modsList.collectAsState()
     val groupedMods = modsList.groupBy { it.targetHashedName ?: "Unknown" }
     val selectedMods by viewModel.selectedMods.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
 
     Scaffold(
         floatingActionButton = {
@@ -227,12 +228,21 @@ fun ModScreen(
                     Button(onClick = onSelectModSource) { Text("Select Mod Source Folder") }
                 }
             } else {
-                if (groupedMods.isEmpty()) {
+                if (isLoading) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CircularProgressIndicator()
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Scanning for mods...")
+                    }
+                } else if (groupedMods.isEmpty()) {
                     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("No mods found in the selected directory.")
                     }
-                }
-                else {
+                } else {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
                         groupedMods.toSortedMap().forEach { (hash, modsInGroup) ->
                             stickyHeader {
