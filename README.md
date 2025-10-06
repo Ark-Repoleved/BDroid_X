@@ -35,17 +35,19 @@ Before you can start installing mods, you need to complete a one-time authorizat
 
 ## Folder/.zip Structure
 
-Place each mod in its own folder/.zip under `BD2_Mods/`. File names must match the asset names inside the Unity bundles the game uses. A typical layout looks like this. Using Lathel: Dark Knight assets as an example here:
+For the game to correctly load your mods, each mod must be placed within its own dedicated folder or .zip file inside the `BD2_Mods/` directory. The filenames within your mod folder **must** exactly match the original asset names used in the game's Unity bundles.
+
+Here is a typical layout, using assets for "Lathel: Dark Knight" as an example:
 
 ```
-BD2_Mods/
-|-- Lathel_IDLE/
-|   |-- char000104.skel (or.json)      # Spine skeleton
-|   |-- char000104.atlas     # Atlas text
-|   |-- char000104.png       # Texture(s)
-|   
-|-- another_mod/
-    |-- ...
+📁 BD2_Mods/
+├── 📁 Lathel_IDLE/
+│   ├── 📄 char000104.skel (or .json)  # The Spine skeleton data
+│   ├── 📄 char000104.atlas             # The atlas mapping file
+│   └── 🖼️ char000104.png               # The texture atlas image(s)
+│
+└── 📁 another_mod/
+    └── ... (other mod files)
 ```
 
 ## How to Install Mods
