@@ -83,6 +83,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _modsList = MutableStateFlow<List<ModInfo>>(emptyList())
     val modsList: StateFlow<List<ModInfo>> = _modsList.asStateFlow()
 
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
     private val _selectedMods = MutableStateFlow<Set<Uri>>(emptySet())
     val selectedMods: StateFlow<Set<Uri>> = _selectedMods.asStateFlow()
 
@@ -300,79 +303,83 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     // --- PRIVATE HELPERS ---
     private fun scanModSourceDirectory(context: Context, dirUri: Uri) {
+        _isLoading.value = true
         viewModelScope.launch(Dispatchers.IO) {
-            // Clear lists and selections at the beginning of the scan
-            withContext(Dispatchers.Main) {
-                _modsList.value = emptyList()
-                _selectedMods.value = emptySet()
-            }
+            try {
+                val existingCache = loadModCache(context)
+                val newCache = mutableMapOf<String, ModCacheInfo>()
+                val tempModsList = mutableListOf<ModInfo>()
+                val files = DocumentFile.fromTreeUri(context, dirUri)?.listFiles() ?: emptyArray()
 
-            val existingCache = loadModCache(context)
-            val newCache = mutableMapOf<String, ModCacheInfo>()
-            val files = DocumentFile.fromTreeUri(context, dirUri)?.listFiles() ?: emptyArray()
+                files.forEach { file ->
+                    val uriString = file.uri.toString()
+                    val lastModified = file.lastModified()
+                    val cachedInfo = existingCache[uriString]
 
-            files.forEach { file ->
-                val uriString = file.uri.toString()
-                val lastModified = file.lastModified()
-                val cachedInfo = existingCache[uriString]
-
-                val modInfo = if (cachedInfo != null && cachedInfo.lastModified == lastModified) {
-                    // Cache hit and file is unchanged
-                    newCache[uriString] = cachedInfo // Keep the valid cache entry
-                    ModInfo(
-                        name = cachedInfo.name,
-                        character = cachedInfo.character,
-                        costume = cachedInfo.costume,
-                        type = cachedInfo.type,
-                        isEnabled = false,
-                        uri = file.uri,
-                        targetHashedName = cachedInfo.targetHashedName,
-                        isDirectory = cachedInfo.isDirectory
-                    )
-                } else {
-                    // Cache miss or file was modified
-                    val modName = file.name?.removeSuffix(".zip") ?: ""
-                    val isDirectory = file.isDirectory
-                    val modDetails = if (isDirectory) {
-                        extractModDetailsFromDirectory(context, file.uri)
+                    val modInfo = if (cachedInfo != null && cachedInfo.lastModified == lastModified) {
+                        // Cache hit and file is unchanged
+                        newCache[uriString] = cachedInfo // Keep the valid cache entry
+                        ModInfo(
+                            name = cachedInfo.name,
+                            character = cachedInfo.character,
+                            costume = cachedInfo.costume,
+                            type = cachedInfo.type,
+                            isEnabled = false,
+                            uri = file.uri,
+                            targetHashedName = cachedInfo.targetHashedName,
+                            isDirectory = cachedInfo.isDirectory
+                        )
                     } else {
-                        extractModDetailsFromUri(context, file.uri)
+                        // Cache miss or file was modified
+                        val modName = file.name?.removeSuffix(".zip") ?: ""
+                        val isDirectory = file.isDirectory
+                        val modDetails = if (isDirectory) {
+                            extractModDetailsFromDirectory(context, file.uri)
+                        } else {
+                            extractModDetailsFromUri(context, file.uri)
+                        }
+                        val bestMatch = findBestMatch(modDetails.fileId, modDetails.fileNames)
+
+                        // Create new cache entry
+                        val newCacheInfo = ModCacheInfo(
+                            uriString = uriString,
+                            lastModified = lastModified,
+                            name = modName,
+                            character = bestMatch?.character ?: "Unknown",
+                            costume = bestMatch?.costume ?: "Unknown",
+                            type = bestMatch?.type ?: "idle",
+                            targetHashedName = bestMatch?.hashedName,
+                            isDirectory = isDirectory
+                        )
+                        newCache[uriString] = newCacheInfo
+
+                        ModInfo(
+                            name = modName,
+                            character = bestMatch?.character ?: "Unknown",
+                            costume = bestMatch?.costume ?: "Unknown",
+                            type = bestMatch?.type ?: "idle",
+                            isEnabled = false,
+                            uri = file.uri,
+                            targetHashedName = bestMatch?.hashedName,
+                            isDirectory = isDirectory
+                        )
                     }
-                    val bestMatch = findBestMatch(modDetails.fileId, modDetails.fileNames)
-
-                    // Create new cache entry
-                    val newCacheInfo = ModCacheInfo(
-                        uriString = uriString,
-                        lastModified = lastModified,
-                        name = modName,
-                        character = bestMatch?.character ?: "Unknown",
-                        costume = bestMatch?.costume ?: "Unknown",
-                        type = bestMatch?.type ?: "idle",
-                        targetHashedName = bestMatch?.hashedName,
-                        isDirectory = isDirectory
-                    )
-                    newCache[uriString] = newCacheInfo
-
-                    ModInfo(
-                        name = modName,
-                        character = bestMatch?.character ?: "Unknown",
-                        costume = bestMatch?.costume ?: "Unknown",
-                        type = bestMatch?.type ?: "idle",
-                        isEnabled = false,
-                        uri = file.uri,
-                        targetHashedName = bestMatch?.hashedName,
-                        isDirectory = isDirectory
-                    )
+                    tempModsList.add(modInfo)
                 }
 
-                // Append the new mod to the list, triggering a UI update
+                // Save the updated cache to disk
+                saveModCache(context, newCache)
+
+                // Update the UI in one go on the main thread
                 withContext(Dispatchers.Main) {
-                    _modsList.value = (_modsList.value + modInfo).sortedBy { it.name }
+                    _modsList.value = tempModsList.sortedBy { it.name }
+                    _selectedMods.value = emptySet()
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    _isLoading.value = false
                 }
             }
-
-            // Save the updated cache to disk
-            saveModCache(context, newCache)
         }
     }
 
