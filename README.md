@@ -40,7 +40,7 @@ Place each mod in its own folder/.zip under `BD2_Mods/`. File names must match t
 ```
 BD2_Mods/
 |-- Lathel_IDLE/
-|   |-- char000104.skel (or .json)      # Spine skeleton
+|   |-- char000104.skel (or.json)      # Spine skeleton
 |   |-- char000104.atlas     # Atlas text
 |   |-- char000104.png       # Texture(s)
 |   
