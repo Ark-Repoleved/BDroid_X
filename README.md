@@ -33,6 +33,21 @@ Before you can start installing mods, you need to complete a one-time authorizat
 3.  In the file picker that appears, navigate to where you store your mod files (e.g., `.zip` archives or extracted folders), and then tap **"Use this folder"**.
     *   *Recommendation:* Create a folder named `BD2_Mods` in your phone's storage and place all your downloaded mods there.
 
+## Folder/.zip Structure
+
+Place each mod in its own folder under `mods/`. File names must match the asset names inside the Unity bundles the game uses. A typical layout looks like this. Using Darian: Prophetic Dream assets as an example here:
+
+```
+BD2_Mods/
+|-- Lathel_IDLE/
+|   |-- char000101.skel (or .json)      # Spine skeleton
+|   |-- char000101.atlas     # Atlas text
+|   |-- char000101.png       # Texture(s)
+|   
+|-- another_mod/
+    |-- ...
+```
+
 ## How to Install Mods
 
 1.  **Select Mods**: On the main screen list, check the one or more mods you want to install. Note that you can only batch-install mods belonging to the same group (Target).
