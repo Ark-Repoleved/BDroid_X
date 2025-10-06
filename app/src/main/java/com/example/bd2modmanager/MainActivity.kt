@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import com.example.bd2modmanager.ui.viewmodel.InstallState
 import com.example.bd2modmanager.ui.viewmodel.MainViewModel
 import com.example.bd2modmanager.ui.viewmodel.ModInfo
+import com.example.bd2modmanager.ui.viewmodel.UninstallState
 import com.example.bd2modmanager.utils.SafManager
 
 class MainActivity : ComponentActivity() {
@@ -79,9 +80,102 @@ class MainActivity : ComponentActivity() {
                     onProvideFile = { originalDataLauncher.launch("*/*") },
                     onDownload = { viewModel.downloadOriginalData(context = this) }
                 )
+
+                val uninstallState by viewModel.uninstallState.collectAsState()
+                UninstallDialog(
+                    state = uninstallState,
+                    onDismiss = { viewModel.resetUninstallState() }
+                )
             }
         }
     }
+}
+
+@Composable
+fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
+    if (state is UninstallState.Idle) return
+
+    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            val text = when (state) {
+                is UninstallState.Downloading -> "Restoring Original File..."
+                is UninstallState.Finished -> "Restore Successful!"
+                is UninstallState.Failed -> "Restore Failed"
+                else -> ""
+            }
+            Text(text)
+        },
+        text = {
+            when (state) {
+                is UninstallState.Downloading -> Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Downloading original file for: ${state.hashedName}")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(8.dp)
+                            )
+                            .padding(16.dp)
+                    ) {
+                        CircularProgressIndicator()
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(state.progressMessage, textAlign = TextAlign.Center)
+                    }
+                }
+                is UninstallState.Finished -> {
+                    Column {
+                        Text("Original file saved to your Downloads folder.")
+                        Spacer(Modifier.height(16.dp))
+                        Text("For advanced users, run the following command in a root shell to move the file:")
+                        Spacer(Modifier.height(8.dp))
+
+                        SelectionContainer {
+                            Text(
+                                text = state.command,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp))
+                                    .padding(8.dp)
+                                    .fillMaxWidth()
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            Button(
+                                onClick = {
+                                    clipboardManager.setText(AnnotatedString(state.command))
+                                    Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                                }
+                            ) {
+                                Text("Copy Command")
+                            }
+                        }
+                    }
+                }
+                is UninstallState.Failed -> Text(state.error)
+                else -> {}
+            }
+        },
+        confirmButton = {
+            if (state !is UninstallState.Downloading) {
+                Button(onClick = onDismiss) { Text("OK") }
+            }
+        },
+        dismissButton = null
+    )
 }
 
 @Composable
@@ -205,6 +299,7 @@ fun ModScreen(
     val groupedMods = modsList.groupBy { it.targetHashedName ?: "Unknown" }
     val selectedMods by viewModel.selectedMods.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val context = LocalContext.current
 
     Scaffold(
         floatingActionButton = {
@@ -246,27 +341,36 @@ fun ModScreen(
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
                         groupedMods.toSortedMap().forEach { (hash, modsInGroup) ->
                             stickyHeader {
-                                Text(
-                                    text = "Target: ${hash.take(12)}...",
+                                Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .background(MaterialTheme.colorScheme.secondaryContainer)
-                                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                        .padding(horizontal = 16.dp, vertical = 0.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Target: ${hash.take(12)}...",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    TextButton(onClick = { viewModel.initiateUninstall(context, hash) }) {
+                                        Text("UNINSTALL")
+                                    }
+                                }
                             }
-                                            items(
-                                                items = modsInGroup,
-                                                key = { mod -> mod.uri.toString() } // Use URI as a stable key
-                                            ) { modInfo ->
-                                                ModCard(
-                                                    modInfo = modInfo,
-                                                    isSelected = modInfo.uri in selectedMods,
-                                                    onToggleSelection = { viewModel.toggleModSelection(modInfo.uri) }
-                                                )
-                                                HorizontalDivider()
-                                            }                        }
+                            items(
+                                items = modsInGroup,
+                                key = { mod -> mod.uri.toString() } // Use URI as a stable key
+                            ) { modInfo ->
+                                ModCard(
+                                    modInfo = modInfo,
+                                    isSelected = modInfo.uri in selectedMods,
+                                    onToggleSelection = { viewModel.toggleModSelection(modInfo.uri) }
+                                )
+                                HorizontalDivider()
+                            }
+                        }
                     }
                 }
             }
