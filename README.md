@@ -42,9 +42,9 @@ Here is a typical layout, using assets for "Lathel: Dark Knight" as an example:
 ```
 📁 BD2_Mods/
 ├── 📁 Lathel_IDLE/
-│   ├── 📄 char000104.skel (or`.json`)  # The Spine skeleton data
-│   ├── 📄 char000104.atlas             # The atlas mapping file
-│   └── 🖼️ char000104.png               # The texture atlas image(s)
+│   ├── 📄 char000104.skel (or.json)  # The Spine skeleton data
+│   ├── 📄 char000104.atlas           # The atlas mapping file
+│   └── 🖼️ char000104.png             # The texture atlas image(s)
 │
 └── 📁 another_mod/
     └── ... (other mod files)
