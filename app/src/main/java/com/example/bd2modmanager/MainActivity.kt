@@ -354,10 +354,7 @@ fun ModScreen(
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold
                                     )
-                                    TextButton(
-                                        onClick = { viewModel.initiateUninstall(context, hash) },
-                                        contentPadding = PaddingValues(vertical = 2.dp)
-                                    ) {
+                                    TextButton(onClick = { viewModel.initiateUninstall(context, hash) }) {
                                         Text("UNINSTALL")
                                     }
                                 }
@@ -368,3 +365,52 @@ fun ModScreen(
                             ) { modInfo ->
                                 ModCard(
                                     modInfo = modInfo,
+                                    isSelected = modInfo.uri in selectedMods,
+                                    onToggleSelection = { viewModel.toggleModSelection(modInfo.uri) }
+                                )
+                                HorizontalDivider()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggleSelection)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = modInfo.name, style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = modInfo.type.uppercase(),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .background(MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(text = "${modInfo.character} - ${modInfo.costume}", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        Checkbox(checked = isSelected, onCheckedChange = { onToggleSelection() })
+    }
+}
+
+@Composable
+fun BD2ModManagerTheme(content: @Composable () -> Unit) {
+    MaterialTheme {
+        content()
+    }
+}
