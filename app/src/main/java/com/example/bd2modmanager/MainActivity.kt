@@ -356,7 +356,7 @@ fun ModScreen(
                                     )
                                     TextButton(
                                         onClick = { viewModel.initiateUninstall(context, hash) },
-                                        contentPadding = PaddingValues(vertical = 2.dp)
+                                        contentPadding = PaddingValues(vertical = 0.dp)
                                     ) {
                                         Text("UNINSTALL")
                                     }
