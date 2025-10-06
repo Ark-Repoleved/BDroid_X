@@ -35,7 +35,7 @@ Before you can start installing mods, you need to complete a one-time authorizat
 
 ## Folder/.zip Structure
 
-For the game to correctly load your mods, each mod must be placed within its own dedicated folder or .zip file inside the `BD2_Mods/` directory. The filenames within your mod folder **must** exactly match the original asset names used in the game's Unity bundles.
+For mods to be installed successfully, each mod must be placed within its own dedicated folder or`.zip` file inside the `BD2_Mods/` directory. The filenames within your mod folder **must** exactly match the original asset names used in the game's Unity bundles.
 
 Here is a typical layout, using assets for "Lathel: Dark Knight" as an example:
 
