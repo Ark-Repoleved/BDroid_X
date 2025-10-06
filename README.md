@@ -35,14 +35,14 @@ Before you can start installing mods, you need to complete a one-time authorizat
 
 ## Folder/.zip Structure
 
-Place each mod in its own folder under `mods/`. File names must match the asset names inside the Unity bundles the game uses. A typical layout looks like this. Using Darian: Prophetic Dream assets as an example here:
+Place each mod in its own folder/.zip under `BD2_Mods/`. File names must match the asset names inside the Unity bundles the game uses. A typical layout looks like this. Using Lathel: Dark Knight assets as an example here:
 
 ```
 BD2_Mods/
 |-- Lathel_IDLE/
-|   |-- char000101.skel (or .json)      # Spine skeleton
-|   |-- char000101.atlas     # Atlas text
-|   |-- char000101.png       # Texture(s)
+|   |-- char000104.skel (or .json)      # Spine skeleton
+|   |-- char000104.atlas     # Atlas text
+|   |-- char000104.png       # Texture(s)
 |   
 |-- another_mod/
     |-- ...
