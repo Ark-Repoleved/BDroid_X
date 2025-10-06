@@ -47,7 +47,7 @@ Here is a typical layout, using assets for "Lathel: Dark Knight" as an example:
 │   └── 🖼️ char000104.png             # The texture atlas image(s)
 │
 └── 📁 another_mod/
-     └── ... (other mod files)
+    └── ... (other mod files)
 ```
 
 ## How to Install Mods
