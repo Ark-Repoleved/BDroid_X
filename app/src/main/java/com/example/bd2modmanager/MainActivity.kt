@@ -355,7 +355,7 @@ fun ModScreen(
                                         fontWeight = FontWeight.Bold
                                     )
                                     TextButton(onClick = { viewModel.initiateUninstall(context, hash) }) {
-                                        Text("UNINSTALL")
+                                        Text("UNINSTALL", fontSize = 12.sp)
                                     }
                                 }
                             }
