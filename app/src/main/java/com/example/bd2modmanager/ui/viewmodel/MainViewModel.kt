@@ -176,6 +176,20 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         _selectedMods.value = if (modUri in _selectedMods.value) _selectedMods.value - modUri else _selectedMods.value + modUri
     }
 
+    fun toggleSelectAllForGroup(groupHash: String) {
+        val modsInGroup = _modsList.value.filter { it.targetHashedName == groupHash }.map { it.uri }.toSet()
+        val currentSelections = _selectedMods.value
+        val groupSelections = currentSelections.intersect(modsInGroup)
+
+        _selectedMods.value = if (groupSelections.size == modsInGroup.size) {
+            // All are selected, so deselect all
+            currentSelections - modsInGroup
+        } else {
+            // Some or none are selected, so select all
+            currentSelections + modsInGroup
+        }
+    }
+
     fun initiateBatchRepack() {
         val allMods = _modsList.value
         val jobs = _selectedMods.value
