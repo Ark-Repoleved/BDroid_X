@@ -212,6 +212,18 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
                         Text("To repack mods for group:", textAlign = TextAlign.Center)
                         Text(state.job.hashedName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 4.dp))
                         Text("Please provide the original __data file.", textAlign = TextAlign.Center)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(onClick = onDownload) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Download from Server")
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(onClick = onProvideFile) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Select File Manually")
+                        }
                     }
                     is InstallState.Finished -> {
                         val hash = state.job.hashedName
@@ -259,19 +271,7 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
         confirmButton = {
             when (state) {
                 is InstallState.AwaitingOriginalFile -> {
-                    Column(horizontalAlignment = Alignment.End, modifier = Modifier.fillMaxWidth()) {
-                        Button(onClick = onDownload) {
-                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Download from Server")
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedButton(onClick = onProvideFile) {
-                            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Select File Manually")
-                        }
-                    }
+                    // No confirm button for this state, actions are in the content
                 }
                 is InstallState.Finished, is InstallState.Failed -> Button(onClick = onDismiss) { Text("OK") }
                 else -> {}
@@ -337,10 +337,24 @@ fun ModScreen(
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(onClick = { viewModel.initiateUninstall(context, hash) }) {
+                                            Icon(
+                                                Icons.Default.Delete,
+                                                contentDescription = "Uninstall",
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+
+                                        Text(
+                                            text = "Target: ${hash.take(12)}...",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.weight(1f).padding(start = 8.dp)
+                                        )
+
                                         val modsInGroup = groupedMods[hash] ?: emptyList()
                                         val groupUris = modsInGroup.map { it.uri }.toSet()
                                         val selectedInGroup = selectedMods.intersect(groupUris)
@@ -355,22 +369,6 @@ fun ModScreen(
                                             state = checkboxState,
                                             onClick = { viewModel.toggleSelectAllForGroup(hash) }
                                         )
-
-                                        Text(
-                                            text = "Target: ${hash.take(12)}...",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                        OutlinedButton(
-                                            onClick = { viewModel.initiateUninstall(context, hash) },
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                                        ) {
-                                            Icon(Icons.Default.Delete, contentDescription = "Uninstall", modifier = Modifier.size(16.dp))
-                                            Spacer(Modifier.width(4.dp))
-                                            Text("Uninstall", style = MaterialTheme.typography.labelMedium)
-                                        }
                                     }
                                     HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
                                 }
