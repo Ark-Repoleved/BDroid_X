@@ -271,7 +271,6 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
         confirmButton = {
             when (state) {
                 is InstallState.AwaitingOriginalFile -> {
-                    // No confirm button for this state, actions are in the content
                 }
                 is InstallState.Finished, is InstallState.Failed -> Button(onClick = onDismiss) { Text("OK") }
                 else -> {}
@@ -339,6 +338,14 @@ fun ModScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
+                                        Text(
+                                            text = "Target: ${hash.take(12)}...",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.weight(1f)
+                                        )
+
                                         IconButton(onClick = { viewModel.initiateUninstall(context, hash) }) {
                                             Icon(
                                                 Icons.Default.Delete,
@@ -346,14 +353,6 @@ fun ModScreen(
                                                 tint = MaterialTheme.colorScheme.primary
                                             )
                                         }
-
-                                        Text(
-                                            text = "Target: ${hash.take(12)}...",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.weight(1f).padding(start = 8.dp)
-                                        )
 
                                         val modsInGroup = groupedMods[hash] ?: emptyList()
                                         val groupUris = modsInGroup.map { it.uri }.toSet()
