@@ -8,6 +8,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,13 +20,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -31,11 +35,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.example.bd2modmanager.ui.theme.BD2ModManagerTheme
 import com.example.bd2modmanager.ui.viewmodel.InstallState
 import com.example.bd2modmanager.ui.viewmodel.MainViewModel
 import com.example.bd2modmanager.ui.viewmodel.ModInfo
 import com.example.bd2modmanager.ui.viewmodel.UninstallState
 import com.example.bd2modmanager.utils.SafManager
+import com.valentinilk.shimmer.shimmer
+
+import androidx.compose.ui.state.ToggleableState
 
 class MainActivity : ComponentActivity() {
 
@@ -100,6 +108,14 @@ fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        icon = {
+            when (state) {
+                is UninstallState.Downloading -> Icon(Icons.Default.Download, contentDescription = "Downloading")
+                is UninstallState.Finished -> Icon(Icons.Default.CheckCircle, contentDescription = "Success")
+                is UninstallState.Failed -> Icon(Icons.Default.Error, contentDescription = "Failed")
+                else -> {}
+            }
+        },
         title = {
             val text = when (state) {
                 is UninstallState.Downloading -> "Restoring Original File..."
@@ -110,33 +126,19 @@ fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
             Text(text)
         },
         text = {
-            when (state) {
-                is UninstallState.Downloading -> Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Downloading original file for: ${state.hashedName}")
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                            .padding(16.dp)
-                    ) {
-                        CircularProgressIndicator()
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                when (state) {
+                    is UninstallState.Downloading -> {
+                        Text("Downloading original file for: ${state.hashedName}", textAlign = TextAlign.Center)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text(state.progressMessage, textAlign = TextAlign.Center)
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(state.progressMessage, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                     }
-                }
-                is UninstallState.Finished -> {
-                    Column {
-                        Text("Original file saved to your Downloads folder.")
+                    is UninstallState.Finished -> {
+                        Text("Original file saved to your Downloads folder.", textAlign = TextAlign.Center)
                         Spacer(Modifier.height(16.dp))
-                        Text("For advanced users, run the following command in a root shell to move the file:")
+                        Text("For advanced users, run this command in a root shell to move the file:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                         Spacer(Modifier.height(8.dp))
 
                         SelectionContainer {
@@ -144,29 +146,26 @@ fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
                                 text = state.command,
                                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                                 modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp))
-                                    .padding(8.dp)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                    .padding(12.dp)
                                     .fillMaxWidth()
                             )
                         }
                         Spacer(Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            Button(
-                                onClick = {
-                                    clipboardManager.setText(AnnotatedString(state.command))
-                                    Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
-                                }
-                            ) {
-                                Text("Copy Command")
+                        Button(
+                            onClick = {
+                                clipboardManager.setText(AnnotatedString(state.command))
+                                Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
                             }
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Copy Command")
                         }
                     }
+                    is UninstallState.Failed -> Text(state.error, textAlign = TextAlign.Center)
+                    else -> {}
                 }
-                is UninstallState.Failed -> Text(state.error)
-                else -> {}
             }
         },
         confirmButton = {
@@ -187,6 +186,15 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        icon = {
+            when (state) {
+                is InstallState.AwaitingOriginalFile -> Icon(Icons.Default.Help, contentDescription = "Awaiting File")
+                is InstallState.Finished -> Icon(Icons.Default.CheckCircle, contentDescription = "Success")
+                is InstallState.Failed -> Icon(Icons.Default.Error, contentDescription = "Failed")
+                is InstallState.Installing -> Icon(Icons.Default.Build, contentDescription = "Installing")
+                else -> {}
+            }
+        },
         title = {
             val text = when (state) {
                 is InstallState.AwaitingOriginalFile -> "Original File Needed"
@@ -198,23 +206,20 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
             Text(text)
         },
         text = {
-            when (state) {
-                is InstallState.AwaitingOriginalFile ->
-                    Column {
-                        Text("To repack mods for group ")
-                        SelectionContainer { Text(state.job.hashedName, fontWeight = FontWeight.Bold) }
-                        Spacer(Modifier.height(8.dp))
-                        Text("Please provide the original __data file.")
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                when (state) {
+                    is InstallState.AwaitingOriginalFile -> {
+                        Text("To repack mods for group:", textAlign = TextAlign.Center)
+                        Text(state.job.hashedName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 4.dp))
+                        Text("Please provide the original __data file.", textAlign = TextAlign.Center)
                     }
+                    is InstallState.Finished -> {
+                        val hash = state.job.hashedName
+                        val command = "mv -f /sdcard/Download/__${hash} /sdcard/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hash/*/__data"
 
-                is InstallState.Finished -> {
-                    val hash = state.job.hashedName
-                    val command = "mv -f /sdcard/Download/__${hash} /sdcard/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hash/*/__data"
-
-                    Column {
-                        Text("New file for group '$hash' saved to your Downloads folder as __${hash}.")
+                        Text("New file saved to Downloads folder as __${hash}.", textAlign = TextAlign.Center)
                         Spacer(Modifier.height(16.dp))
-                        Text("For advanced users, run the following command in a root shell to move the file:")
+                        Text("For advanced users, run this command in a root shell to move the file:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                         Spacer(Modifier.height(8.dp))
 
                         SelectionContainer {
@@ -222,69 +227,61 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
                                 text = command,
                                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                                 modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp))
-                                    .padding(8.dp)
+                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                    .padding(12.dp)
                                     .fillMaxWidth()
                             )
                         }
                         Spacer(Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            Button(
-                                onClick = {
-                                    clipboardManager.setText(AnnotatedString(command))
-                                    Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
-                                }
-                            ) {
-                                Text("Copy Command")
+                        Button(
+                            onClick = {
+                                clipboardManager.setText(AnnotatedString(command))
+                                Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
                             }
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Copy Command")
                         }
                     }
-                }
-                is InstallState.Failed -> Text(state.error)
-                is InstallState.Installing -> Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Processing group: ${state.job.hashedName}")
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                            .padding(16.dp)
-                    ) {
-                        CircularProgressIndicator()
+                    is InstallState.Failed -> Text(state.error, textAlign = TextAlign.Center)
+                    is InstallState.Installing -> {
+                        Text("Processing group: ${state.job.hashedName}", textAlign = TextAlign.Center)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text(state.progressMessage, textAlign = TextAlign.Center)
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(state.progressMessage, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                     }
+                    else -> {}
                 }
-                else -> {}
             }
         },
         confirmButton = {
             when (state) {
                 is InstallState.AwaitingOriginalFile -> {
                     Column(horizontalAlignment = Alignment.End, modifier = Modifier.fillMaxWidth()) {
-                        Button(onClick = onDownload) { Text("Download from Server") }
+                        Button(onClick = onDownload) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Download from Server")
+                        }
                         Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedButton(onClick = onProvideFile) { Text("Select File Manually") }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        TextButton(onClick = onDismiss) { Text("Cancel") }
+                        OutlinedButton(onClick = onProvideFile) {
+                            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Select File Manually")
+                        }
                     }
                 }
                 is InstallState.Finished, is InstallState.Failed -> Button(onClick = onDismiss) { Text("OK") }
                 else -> {}
             }
         },
-        dismissButton = null
+        dismissButton = {
+             if (state is InstallState.AwaitingOriginalFile) {
+                 TextButton(onClick = onDismiss) { Text("Cancel") }
+             }
+        }
     )
 }
 
@@ -303,10 +300,12 @@ fun ModScreen(
 
     Scaffold(
         floatingActionButton = {
-            if (selectedMods.isNotEmpty()) {
-                FloatingActionButton(onClick = { viewModel.initiateBatchRepack() }) {
-                    Icon(Icons.Default.Done, contentDescription = "Repack Selected")
-                }
+            AnimatedVisibility(visible = selectedMods.isNotEmpty()) {
+                ExtendedFloatingActionButton(
+                    onClick = { viewModel.initiateBatchRepack() },
+                    icon = { Icon(Icons.Default.Done, contentDescription = "Repack") },
+                    text = { Text("Repack Selected") }
+                )
             }
         }
     ) { padding ->
@@ -317,60 +316,74 @@ fun ModScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             if (modSourceDirectoryUri == null) {
-                Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Welcome! Please select your mods folder.", textAlign = TextAlign.Center, modifier = Modifier.padding(16.dp))
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(onClick = onSelectModSource) { Text("Select Mod Source Folder") }
-                }
+                WelcomeScreen(onSelectModSource)
             } else {
                 if (isLoading) {
-                    Column(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        CircularProgressIndicator()
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("Scanning for mods...")
-                    }
+                    ShimmerLoadingScreen()
                 } else if (groupedMods.isEmpty()) {
-                    Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("No mods found in the selected directory.")
-                    }
+                    EmptyModsScreen()
                 } else {
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
                         groupedMods.toSortedMap().forEach { (hash, modsInGroup) ->
                             stickyHeader {
-                                Row(
+                                Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .background(MaterialTheme.colorScheme.secondaryContainer)
-                                        .padding(horizontal = 16.dp, vertical = 0.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                        .background(MaterialTheme.colorScheme.surface)
+                                        .padding(horizontal = 16.dp, vertical = 8.dp)
                                 ) {
-                                    Text(
-                                        text = "Target: ${hash.take(12)}...",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    TextButton(
-                                        onClick = { viewModel.initiateUninstall(context, hash) }
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Text("UNINSTALL")
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        val modsInGroup = groupedMods[hash] ?: emptyList()
+                                        val groupUris = modsInGroup.map { it.uri }.toSet()
+                                        val selectedInGroup = selectedMods.intersect(groupUris)
+
+                                        val checkboxState = when {
+                                            selectedInGroup.isEmpty() -> ToggleableState.Off
+                                            selectedInGroup.size == groupUris.size -> ToggleableState.On
+                                            else -> ToggleableState.Indeterminate
+                                        }
+
+                                        TriStateCheckbox(
+                                            state = checkboxState,
+                                            onClick = { viewModel.toggleSelectAllForGroup(hash) }
+                                        )
+
+                                        Text(
+                                            text = "Target: ${hash.take(12)}...",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
                                     }
+                                        OutlinedButton(
+                                            onClick = { viewModel.initiateUninstall(context, hash) },
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                        ) {
+                                            Icon(Icons.Default.Delete, contentDescription = "Uninstall", modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Uninstall", style = MaterialTheme.typography.labelMedium)
+                                        }
+                                    }
+                                    HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
                                 }
                             }
                             items(
                                 items = modsInGroup,
-                                key = { mod -> mod.uri.toString() } // Use URI as a stable key
+                                key = { mod -> mod.uri.toString() }
                             ) { modInfo ->
                                 ModCard(
                                     modInfo = modInfo,
                                     isSelected = modInfo.uri in selectedMods,
                                     onToggleSelection = { viewModel.toggleModSelection(modInfo.uri) }
                                 )
-                                HorizontalDivider()
                             }
                         }
                     }
@@ -381,38 +394,152 @@ fun ModScreen(
 }
 
 @Composable
-fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit) {
-    Row(
+fun WelcomeScreen(onSelectFolder: () -> Unit) {
+    Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onToggleSelection)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .fillMaxSize()
+            .padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = modInfo.name, style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = modInfo.type.uppercase(),
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .background(MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "${modInfo.character} - ${modInfo.costume}", style = MaterialTheme.typography.bodyMedium)
-            }
+        Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+        Spacer(modifier = Modifier.height(24.dp))
+        Text("Welcome!", style = MaterialTheme.typography.headlineMedium)
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            "To get started, please select the folder where you store your Brown Dust 2 mods.",
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(32.dp))
+        Button(onClick = onSelectFolder) {
+            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Select Mod Source Folder")
         }
-        Checkbox(checked = isSelected, onCheckedChange = { onToggleSelection() })
     }
 }
 
 @Composable
-fun BD2ModManagerTheme(content: @Composable () -> Unit) {
-    MaterialTheme {
-        content()
+fun EmptyModsScreen() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.secondary)
+        Spacer(modifier = Modifier.height(24.dp))
+        Text("No Mods Found", style = MaterialTheme.typography.headlineSmall)
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            "We couldn't find any valid mods in the selected folder. Make sure your mods are in .zip format or unzipped folders.",
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
+
+
+@Composable
+fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit) {
+    val elevation by animateDpAsState(if (isSelected) 8.dp else 2.dp, label = "elevation")
+    ElevatedCard(
+        elevation = CardDefaults.cardElevation(defaultElevation = elevation),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp) // Reduced vertical padding
+            .clip(CardDefaults.shape)
+            .clickable(onClick = onToggleSelection)
+            .animateContentSize()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), // Reduced vertical padding
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(checked = isSelected, onCheckedChange = { onToggleSelection() })
+            Spacer(Modifier.width(12.dp)) // Reduced spacer
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = modInfo.name, style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(2.dp)) // Reduced spacer
+                Text(
+                    text = "${modInfo.character} - ${modInfo.costume}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                AssistChip(
+                    onClick = { /* No action */ },
+                    label = { Text(modInfo.type.uppercase()) },
+                    leadingIcon = {
+                        val icon = when(modInfo.type.lowercase()) {
+                            "idle" -> Icons.Default.Person
+                            "cutscene" -> Icons.Default.Movie
+                            else -> Icons.Default.Category
+                        }
+                        Icon(icon, contentDescription = modInfo.type, Modifier.size(18.dp))
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ShimmerLoadingScreen() {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(vertical = 8.dp)
+    ) {
+        items(10) { 
+            ShimmerModCard()
+        }
+    }
+}
+
+@Composable
+fun ShimmerModCard() {
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .shimmer()
+    ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                )
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.7f)
+                            .height(20.dp)
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.9f)
+                            .height(16.dp)
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(100.dp)
+                            .height(32.dp)
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                    )
+                }
+            }
+        }
+    }
