@@ -446,44 +446,49 @@ fun EmptyModsScreen() {
 
 @Composable
 fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit) {
-    val elevation by animateDpAsState(if (isSelected) 8.dp else 2.dp, label = "elevation")
+    val elevation by animateDpAsState(if (isSelected) 4.dp else 1.dp, label = "elevation")
     ElevatedCard(
         elevation = CardDefaults.cardElevation(defaultElevation = elevation),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp) // Reduced vertical padding
+            .padding(horizontal = 16.dp, vertical = 2.dp)
             .clip(CardDefaults.shape)
             .clickable(onClick = onToggleSelection)
-            .animateContentSize()
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), // Reduced vertical padding
+            modifier = Modifier.padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Checkbox(checked = isSelected, onCheckedChange = { onToggleSelection() })
-            Spacer(Modifier.width(12.dp)) // Reduced spacer
+            Spacer(Modifier.width(4.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = modInfo.name, style = MaterialTheme.typography.titleMedium)
-                Spacer(modifier = Modifier.height(2.dp)) // Reduced spacer
+                Text(
+                    text = modInfo.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
                 Text(
                     text = "${modInfo.character} - ${modInfo.costume}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                AssistChip(
-                    onClick = { /* No action */ },
-                    label = { Text(modInfo.type.uppercase()) },
-                    leadingIcon = {
-                        val icon = when(modInfo.type.lowercase()) {
-                            "idle" -> Icons.Default.Person
-                            "cutscene" -> Icons.Default.Movie
-                            else -> Icons.Default.Category
-                        }
-                        Icon(icon, contentDescription = modInfo.type, Modifier.size(18.dp))
-                    }
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
                 )
             }
+            Spacer(Modifier.width(8.dp))
+            AssistChip(
+                onClick = { /* No action */ },
+                label = { Text(modInfo.type.uppercase(), style = MaterialTheme.typography.labelSmall) },
+                leadingIcon = {
+                    val icon = when(modInfo.type.lowercase()) {
+                        "idle" -> Icons.Default.Person
+                        "cutscene" -> Icons.Default.Movie
+                        else -> Icons.Default.Category
+                    }
+                    Icon(icon, contentDescription = modInfo.type, Modifier.size(14.dp))
+                },
+                modifier = Modifier.heightIn(max = 24.dp)
+            )
         }
     }
 }
