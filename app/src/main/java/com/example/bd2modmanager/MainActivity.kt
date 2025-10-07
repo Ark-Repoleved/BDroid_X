@@ -22,9 +22,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,6 +55,8 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             BD2ModManagerTheme {
+                var uninstallConfirmationTarget by remember { mutableStateOf<String?>(null) }
+
                 val modSourceDirLauncher = rememberLauncherForActivityResult(
                     contract = SafManager.PickDirectoryWithSpecialAccess(),
                     onResult = { uri ->
@@ -77,7 +78,8 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     ModScreen(
                         viewModel = viewModel,
-                        onSelectModSource = { modSourceDirLauncher.launch(Unit) }
+                        onSelectModSource = { modSourceDirLauncher.launch(Unit) },
+                        onUninstallRequest = { hash -> uninstallConfirmationTarget = hash }
                     )
                 }
 
@@ -94,10 +96,56 @@ class MainActivity : ComponentActivity() {
                     state = uninstallState,
                     onDismiss = { viewModel.resetUninstallState() }
                 )
+
+                UninstallConfirmationDialog(
+                    targetHash = uninstallConfirmationTarget,
+                    onConfirm = { hash ->
+                        viewModel.initiateUninstall(this, hash)
+                        uninstallConfirmationTarget = null
+                    },
+                    onDismiss = {
+                        uninstallConfirmationTarget = null
+                    }
+                )
             }
         }
     }
 }
+
+@Composable
+fun UninstallConfirmationDialog(
+    targetHash: String?,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    if (targetHash == null) return
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Warning, contentDescription = "Warning") },
+        title = { Text("Confirm Restore") },
+        text = {
+            Text(
+                "Are you sure you want to restore the original file for this group?\n\nTarget: ${targetHash.take(12)}...",
+                textAlign = TextAlign.Center
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(targetHash) },
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Text("Confirm")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
 
 @Composable
 fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
@@ -288,7 +336,8 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
 @Composable
 fun ModScreen(
     viewModel: MainViewModel,
-    onSelectModSource: () -> Unit
+    onSelectModSource: () -> Unit,
+    onUninstallRequest: (String) -> Unit
 ) {
     val modSourceDirectoryUri by viewModel.modSourceDirectoryUri.collectAsState()
     val modsList by viewModel.modsList.collectAsState()
@@ -346,7 +395,7 @@ fun ModScreen(
                                             modifier = Modifier.weight(1f)
                                         )
 
-                                        IconButton(onClick = { viewModel.initiateUninstall(context, hash) }) {
+                                        IconButton(onClick = { onUninstallRequest(hash) }) {
                                             Icon(
                                                 Icons.Default.Delete,
                                                 contentDescription = "Uninstall",
@@ -496,7 +545,7 @@ fun ShimmerLoadingScreen() {
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 8.dp)
     ) {
-        items(10) { 
+        items(10) {
             ShimmerModCard()
         }
     }
