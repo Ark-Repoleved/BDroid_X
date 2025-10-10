@@ -44,8 +44,9 @@ import com.example.bd2modmanager.ui.viewmodel.ModInfo
 import com.example.bd2modmanager.ui.viewmodel.UninstallState
 import com.example.bd2modmanager.utils.SafManager
 import com.valentinilk.shimmer.shimmer
-
 import androidx.compose.ui.state.ToggleableState
+
+import androidx.compose.material.icons.automirrored.filled.Help
 
 class MainActivity : ComponentActivity() {
 
@@ -239,7 +240,7 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
         onDismissRequest = onDismiss,
         icon = {
             when (state) {
-                is InstallState.AwaitingOriginalFile -> Icon(Icons.Default.Help, contentDescription = "Awaiting File")
+                is InstallState.AwaitingOriginalFile -> Icon(Icons.AutoMirrored.Filled.Help, contentDescription = "Awaiting File")
                 is InstallState.Finished -> Icon(Icons.Default.CheckCircle, contentDescription = "Success")
                 is InstallState.Failed -> Icon(Icons.Default.Error, contentDescription = "Failed")
                 is InstallState.Installing -> Icon(Icons.Default.Build, contentDescription = "Installing")
