@@ -88,14 +88,6 @@ sealed class UninstallState {
     data class Failed(val error: String) : UninstallState()
 }
 
-// Represents the state of the unpack process
-sealed class UnpackState {
-    object Idle : UnpackState()
-    data class Unpacking(val progressMessage: String = "Initializing...") : UnpackState()
-    data class Finished(val message: String) : UnpackState()
-    data class Failed(val error: String) : UnpackState()
-}
-
 class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel() {
 
     companion object {
@@ -131,13 +123,6 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     private val _uninstallState = MutableStateFlow<UninstallState>(UninstallState.Idle)
     val uninstallState: StateFlow<UninstallState> = _uninstallState.asStateFlow()
-
-    // --- Unpack State ---
-    private val _unpackState = MutableStateFlow<UnpackState>(UnpackState.Idle)
-    val unpackState: StateFlow<UnpackState> = _unpackState.asStateFlow()
-
-    private val _unpackInputFile = MutableStateFlow<Uri?>(null)
-    val unpackInputFile: StateFlow<Uri?> = _unpackInputFile.asStateFlow()
 
     private var characterLut: Map<String, List<CharacterInfo>> = emptyMap()
 
@@ -406,67 +391,6 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         _uninstallState.value = UninstallState.Idle
     }
 
-    // --- Unpack Logic ---
-    fun setUnpackInputFile(uri: Uri?) {
-        _unpackInputFile.value = uri
-    }
-
-    fun initiateUnpack(context: Context) {
-        val inputFile = _unpackInputFile.value ?: return
-
-        viewModelScope.launch {
-            _unpackState.value = UnpackState.Unpacking("Starting unpack...")
-            val (success, message) = withContext(Dispatchers.IO) {
-                if (!Python.isStarted()) {
-                    Python.start(com.chaquo.python.android.AndroidPlatform(context))
-                }
-                // We need to copy the input file to a place Python can access directly
-                val tempInputFile = File(context.cacheDir, "temp_unpack_input.bundle")
-                context.contentResolver.openInputStream(inputFile)?.use { input ->
-                    tempInputFile.outputStream().use { output ->
-                        input.copyTo(output)
-                    }
-                }
-
-                // Create a temporary directory for Python to write to
-                val tempOutputDir = File(context.cacheDir, "temp_unpack_output")
-                if (tempOutputDir.exists()) tempOutputDir.deleteRecursively()
-                tempOutputDir.mkdirs()
-
-                val unpackResult = ModdingService.unpackBundle(tempInputFile.absolutePath, tempOutputDir.absolutePath) { progress ->
-                    viewModelScope.launch(Dispatchers.Main) {
-                        _unpackState.value = UnpackState.Unpacking(progress)
-                    }
-                }
-
-                // If unpack was successful, copy files to the public downloads directory
-                if (unpackResult.first) {
-                    tempOutputDir.listFiles()?.forEach { file ->
-                        saveFileToDownloads(context, file, file.name, "outputs")
-                    }
-                }
-
-                // Clean up temporary files
-                tempInputFile.delete()
-                tempOutputDir.deleteRecursively()
-
-                unpackResult
-            }
-
-            _unpackState.value = if (success) {
-                UnpackState.Finished("Unpacked files saved to Download/outputs folder.")
-            } else {
-                UnpackState.Failed(message)
-            }
-        }
-    }
-
-    fun resetUnpackState() {
-        _unpackState.value = UnpackState.Idle
-        _unpackInputFile.value = null
-    }
-
-
     // --- PRIVATE HELPERS ---
     fun scanModSourceDirectory(context: Context, dirUri: Uri) {
         _isLoading.value = true
@@ -477,8 +401,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 val tempModsList = mutableListOf<ModInfo>()
                 val files = DocumentFile.fromTreeUri(context, dirUri)?.listFiles() ?: emptyArray()
 
-                files.filter { it.isDirectory || it.name?.endsWith(".zip", ignoreCase = true) == true }
-                    .forEach { file ->
+                files.forEach { file ->
                     val uriString = file.uri.toString()
                     val lastModified = file.lastModified()
                     val cachedInfo = existingCache[uriString]
@@ -558,8 +481,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             val json = cacheFile.readText()
             val type = object : TypeToken<Map<String, ModCacheInfo>>() {}.type
             gson.fromJson(json, type) ?: emptyMap()
-        }
-        catch (e: Exception) {
+        } catch (e: Exception) {
             e.printStackTrace()
             emptyMap()
         }
@@ -602,17 +524,12 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         return candidates.first()
     }
 
-    private fun saveFileToDownloads(context: Context, file: File, displayName: String, subdirectory: String? = null): Uri? {
+    private fun saveFileToDownloads(context: Context, file: File, displayName: String): Uri? {
         val resolver = context.contentResolver
-        val relativePath = if (subdirectory != null) {
-            File(Environment.DIRECTORY_DOWNLOADS, subdirectory).path
-        } else {
-            Environment.DIRECTORY_DOWNLOADS
-        }
         val contentValues = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
             put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
-            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
         }
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
         uri?.let {
