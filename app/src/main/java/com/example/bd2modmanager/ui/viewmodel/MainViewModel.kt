@@ -58,14 +58,27 @@ data class ModDetails(val fileId: String?, val fileNames: List<String>)
 // Data class for a batch repack job
 data class RepackJob(val hashedName: String, val modsToInstall: List<ModInfo>)
 
-// Represents the state of the installation process
-sealed class InstallState {
-    object Idle : InstallState()
-    data class AwaitingOriginalFile(val job: RepackJob) : InstallState()
-    data class Installing(val job: RepackJob, val progressMessage: String = "Initializing...") : InstallState()
-    data class Finished(val publicUri: Uri, val job: RepackJob) : InstallState()
-    data class Failed(val error: String) : InstallState()
+// Represents the state of an individual installation job
+sealed class JobStatus {
+    object Pending : JobStatus()
+    data class Downloading(val progressMessage: String = "Waiting...") : JobStatus()
+    data class Installing(val progressMessage: String = "Initializing...") : JobStatus()
+    data class Finished(val publicUri: Uri) : JobStatus()
+    data class Failed(val error: String) : JobStatus()
 }
+
+// Data class to hold a job and its current status
+data class InstallJob(
+    val job: RepackJob,
+    val status: JobStatus = JobStatus.Pending
+)
+
+// Represents the final result of the entire batch installation
+data class FinalInstallResult(
+    val successfulJobs: Int,
+    val failedJobs: Int,
+    val command: String?
+)
 
 // Represents the state of the uninstall process
 sealed class UninstallState {
@@ -97,13 +110,19 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _selectedMods = MutableStateFlow<Set<Uri>>(emptySet())
     val selectedMods: StateFlow<Set<Uri>> = _selectedMods.asStateFlow()
 
-    private val _installState = MutableStateFlow<InstallState>(InstallState.Idle)
-    val installState: StateFlow<InstallState> = _installState.asStateFlow()
+    // --- New State Management for Parallel Installation ---
+    private val _installJobs = MutableStateFlow<List<InstallJob>>(emptyList())
+    val installJobs: StateFlow<List<InstallJob>> = _installJobs.asStateFlow()
+
+    private val _showInstallDialog = MutableStateFlow(false)
+    val showInstallDialog: StateFlow<Boolean> = _showInstallDialog.asStateFlow()
+
+    private val _finalInstallResult = MutableStateFlow<FinalInstallResult?>(null)
+    val finalInstallResult: StateFlow<FinalInstallResult?> = _finalInstallResult.asStateFlow()
+    // --- End New State ---
 
     private val _uninstallState = MutableStateFlow<UninstallState>(UninstallState.Idle)
     val uninstallState: StateFlow<UninstallState> = _uninstallState.asStateFlow()
-
-    private val _repackQueue = MutableStateFlow<List<RepackJob>>(emptyList())
 
     private var characterLut: Map<String, List<CharacterInfo>> = emptyMap()
 
@@ -122,11 +141,13 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
             updateCharacterData(context)
             modSourceDirectoryUri.value?.let { scanModSourceDirectory(context, it) }
+        }
 
-            // Observer for the repack queue
-            _repackQueue.collect { queue ->
-                if (_installState.value is InstallState.Idle && queue.isNotEmpty()) {
-                    _installState.value = InstallState.AwaitingOriginalFile(queue.first())
+        // Centralized observer for job completion
+        viewModelScope.launch {
+            installJobs.collect { jobs ->
+                if (jobs.isNotEmpty() && jobs.all { it.status is JobStatus.Finished || it.status is JobStatus.Failed }) {
+                    summarizeResults()
                 }
             }
         }
@@ -190,7 +211,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         }
     }
 
-    fun initiateBatchRepack() {
+    fun initiateBatchRepack(context: Context) {
         val allMods = _modsList.value
         val jobs = _selectedMods.value
             .mapNotNull { uri -> allMods.find { it.uri == uri } }
@@ -199,131 +220,138 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             .map { (hash, mods) -> RepackJob(hash, mods) }
 
         if (jobs.isNotEmpty()) {
-            _repackQueue.value = jobs
+            _installJobs.value = jobs.map { InstallJob(it) }
+            _finalInstallResult.value = null
+            _showInstallDialog.value = true
+            processInstallJobs(context)
         }
     }
 
-    fun downloadOriginalData(context: Context) {
-        val currentState = _installState.value
-        if (currentState !is InstallState.AwaitingOriginalFile) return
-        val job = currentState.job
-
+    private fun processInstallJobs(context: Context) {
         viewModelScope.launch {
-            _installState.value = InstallState.Installing(job, "Starting download...")
-            val (success, messageOrPath) = withContext(Dispatchers.IO) {
-                if (!Python.isStarted()) {
+            if (!Python.isStarted()) {
+                withContext(Dispatchers.IO) {
                     Python.start(com.chaquo.python.android.AndroidPlatform(context))
                 }
-                ModdingService.downloadBundle(job.hashedName, "HD", context.cacheDir.absolutePath) { progress ->
-                    viewModelScope.launch(Dispatchers.Main) {
-                        _installState.value = InstallState.Installing(job, progress)
-                    }
-                }
             }
 
-            if (success) {
-                val downloadedFile = File(messageOrPath)
-                proceedWithInstall(context, Uri.fromFile(downloadedFile), true)
-            } else {
-                _installState.value = InstallState.Failed(messageOrPath)
+            _installJobs.value.forEach { installJob ->
+                launch(Dispatchers.IO) { // Launch a concurrent coroutine for each job on an IO thread
+                    processSingleJob(context, installJob)
+                }
             }
         }
     }
 
-    fun proceedWithInstall(context: Context, originalDataUri: Uri, isDownloaded: Boolean = false) {
-        val currentState = _installState.value
-        if (currentState !is InstallState.AwaitingOriginalFile && currentState !is InstallState.Installing) return
+    private suspend fun processSingleJob(context: Context, installJob: InstallJob) {
+        val job = installJob.job
+        val hashedName = job.hashedName
 
-        val job = when (currentState) {
-            is InstallState.AwaitingOriginalFile -> currentState.job
-            is InstallState.Installing -> currentState.job
-            else -> return
-        }
+        try {
+            // 1. Download original bundle
+            updateJobStatus(hashedName, JobStatus.Downloading("Starting download..."))
+            val (downloadSuccess, messageOrPath) = ModdingService.downloadBundle(hashedName, "HD", context.cacheDir.absolutePath) { progress ->
+                updateJobStatus(hashedName, JobStatus.Downloading(progress))
+            }
 
-        viewModelScope.launch {
-            _installState.value = InstallState.Installing(job)
-            withContext(Dispatchers.IO) {
-                try {
-                    if (!Python.isStarted()) {
-                        Python.start(com.chaquo.python.android.AndroidPlatform(context))
-                    }
+            if (!downloadSuccess) {
+                throw Exception("Download failed: $messageOrPath")
+            }
+            val originalDataCache = File(messageOrPath)
 
-                    val cacheDir = context.cacheDir
-                    val originalDataCache = File(cacheDir, "temp_original__data")
-                    val modAssetsDir = File(cacheDir, "temp_mod_assets")
+            // 2. Prepare mod assets
+            updateJobStatus(hashedName, JobStatus.Installing("Extracting mod files..."))
+            val modAssetsDir = File(context.cacheDir, "temp_mod_assets_${hashedName}")
 
-                    // Cleanup previous run
-                    if (modAssetsDir.exists()) modAssetsDir.deleteRecursively()
-                    modAssetsDir.mkdirs()
+            if (modAssetsDir.exists()) modAssetsDir.deleteRecursively()
+            modAssetsDir.mkdirs()
 
-                    // Copy original __data file
-                    if (isDownloaded) {
-                        // If it's a downloaded file, its URI is a file URI, so we can get the path directly
-                        File(originalDataUri.path!!).copyTo(originalDataCache, true)
-                    } else {
-                        // If it's from the user, it's a content URI and needs the content resolver
-                        context.contentResolver.openInputStream(originalDataUri)?.use { it.copyTo(originalDataCache.outputStream()) }
-                    }
-
-                    // Extract all selected mods for this job
-                    job.modsToInstall.forEach { modInfo ->
-                        if (modInfo.isDirectory) {
-                            DocumentFile.fromTreeUri(context, modInfo.uri)?.let { copyDirectoryToCache(context, it, modAssetsDir) }
-                        } else {
-                            context.contentResolver.openInputStream(modInfo.uri)?.use { fis ->
-                                ZipInputStream(fis).use { zis ->
-                                    var entry = zis.nextEntry
-                                    while (entry != null) {
-                                        val newFile = File(modAssetsDir, entry.name)
-                                        if (entry.isDirectory) newFile.mkdirs() else newFile.outputStream().use { fos -> zis.copyTo(fos) }
-                                        entry = zis.nextEntry
-                                    }
-                                }
+            job.modsToInstall.forEach { modInfo ->
+                if (modInfo.isDirectory) {
+                    DocumentFile.fromTreeUri(context, modInfo.uri)?.let { copyDirectoryToCache(context, it, modAssetsDir) }
+                } else {
+                    context.contentResolver.openInputStream(modInfo.uri)?.use { fis ->
+                        ZipInputStream(fis).use { zis ->
+                            var entry = zis.nextEntry
+                            while (entry != null) {
+                                val newFile = File(modAssetsDir, entry.name)
+                                if (entry.isDirectory) newFile.mkdirs() else newFile.outputStream().use { fos -> zis.copyTo(fos) }
+                                entry = zis.nextEntry
                             }
                         }
                     }
-
-                    // Repack using Python script
-                    val repackedDataCache = File(cacheDir, "__${job.hashedName}")
-                    val (success, message) = ModdingService.repackBundle(originalDataCache.absolutePath, modAssetsDir.absolutePath, repackedDataCache.absolutePath) { progress ->
-                        // Update progress on the main thread
-                        viewModelScope.launch(Dispatchers.Main) {
-                            _installState.value = InstallState.Installing(job, progress)
-                        }
-                    }
-
-                    // Cleanup
-                    originalDataCache.delete()
-                    modAssetsDir.deleteRecursively()
-
-                    if (success) {
-                        val publicUri = saveFileToDownloads(context, repackedDataCache, "__${job.hashedName}")
-                        repackedDataCache.delete()
-                        if (publicUri != null) {
-                            _installState.value = InstallState.Finished(publicUri, job)
-                        } else {
-                            _installState.value = InstallState.Failed("Failed to save file to public Downloads folder.")
-                        }
-                    } else {
-                        repackedDataCache.delete()
-                        _installState.value = InstallState.Failed(message)
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    _installState.value = InstallState.Failed(e.message ?: "An unknown error occurred.")
                 }
+            }
+
+
+            // 3. Repack bundle
+            updateJobStatus(hashedName, JobStatus.Installing("Repacking bundle..."))
+            val repackedDataCache = File(context.cacheDir, "__${hashedName}")
+            val (repackSuccess, repackMessage) = ModdingService.repackBundle(originalDataCache.absolutePath, modAssetsDir.absolutePath, repackedDataCache.absolutePath) { progress ->
+                updateJobStatus(hashedName, JobStatus.Installing(progress))
+            }
+
+            // 4. Cleanup temp files
+            originalDataCache.delete()
+            modAssetsDir.deleteRecursively()
+
+
+            if (!repackSuccess) {
+                throw Exception("Repack failed: $repackMessage")
+            }
+
+            // 5. Save to public downloads and finalize
+            val publicUri = saveFileToDownloads(context, repackedDataCache, "__${hashedName}")
+            repackedDataCache.delete()
+
+            if (publicUri != null) {
+                updateJobStatus(hashedName, JobStatus.Finished(publicUri))
+            } else {
+                throw Exception("Failed to save file to Downloads folder.")
+            }
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+            updateJobStatus(hashedName, JobStatus.Failed(e.message ?: "An unknown error occurred."))
+        }
+    }
+
+    private fun summarizeResults() {
+        val finishedJobs = _installJobs.value
+        val successfulJobs = finishedJobs.filter { it.status is JobStatus.Finished }
+        val failedJobs = finishedJobs.filter { it.status is JobStatus.Failed }
+
+        val command = if (successfulJobs.isNotEmpty()) {
+            successfulJobs.joinToString(" && ") {
+                val hash = it.job.hashedName
+                "mv -f /sdcard/Download/__${hash} /sdcard/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hash/*/__data"
+            }
+        } else null
+
+        _finalInstallResult.value = FinalInstallResult(
+            successfulJobs = successfulJobs.size,
+            failedJobs = failedJobs.size,
+            command = command
+        )
+    }
+
+    @Synchronized
+    private fun updateJobStatus(hashedName: String, newStatus: JobStatus) {
+        viewModelScope.launch(Dispatchers.Main) {
+            val currentJobs = _installJobs.value.toMutableList()
+            val jobIndex = currentJobs.indexOfFirst { it.job.hashedName == hashedName }
+            if (jobIndex != -1) {
+                currentJobs[jobIndex] = currentJobs[jobIndex].copy(status = newStatus)
+                _installJobs.value = currentJobs
             }
         }
     }
 
-    fun resetInstallState() {
-        val currentState = _installState.value
-        if (currentState is InstallState.Finished || currentState is InstallState.Failed) {
-            _repackQueue.value = _repackQueue.value.drop(1)
-        } else { // User cancelled
-            _repackQueue.value = emptyList()
-        }
-        _installState.value = InstallState.Idle
+    fun closeInstallDialog() {
+        _showInstallDialog.value = false
+        _installJobs.value = emptyList()
+        _finalInstallResult.value = null
+        _selectedMods.value = emptySet()
     }
 
     fun initiateUninstall(context: Context, hashedName: String) {
