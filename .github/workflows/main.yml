@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -24,16 +25,27 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
+      - name: Decode Release Keystore
+        run: |
+          echo "Decoding keystore from secrets..."
+          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > release-key.jks
+          echo "Keystore decoded successfully."
+      
       - name: Make Gradle executable
         run: chmod +x ./gradlew
 
-      - name: Build Release APK
-        run: ./gradlew assembleDebug
+      - name: Build Signed Release APK
+        run: ./gradlew assembleRelease
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/release-key.jks
+          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
       - name: Create Release and Upload APK
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag }}
-          files: app/build/outputs/apk/debug/*.apk
+          files: app/build/outputs/apk/release/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
