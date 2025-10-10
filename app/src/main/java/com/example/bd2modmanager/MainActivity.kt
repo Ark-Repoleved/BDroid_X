@@ -259,7 +259,11 @@ fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
     val context = LocalContext.current
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            if (state !is UninstallState.Downloading) {
+                onDismiss()
+            }
+        },
         icon = {
             when (state) {
                 is UninstallState.Downloading -> Icon(Icons.Default.Download, contentDescription = "Downloading")
@@ -278,67 +282,57 @@ fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
             Text(text)
         },
         text = {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .weight(1f)
-                        .verticalScroll(rememberScrollState())
-                        .fillMaxWidth()
-                ) {
-                    when (state) {
-                        is UninstallState.Downloading -> {
-                            Text("Downloading original file for: ${state.hashedName}", textAlign = TextAlign.Center)
-                            Spacer(modifier = Modifier.height(16.dp))
-                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(state.progressMessage, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-                        }
-                        is UninstallState.Finished -> {
-                            Text("Original file saved to your Downloads folder.", textAlign = TextAlign.Center)
-                            Spacer(Modifier.height(16.dp))
-                            Text("For advanced users, run this command in a root shell to move the file:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-                            Spacer(Modifier.height(8.dp))
-                            Button(
-                                onClick = {
-                                    clipboardManager.setText(AnnotatedString(state.command))
-                                    Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
-                                }
-                            ) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text("Copy Command")
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            SelectionContainer {
-                                Text(
-                                    text = state.command,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                    modifier = Modifier
-                                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                                        .padding(12.dp)
-                                        .fillMaxWidth()
-                                )
-                            }
-                        }
-                        is UninstallState.Failed -> Text(state.error, textAlign = TextAlign.Center)
-                        else -> {}
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
+                when (state) {
+                    is UninstallState.Downloading -> {
+                        Text("Downloading original file for: ${state.hashedName}", textAlign = TextAlign.Center)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(state.progressMessage, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                     }
-                }
-
-                if (state !is UninstallState.Downloading) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 16.dp),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        Button(onClick = onDismiss) { Text("OK") }
+                    is UninstallState.Finished -> {
+                        Text("Original file saved to your Downloads folder.", textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(16.dp))
+                        Text("For advanced users, run this command in a root shell to move the file:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                clipboardManager.setText(AnnotatedString(state.command))
+                                Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Copy Command")
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        SelectionContainer {
+                            Text(
+                                text = state.command,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                    .padding(12.dp)
+                                    .fillMaxWidth()
+                            )
+                        }
                     }
+                    is UninstallState.Failed -> Text(state.error, textAlign = TextAlign.Center)
+                    else -> {}
                 }
             }
         },
-        confirmButton = {},
+        confirmButton = {
+            if (state !is UninstallState.Downloading) {
+                Button(onClick = onDismiss) {
+                    Text("OK")
+                }
+            }
+        },
         dismissButton = null
     )
 }
