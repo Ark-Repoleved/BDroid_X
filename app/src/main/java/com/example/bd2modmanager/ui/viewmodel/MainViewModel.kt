@@ -364,7 +364,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     // --- PRIVATE HELPERS ---
-    private fun scanModSourceDirectory(context: Context, dirUri: Uri) {
+    fun scanModSourceDirectory(context: Context, dirUri: Uri) {
         _isLoading.value = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
