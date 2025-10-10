@@ -120,7 +120,8 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
 
     # 2. Allocate context
     context = c_void_p()
-    thread_count = 1
+    # Use all available CPU cores to accelerate compression.
+    thread_count = os.cpu_count() or 1
     status = astcenc.astcenc_context_alloc(byref(config), thread_count, byref(context))
     if status != ASTCENC_SUCCESS:
         return None, f"astcenc_context_alloc failed: {get_error_string(status)}"
