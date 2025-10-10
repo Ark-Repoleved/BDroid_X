@@ -22,11 +22,14 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -332,7 +335,7 @@ fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () 
     )
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ModScreen(
     viewModel: MainViewModel,
@@ -345,6 +348,19 @@ fun ModScreen(
     val selectedMods by viewModel.selectedMods.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val context = LocalContext.current
+
+    val pullToRefreshState = rememberPullToRefreshState()
+    if (pullToRefreshState.isRefreshing) {
+        LaunchedEffect(true) {
+            modSourceDirectoryUri?.let { viewModel.scanModSourceDirectory(context, it) }
+        }
+    }
+
+    LaunchedEffect(isLoading) {
+        if (!isLoading) {
+            pullToRefreshState.endRefresh()
+        }
+    }
 
     Scaffold(
         floatingActionButton = {
@@ -366,73 +382,79 @@ fun ModScreen(
             if (modSourceDirectoryUri == null) {
                 WelcomeScreen(onSelectModSource)
             } else {
-                if (isLoading) {
-                    ShimmerLoadingScreen()
-                } else if (groupedMods.isEmpty()) {
-                    EmptyModsScreen()
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(vertical = 8.dp)
-                    ) {
-                        groupedMods.toSortedMap().forEach { (hash, modsInGroup) ->
-                            stickyHeader {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(MaterialTheme.colorScheme.surface)
-                                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.fillMaxWidth()
+                Box(modifier = Modifier.nestedScroll(pullToRefreshState.nestedScrollConnection)) {
+                    if (isLoading && modsList.isEmpty()) { // Show shimmer only on initial load
+                        ShimmerLoadingScreen()
+                    } else if (modsList.isEmpty()) {
+                        EmptyModsScreen()
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(vertical = 8.dp)
+                        ) {
+                            groupedMods.toSortedMap().forEach { (hash, modsInGroup) ->
+                                stickyHeader {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(MaterialTheme.colorScheme.surface)
+                                            .padding(horizontal = 16.dp, vertical = 8.dp)
                                     ) {
-                                        Text(
-                                            text = "Target: ${hash.take(12)}...",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.weight(1f)
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Text(
+                                                text = "Target: ${hash.take(12)}...",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.weight(1f)
+                                            )
 
-                                        IconButton(onClick = { onUninstallRequest(hash) }) {
-                                            Icon(
-                                                Icons.Default.Delete,
-                                                contentDescription = "Uninstall",
-                                                tint = MaterialTheme.colorScheme.primary
+                                            IconButton(onClick = { onUninstallRequest(hash) }) {
+                                                Icon(
+                                                    Icons.Default.Delete,
+                                                    contentDescription = "Uninstall",
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+
+                                            val modsInGroupUris = modsInGroup.map { it.uri }.toSet()
+                                            val selectedInGroup = selectedMods.intersect(modsInGroupUris)
+
+                                            val checkboxState = when {
+                                                selectedInGroup.isEmpty() -> ToggleableState.Off
+                                                selectedInGroup.size == modsInGroupUris.size -> ToggleableState.On
+                                                else -> ToggleableState.Indeterminate
+                                            }
+
+                                            TriStateCheckbox(
+                                                state = checkboxState,
+                                                onClick = { viewModel.toggleSelectAllForGroup(hash) }
                                             )
                                         }
-
-                                        val modsInGroup = groupedMods[hash] ?: emptyList()
-                                        val groupUris = modsInGroup.map { it.uri }.toSet()
-                                        val selectedInGroup = selectedMods.intersect(groupUris)
-
-                                        val checkboxState = when {
-                                            selectedInGroup.isEmpty() -> ToggleableState.Off
-                                            selectedInGroup.size == groupUris.size -> ToggleableState.On
-                                            else -> ToggleableState.Indeterminate
-                                        }
-
-                                        TriStateCheckbox(
-                                            state = checkboxState,
-                                            onClick = { viewModel.toggleSelectAllForGroup(hash) }
-                                        )
+                                        HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
                                     }
-                                    HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
                                 }
-                            }
-                            items(
-                                items = modsInGroup,
-                                key = { mod -> mod.uri.toString() }
-                            ) { modInfo ->
-                                ModCard(
-                                    modInfo = modInfo,
-                                    isSelected = modInfo.uri in selectedMods,
-                                    onToggleSelection = { viewModel.toggleModSelection(modInfo.uri) }
-                                )
+                                items(
+                                    items = modsInGroup,
+                                    key = { mod -> mod.uri.toString() }
+                                ) { modInfo ->
+                                    ModCard(
+                                        modInfo = modInfo,
+                                        isSelected = modInfo.uri in selectedMods,
+                                        onToggleSelection = { viewModel.toggleModSelection(modInfo.uri) }
+                                    )
+                                }
                             }
                         }
                     }
+
+                    PullToRefreshContainer(
+                        modifier = Modifier.align(Alignment.TopCenter),
+                        state = pullToRefreshState,
+                    )
                 }
             }
         }
