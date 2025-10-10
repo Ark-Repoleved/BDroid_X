@@ -11,7 +11,7 @@ No need for a PC to unpack and repack.
 ## Features
 
 *   **Automatic Scan & Grouping**: Automatically scans your specified mod folder and intelligently groups mods based on the game files they modify.
-*   **Batch Installation**: You can select and process multiple mods from the same group at once.
+*   **Parallel Processing**: Select mods from different groups and process them all in a single batch. The app handles everything concurrently.
 *   **On-Device Repacking**: Unpack, convert resources (ASTC), and repack mods directly on your phone without needing a computer.
 
 ## System Requirements
@@ -52,15 +52,10 @@ Here is a typical layout, using assets for "Lathel: Dark Knight" as an example:
 
 ## How to Install Mods
 
-1.  **Select Mods**: On the main screen list, check the one or more mods you want to install. Note that you can only batch-install mods belonging to the same group (Target).
+1.  **Select Mods**: On the main screen list, check one or more mods you want to install. You can now select mods from different groups (Targets) at the same time.
 2.  **Start Repacking**: Tap the floating action button with the **check mark (✓)** at the bottom right.
-3.  **Provide the Original File**:
-    *   A dialog will appear asking for the original `__data` file.
-    *   You now have two options:
-        *   **Download from Server (Recommended)**: Tap this button, and the app will automatically download the correct, latest version of the `__data` file from the game's official servers.
-        *   **Select File Manually**: If you prefer, you can still manually locate the original `Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/[hashed_name]/*/__data` file, copy it to your mod folder and select it using the file picker.
-4.  **Wait for Processing**: The app will automatically perform the unpacking, compression, and repacking process in the background. Please wait patiently.
-5.  **Manually Replace the File (Current Version)**:
+3.  **Automatic Download & Repack**: A new dialog will appear, showing the live progress for each mod group. The app automatically downloads the latest original game files for each group from the official servers and repacks your selected mods in parallel.
+4.  **Manually Replace the File**:
     *   After a successful installation, a new, modified `__data` file will be saved to your phone's **`Download`** folder with the filename `__[hashed_name]`.
     *   **You need to manually copy or move this file to the corresponding game folder, overwriting the original `__data` file.**
     *   You can use a third-party file manager (with special permissions) to do this. The dialog will provide a one-click ADB command that can be executed via [ShizuTools](https://github.com/legendsayantan/ShizuTools) to automate the replacement.
@@ -71,7 +66,7 @@ Here is a typical layout, using assets for "Lathel: Dark Knight" as an example:
     *   A: Please ensure you have correctly selected the "Mod Source Folder". Also, make sure your mods are in `.zip` format or are unzipped folders.
 
 *   **Q: What should I do if the installation fails?**
-    *   A: The most common reason is providing the wrong original `__data` file in step 3. Please make sure the file you provide matches the `hashed_name` prompted by the app.
+    *   A: Installation can fail for a few reasons: 1) A network error occurred while downloading the original game files. 2) The mod files are corrupted or missing essential parts (like the `.skel` or `.json` file). 3) An unexpected error occurred during the repacking process. Check the error message in the dialog for more details and ensure your internet connection is stable.
 
 *   **Q: What if the graphics are corrupted after installing a mod and entering the game?**
     *   A: This is likely because the mod is missing the `.skel` or `.json` file. A complete mod requires `.png`, `.atlas`, and `.skel` or `.json` files to function correctly.
