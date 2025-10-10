@@ -15,8 +15,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.filled.*
@@ -113,54 +115,70 @@ fun ParallelInstallDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
 
     AlertDialog(
         onDismissRequest = { if (finalResult != null) onDismiss() },
-        modifier = Modifier.fillMaxHeight(0.8f).fillMaxWidth(0.95f),
+        modifier = Modifier
+            .fillMaxHeight(0.8f)
+            .fillMaxWidth(0.95f),
         title = {
             Text(if (finalResult == null) "Processing Mods" else "Batch Repack Complete")
         },
         text = {
-            if (finalResult == null) {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(jobs, key = { it.job.hashedName }) { installJob ->
-                        InstallJobRow(installJob)
+            Column(modifier = Modifier.fillMaxSize()) {
+                Box(modifier = Modifier.weight(1f)) {
+                    if (finalResult == null) {
+                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            items(jobs, key = { it.job.hashedName }) { installJob ->
+                                InstallJobRow(installJob)
+                            }
+                        }
+                    } else {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.verticalScroll(rememberScrollState())
+                        ) {
+                            Text("Summary: ${finalResult!!.successfulJobs} succeeded, ${finalResult!!.failedJobs} failed.", style = MaterialTheme.typography.titleMedium)
+                            finalResult!!.command?.let {
+                                Spacer(Modifier.height(16.dp))
+                                Text("Run this command in a root shell to move all files:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                                Spacer(Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(it))
+                                        Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                                    }
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Copy Command")
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                SelectionContainer {
+                                    Text(
+                                        text = it,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                        modifier = Modifier
+                                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                            .padding(12.dp)
+                                            .fillMaxWidth()
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
-            } else {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Summary: ${finalResult!!.successfulJobs} succeeded, ${finalResult!!.failedJobs} failed.", style = MaterialTheme.typography.titleMedium)
-                    finalResult!!.command?.let {
-                        Spacer(Modifier.height(16.dp))
-                        Text("Run this command in a root shell to move all files:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-                        Spacer(Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                clipboardManager.setText(AnnotatedString(it))
-                                Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
-                            }
-                        ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Copy Command")
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        SelectionContainer {
-                            Text(
-                                text = it,
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                                    .padding(12.dp)
-                                    .fillMaxWidth()
-                            )
-                        }
+
+                if (finalResult != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Button(onClick = onDismiss) { Text("OK") }
                     }
                 }
             }
         },
-        confirmButton = {
-            if (finalResult != null) {
-                Button(onClick = onDismiss) { Text("OK") }
-            }
-        }
+        confirmButton = {}
     )
 }
 
@@ -260,52 +278,67 @@ fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
             Text(text)
         },
         text = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                when (state) {
-                    is UninstallState.Downloading -> {
-                        Text("Downloading original file for: ${state.hashedName}", textAlign = TextAlign.Center)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(state.progressMessage, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-                    }
-                    is UninstallState.Finished -> {
-                        Text("Original file saved to your Downloads folder.", textAlign = TextAlign.Center)
-                        Spacer(Modifier.height(16.dp))
-                        Text("For advanced users, run this command in a root shell to move the file:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-                        Spacer(Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                clipboardManager.setText(AnnotatedString(state.command))
-                                Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+            Column(modifier = Modifier.fillMaxSize()) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .fillMaxWidth()
+                ) {
+                    when (state) {
+                        is UninstallState.Downloading -> {
+                            Text("Downloading original file for: ${state.hashedName}", textAlign = TextAlign.Center)
+                            Spacer(modifier = Modifier.height(16.dp))
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(state.progressMessage, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                        }
+                        is UninstallState.Finished -> {
+                            Text("Original file saved to your Downloads folder.", textAlign = TextAlign.Center)
+                            Spacer(Modifier.height(16.dp))
+                            Text("For advanced users, run this command in a root shell to move the file:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                            Spacer(Modifier.height(8.dp))
+                            Button(
+                                onClick = {
+                                    clipboardManager.setText(AnnotatedString(state.command))
+                                    Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                                }
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Copy Command")
                             }
-                        ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Copy Command")
+                            Spacer(Modifier.height(8.dp))
+                            SelectionContainer {
+                                Text(
+                                    text = state.command,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                    modifier = Modifier
+                                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                        .padding(12.dp)
+                                        .fillMaxWidth()
+                                )
+                            }
                         }
-                        Spacer(Modifier.height(8.dp))
-                        SelectionContainer {
-                            Text(
-                                text = state.command,
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                                    .padding(12.dp)
-                                    .fillMaxWidth()
-                            )
-                        }
+                        is UninstallState.Failed -> Text(state.error, textAlign = TextAlign.Center)
+                        else -> {}
                     }
-                    is UninstallState.Failed -> Text(state.error, textAlign = TextAlign.Center)
-                    else -> {}
+                }
+
+                if (state !is UninstallState.Downloading) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Button(onClick = onDismiss) { Text("OK") }
+                    }
                 }
             }
         },
-        confirmButton = {
-            if (state !is UninstallState.Downloading) {
-                Button(onClick = onDismiss) { Text("OK") }
-            }
-        },
+        confirmButton = {},
         dismissButton = null
     )
 }
