@@ -32,8 +32,6 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun BD2ModManagerTheme(
-    darkTheme: Boolean = false, // Force light theme
-    dynamicColor: Boolean = false, // Disable dynamic color
     content: @Composable () -> Unit) {
     val colorScheme = LightColorScheme
     val view = LocalView.current
@@ -41,7 +39,7 @@ fun BD2ModManagerTheme(
         SideEffect {
             val window = (view.context as Activity).window
             window.statusBarColor = colorScheme.background.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = true
         }
     }
 
