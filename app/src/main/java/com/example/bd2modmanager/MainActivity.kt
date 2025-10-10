@@ -131,17 +131,6 @@ fun ParallelInstallDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
                         Spacer(Modifier.height(16.dp))
                         Text("Run this command in a root shell to move all files:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                         Spacer(Modifier.height(8.dp))
-                        SelectionContainer {
-                            Text(
-                                text = it,
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                                    .padding(12.dp)
-                                    .fillMaxWidth()
-                            )
-                        }
-                        Spacer(Modifier.height(8.dp))
                         Button(
                             onClick = {
                                 clipboardManager.setText(AnnotatedString(it))
@@ -151,6 +140,17 @@ fun ParallelInstallDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
                             Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
                             Text("Copy Command")
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        SelectionContainer {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                    .padding(12.dp)
+                                    .fillMaxWidth()
+                            )
                         }
                     }
                 }
@@ -274,18 +274,6 @@ fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
                         Spacer(Modifier.height(16.dp))
                         Text("For advanced users, run this command in a root shell to move the file:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                         Spacer(Modifier.height(8.dp))
-
-                        SelectionContainer {
-                            Text(
-                                text = state.command,
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                                    .padding(12.dp)
-                                    .fillMaxWidth()
-                            )
-                        }
-                        Spacer(Modifier.height(8.dp))
                         Button(
                             onClick = {
                                 clipboardManager.setText(AnnotatedString(state.command))
@@ -295,6 +283,17 @@ fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
                             Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
                             Text("Copy Command")
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        SelectionContainer {
+                            Text(
+                                text = state.command,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                    .padding(12.dp)
+                                    .fillMaxWidth()
+                            )
                         }
                     }
                     is UninstallState.Failed -> Text(state.error, textAlign = TextAlign.Center)
@@ -359,7 +358,7 @@ fun ModScreen(
                 WelcomeScreen(onSelectModSource)
             } else {
                 Box(modifier = Modifier.nestedScroll(pullToRefreshState.nestedScrollConnection)) {
-                    if (isLoading && modsList.isEmpty()) { // Show shimmer only on initial load
+                    if (isLoading && modsList.isEmpty()) {
                         ShimmerLoadingScreen()
                     } else if (modsList.isEmpty()) {
                         EmptyModsScreen()
