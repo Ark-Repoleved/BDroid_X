@@ -6,10 +6,8 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -20,12 +18,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,16 +35,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.state.ToggleableState
 import com.example.bd2modmanager.ui.theme.BD2ModManagerTheme
-import com.example.bd2modmanager.ui.viewmodel.InstallState
-import com.example.bd2modmanager.ui.viewmodel.MainViewModel
-import com.example.bd2modmanager.ui.viewmodel.ModInfo
-import com.example.bd2modmanager.ui.viewmodel.UninstallState
+import com.example.bd2modmanager.ui.viewmodel.*
 import com.example.bd2modmanager.utils.SafManager
 import com.valentinilk.shimmer.shimmer
-import androidx.compose.ui.state.ToggleableState
-
-import androidx.compose.material.icons.automirrored.filled.Help
 
 class MainActivity : ComponentActivity() {
 
@@ -74,11 +67,6 @@ class MainActivity : ComponentActivity() {
                     }
                 )
 
-                val originalDataLauncher = rememberLauncherForActivityResult(
-                    contract = ActivityResultContracts.GetContent(),
-                    onResult = { uri -> if (uri != null) viewModel.proceedWithInstall(this, uri) }
-                )
-
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     ModScreen(
                         viewModel = viewModel,
@@ -87,13 +75,13 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                val installState by viewModel.installState.collectAsState()
-                InstallDialog(
-                    state = installState,
-                    onDismiss = { viewModel.resetInstallState() },
-                    onProvideFile = { originalDataLauncher.launch("*/*") },
-                    onDownload = { viewModel.downloadOriginalData(context = this) }
-                )
+                val showInstallDialog by viewModel.showInstallDialog.collectAsState()
+                if (showInstallDialog) {
+                    ParallelInstallDialog(
+                        viewModel = viewModel,
+                        onDismiss = { viewModel.closeInstallDialog() }
+                    )
+                }
 
                 val uninstallState by viewModel.uninstallState.collectAsState()
                 UninstallDialog(
@@ -115,6 +103,100 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+@Composable
+fun ParallelInstallDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
+    val jobs by viewModel.installJobs.collectAsState()
+    val finalResult by viewModel.finalInstallResult.collectAsState()
+    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
+
+    AlertDialog(
+        onDismissRequest = { if (finalResult != null) onDismiss() },
+        modifier = Modifier.fillMaxHeight(0.8f).fillMaxWidth(0.95f),
+        title = {
+            Text(if (finalResult == null) "Processing Mods" else "Batch Repack Complete")
+        },
+        text = {
+            if (finalResult == null) {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(jobs, key = { it.job.hashedName }) { installJob ->
+                        InstallJobRow(installJob)
+                    }
+                }
+            } else {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Summary: ${finalResult!!.successfulJobs} succeeded, ${finalResult!!.failedJobs} failed.", style = MaterialTheme.typography.titleMedium)
+                    finalResult!!.command?.let {
+                        Spacer(Modifier.height(16.dp))
+                        Text("Run this command in a root shell to move all files:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(8.dp))
+                        SelectionContainer {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                    .padding(12.dp)
+                                    .fillMaxWidth()
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                clipboardManager.setText(AnnotatedString(it))
+                                Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Copy Command")
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (finalResult != null) {
+                Button(onClick = onDismiss) { Text("OK") }
+            }
+        }
+    )
+}
+
+@Composable
+fun InstallJobRow(installJob: InstallJob) {
+    Column(modifier = Modifier.padding(vertical = 8.dp)) {
+        Text("Target: ${installJob.job.hashedName.take(12)}...", style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val statusIcon = when (installJob.status) {
+                is JobStatus.Pending -> Icons.Default.Schedule
+                is JobStatus.Downloading -> Icons.Default.Download
+                is JobStatus.Installing -> Icons.Default.Build
+                is JobStatus.Finished -> Icons.Default.CheckCircle
+                is JobStatus.Failed -> Icons.Default.Error
+            }
+            Icon(statusIcon, contentDescription = "Status", modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                val progressMessage = when (val status = installJob.status) {
+                    is JobStatus.Downloading -> status.progressMessage
+                    is JobStatus.Installing -> status.progressMessage
+                    is JobStatus.Failed -> status.error
+                    is JobStatus.Finished -> "Finished successfully!"
+                    is JobStatus.Pending -> "Waiting in queue..."
+                }
+                Text(progressMessage, style = MaterialTheme.typography.bodySmall)
+                if (installJob.status is JobStatus.Downloading || installJob.status is JobStatus.Installing) {
+                    Spacer(Modifier.height(4.dp))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+            }
+        }
+    }
+}
+
 
 @Composable
 fun UninstallConfirmationDialog(
@@ -229,113 +311,6 @@ fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
     )
 }
 
-@Composable
-fun InstallDialog(state: InstallState, onDismiss: () -> Unit, onProvideFile: () -> Unit, onDownload: () -> Unit) {
-    if (state is InstallState.Idle) return
-
-    val clipboardManager = LocalClipboardManager.current
-    val context = LocalContext.current
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = {
-            when (state) {
-                is InstallState.AwaitingOriginalFile -> Icon(Icons.AutoMirrored.Filled.Help, contentDescription = "Awaiting File")
-                is InstallState.Finished -> Icon(Icons.Default.CheckCircle, contentDescription = "Success")
-                is InstallState.Failed -> Icon(Icons.Default.Error, contentDescription = "Failed")
-                is InstallState.Installing -> Icon(Icons.Default.Build, contentDescription = "Installing")
-                else -> {}
-            }
-        },
-        title = {
-            val text = when (state) {
-                is InstallState.AwaitingOriginalFile -> "Original File Needed"
-                is InstallState.Finished -> "Repack Successful!"
-                is InstallState.Failed -> "Installation Failed"
-                is InstallState.Installing -> "Processing..."
-                else -> ""
-            }
-            Text(text)
-        },
-        text = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                when (state) {
-                    is InstallState.AwaitingOriginalFile -> {
-                        Text("To repack mods for group:", textAlign = TextAlign.Center)
-                        Text(state.job.hashedName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 4.dp))
-                        Text("Please provide the original __data file.", textAlign = TextAlign.Center)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(onClick = onDownload) {
-                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Download from Server")
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedButton(onClick = onProvideFile) {
-                            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Select File Manually")
-                        }
-                    }
-                    is InstallState.Finished -> {
-                        val hash = state.job.hashedName
-                        val command = "mv -f /sdcard/Download/__${hash} /sdcard/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hash/*/__data"
-
-                        Text("New file saved to Downloads folder as __${hash}.", textAlign = TextAlign.Center)
-                        Spacer(Modifier.height(16.dp))
-                        Text("For advanced users, run this command in a root shell to move the file:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-                        Spacer(Modifier.height(8.dp))
-
-                        SelectionContainer {
-                            Text(
-                                text = command,
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                                    .padding(12.dp)
-                                    .fillMaxWidth()
-                            )
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                clipboardManager.setText(AnnotatedString(command))
-                                Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
-                            }
-                        ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Copy Command")
-                        }
-                    }
-                    is InstallState.Failed -> Text(state.error, textAlign = TextAlign.Center)
-                    is InstallState.Installing -> {
-                        Text("Processing group: ${state.job.hashedName}", textAlign = TextAlign.Center)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(state.progressMessage, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-                    }
-                    else -> {}
-                }
-            }
-        },
-        confirmButton = {
-            when (state) {
-                is InstallState.AwaitingOriginalFile -> {
-                }
-                is InstallState.Finished, is InstallState.Failed -> Button(onClick = onDismiss) { Text("OK") }
-                else -> {}
-            }
-        },
-        dismissButton = {
-             if (state is InstallState.AwaitingOriginalFile) {
-                 TextButton(onClick = onDismiss) { Text("Cancel") }
-             }
-        }
-    )
-}
-
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ModScreen(
@@ -367,7 +342,7 @@ fun ModScreen(
         floatingActionButton = {
             AnimatedVisibility(visible = selectedMods.isNotEmpty()) {
                 ExtendedFloatingActionButton(
-                    onClick = { viewModel.initiateBatchRepack() },
+                    onClick = { viewModel.initiateBatchRepack(context) },
                     icon = { Icon(Icons.Default.Done, contentDescription = "Repack") },
                     text = { Text("Repack Selected") }
                 )
