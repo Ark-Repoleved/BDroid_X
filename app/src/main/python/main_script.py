@@ -7,6 +7,31 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "vendor"))
 from repacker.repacker import repack_bundle
 import character_scraper
 import cdn_downloader
+from unpacker import unpack_bundle as unpacker_main
+
+def unpack_bundle(bundle_path: str, output_dir: str, progress_callback=None):
+    """
+    Entry point for Kotlin to unpack a bundle.
+    Returns a tuple: (success: Boolean, message: String)
+    """
+    try:
+        # The progress callback will handle printing.
+        success, message = unpacker_main(
+            bundle_path=bundle_path,
+            output_dir=output_dir,
+            progress_callback=progress_callback
+        )
+        
+        print(message)
+        return success, message
+            
+    except Exception as e:
+        import traceback
+        error_message = traceback.format_exc()
+        print(f"An error occurred during unpack: {error_message}")
+        if progress_callback:
+            progress_callback(f"An error occurred: {e}")
+        return False, error_message
 
 def download_bundle(hashed_name, quality, output_dir, progress_callback=None):
     """
