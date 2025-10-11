@@ -43,6 +43,9 @@ import com.example.bd2modmanager.ui.viewmodel.*
 import com.example.bd2modmanager.utils.SafManager
 import com.valentinilk.shimmer.shimmer
 
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.text.style.TextOverflow
+
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
@@ -55,6 +58,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             BD2ModManagerTheme {
                 var uninstallConfirmationTarget by remember { mutableStateOf<String?>(null) }
+                var showUnpackDialog by remember { mutableStateOf(false) }
 
                 val modSourceDirLauncher = rememberLauncherForActivityResult(
                     contract = SafManager.PickDirectoryWithSpecialAccess(),
@@ -73,7 +77,8 @@ class MainActivity : ComponentActivity() {
                     ModScreen(
                         viewModel = viewModel,
                         onSelectModSource = { modSourceDirLauncher.launch(Unit) },
-                        onUninstallRequest = { hash -> uninstallConfirmationTarget = hash }
+                        onUninstallRequest = { hash -> uninstallConfirmationTarget = hash },
+                        onUnpackRequest = { showUnpackDialog = true }
                     )
                 }
 
@@ -101,9 +106,123 @@ class MainActivity : ComponentActivity() {
                         uninstallConfirmationTarget = null
                     }
                 )
+
+                if (showUnpackDialog) {
+                    UnpackDialog(
+                        viewModel = viewModel,
+                        onDismiss = { showUnpackDialog = false }
+                    )
+                }
             }
         }
     }
+}
+
+@Composable
+fun SelectionRow(label: String, value: String, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp, horizontal = 4.dp)
+    ) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.width(8.dp))
+            Icon(Icons.Default.FolderOpen, contentDescription = "Select", tint = MaterialTheme.colorScheme.secondary)
+        }
+    }
+}
+
+@Composable
+fun UnpackDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val unpackState by viewModel.unpackState.collectAsState()
+    val inputFile by viewModel.unpackInputFile.collectAsState()
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = { uri ->
+            uri?.let { viewModel.setUnpackInputFile(it) }
+        }
+    )
+
+    AlertDialog(
+        onDismissRequest = {
+            if (unpackState !is UnpackState.Unpacking) {
+                viewModel.resetUnpackState()
+                onDismiss()
+            }
+        },
+        icon = { Icon(Icons.Default.Unarchive, contentDescription = "Unpack Bundle") },
+        title = { Text("Unpack Bundle") },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                when (val state = unpackState) {
+                    is UnpackState.Idle -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            SelectionRow(
+                                label = "Input File:",
+                                value = inputFile?.lastPathSegment ?: "Not selected",
+                                onClick = { filePickerLauncher.launch(arrayOf("*/*")) }
+                            )
+                            Text("Output will be saved to Download/outputs/", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    is UnpackState.Unpacking -> {
+                        Text("Unpacking in progress...", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(16.dp))
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(16.dp))
+                        Text(state.progressMessage, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                    }
+                    is UnpackState.Finished -> {
+                        Icon(Icons.Default.CheckCircle, contentDescription = "Success", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp))
+                        Spacer(Modifier.height(16.dp))
+                        Text("Success!", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text(state.message, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    is UnpackState.Failed -> {
+                        Icon(Icons.Default.Error, contentDescription = "Failed", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(48.dp))
+                        Spacer(Modifier.height(16.dp))
+                        Text("Operation Failed", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text(state.error, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (unpackState is UnpackState.Idle) {
+                Button(
+                    onClick = { viewModel.initiateUnpack(context) },
+                    enabled = inputFile != null
+                ) {
+                    Text("Unpack")
+                }
+            }
+        },
+        dismissButton = {
+            if (unpackState !is UnpackState.Unpacking) {
+                TextButton(onClick = {
+                    viewModel.resetUnpackState()
+                    onDismiss()
+                }) {
+                    Text("Close")
+                }
+            }
+        }
+    )
 }
 
 @Composable
@@ -342,7 +461,8 @@ fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
 fun ModScreen(
     viewModel: MainViewModel,
     onSelectModSource: () -> Unit,
-    onUninstallRequest: (String) -> Unit
+    onUninstallRequest: (String) -> Unit,
+    onUnpackRequest: () -> Unit
 ) {
     val modSourceDirectoryUri by viewModel.modSourceDirectoryUri.collectAsState()
     val modsList by viewModel.modsList.collectAsState()
@@ -366,12 +486,21 @@ fun ModScreen(
 
     Scaffold(
         floatingActionButton = {
-            AnimatedVisibility(visible = selectedMods.isNotEmpty()) {
-                ExtendedFloatingActionButton(
-                    onClick = { viewModel.initiateBatchRepack(context) },
-                    icon = { Icon(Icons.Default.Done, contentDescription = "Repack") },
-                    text = { Text("Repack Selected") }
-                )
+            Box {
+                AnimatedVisibility(visible = modSourceDirectoryUri != null && selectedMods.isEmpty()) {
+                    FloatingActionButton(
+                        onClick = onUnpackRequest,
+                    ) {
+                        Icon(Icons.Default.Unarchive, contentDescription = "Unpack Bundle")
+                    }
+                }
+                AnimatedVisibility(visible = selectedMods.isNotEmpty()) {
+                    ExtendedFloatingActionButton(
+                        onClick = { viewModel.initiateBatchRepack(context) },
+                        icon = { Icon(Icons.Default.Done, contentDescription = "Repack") },
+                        text = { Text("Repack Selected") }
+                    )
+                }
             }
         }
     ) { padding ->
