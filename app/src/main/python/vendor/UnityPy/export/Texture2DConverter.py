@@ -5,7 +5,10 @@ from io import BytesIO
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
-import astc_encoder
+try:
+    import astc_encoder
+except ImportError:
+    astc_encoder = None
 import texture2ddecoder
 from PIL import Image
 
@@ -354,6 +357,10 @@ def atc(image_data: bytes, width: int, height: int, alpha: bool) -> Image.Image:
 
 
 def astc(image_data: bytes, width: int, height: int, block_size: tuple) -> Image.Image:
+    if not astc_encoder:
+        print("WARNING: astc_encoder module not found. Returning a black placeholder image.")
+        return Image.new("RGBA", (width, height), (0, 0, 0, 255))
+
     image = astc_encoder.ASTCImage(astc_encoder.ASTCType.U8, width, height, 1)
     texture_size = calculate_astc_compressed_size(width, height, block_size)
     if len(image_data) < texture_size:
