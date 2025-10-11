@@ -401,7 +401,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 val tempModsList = mutableListOf<ModInfo>()
                 val files = DocumentFile.fromTreeUri(context, dirUri)?.listFiles() ?: emptyArray()
 
-                files.forEach { file ->
+                files.filter { it.isDirectory || it.name?.endsWith(".zip", ignoreCase = true) == true }
+                    .forEach { file ->
                     val uriString = file.uri.toString()
                     val lastModified = file.lastModified()
                     val cachedInfo = existingCache[uriString]
@@ -481,7 +482,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             val json = cacheFile.readText()
             val type = object : TypeToken<Map<String, ModCacheInfo>>() {}.type
             gson.fromJson(json, type) ?: emptyMap()
-        } catch (e: Exception) {
+        }
+        catch (e: Exception) {
             e.printStackTrace()
             emptyMap()
         }
@@ -524,12 +526,17 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         return candidates.first()
     }
 
-    private fun saveFileToDownloads(context: Context, file: File, displayName: String): Uri? {
+    private fun saveFileToDownloads(context: Context, file: File, displayName: String, subdirectory: String? = null): Uri? {
         val resolver = context.contentResolver
+        val relativePath = if (subdirectory != null) {
+            File(Environment.DIRECTORY_DOWNLOADS, subdirectory).path
+        } else {
+            Environment.DIRECTORY_DOWNLOADS
+        }
         val contentValues = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
             put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
-            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
         }
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
         uri?.let {
