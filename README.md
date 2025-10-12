@@ -73,6 +73,12 @@ Here is a typical layout, using assets for "Lathel: Dark Knight" as an example:
 
 ---
 
+## Guide Video
+
+![Guide Video](./guide_video.gif)
+
+---
+
 ## Credits
 
 The development of this application would not have been possible without the contributions of the following open-source projects and tools. Special thanks to:
