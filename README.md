@@ -76,7 +76,7 @@
 ## 操作影片
 
 <p align="center">
-  <img src="./guide_video.gif" width="480">
+  <img src="./guide_video.gif" width="240">
 </p>
 
 ---
