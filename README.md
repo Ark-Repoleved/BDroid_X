@@ -69,7 +69,7 @@ Here is a typical layout, using assets for "Lathel: Dark Knight" as an example:
     *   A: Installation can fail for a few reasons: 1) A network error occurred while downloading the original game files. 2) The mod file names are incorrect. 3) An unexpected error occurred during the repacking process. Check the error message in the dialog for more details and ensure your internet connection is stable.
 
 *   **Q: What if the graphics are corrupted after installing a mod and entering the game?**
-    *   A: This is likely because the mod is missing the `.skel` or `.json` file. A complete mod requires `.png`, `.atlas`, and `.skel` or `.json` files to function correctly.
+    *   A: This is likely because the mod itself doesn't support Android BD2, or missing the `.skel` or `.json` file. A complete mod requires `.png`, `.atlas`, and `.skel` or `.json` files to function correctly.
 
 ---
 
