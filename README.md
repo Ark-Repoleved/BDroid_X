@@ -2,78 +2,78 @@
 
 ---
 
-# BrownDust 2 Android 模組管理器
+# BrownDust 2 Android Mod Manager
 
-解包封包不用跑電腦上了。
+No need for a PC to unpack and repack.
 
 ---
 
-## 功能介紹
+## Features
 
-*   **自動掃描與分組**: 自動掃描您指定的模組資料夾，並根據模組要修改的遊戲檔案進行智慧分組。
-*   **平行處理**: 可一次選取不同分組的模組，應用程式會將所有任務同步處理，大幅提升效率。
-*   **裝置上打包**: 無需連接電腦，直接在您的手機上完成模組的解包、資源轉換 (ASTC) 和重新打包。
+*   **Automatic Scan & Grouping**: Automatically scans your specified mod folder and intelligently groups mods based on the game files they modify.
+*   **Parallel Processing**: Select mods from different groups and process them all in a single batch. The app handles everything concurrently.
+*   **On-Device Repacking**: Unpack, convert resources (ASTC), and repack mods directly on your phone without needing a computer.
 
-## 系統需求
+## System Requirements
 
-*   Android 11 或更高版本。
-*   已安裝《棕色塵埃2》官方最新版本。
+*   Android 11 or higher.
+*   The latest official version of BrownDust 2 installed.
 
-## 安裝教學
+## Installation
 
-1.  [下載](https://github.com/Ark-Repoleved/bd2-android-mod-manager/releases)本應用程式的 `.apk` 檔案。
-2.  點擊下載的 `.apk` 檔案進行安裝。
+1.  [Download](https://github.com/Ark-Repoleved/bd2-android-mod-manager/releases) the `.apk` file for this application.
+2.  Tap the downloaded `.apk` file to install.
 
-## 首次使用設定
+## First-Time Setup
 
-在您開始安裝模組前，需要先完成一個授權步驟：
+Before you can start installing mods, you need to complete a one-time authorization step:
 
-1.  開啟 App，您會看到一個歡迎畫面。
-2.  點擊 **「Select Mod Source Folder」** 按鈕。
-3.  在跳出的檔案選擇器中，導覽至您存放模組檔案 (例如 `.zip` 壓縮檔或已經解壓縮的資料夾) 的位置，然後點擊 **「使用這個資料夾」**。
-    *   *建議：* 您可以在手機儲存空間中建立一個名為 `BD2_Mods` 的資料夾，將所有下載的模組都放在這裡。
+1.  Open the app, and you will see a welcome screen.
+2.  Tap the **"Select Mod Source Folder"** button.
+3.  In the file picker that appears, navigate to where you store your mod files (e.g., `.zip` archives or extracted folders), and then tap **"Use this folder"**.
+    *   *Recommendation:* Create a folder named `BD2_Mods` in your phone's storage and place all your downloaded mods there.
 
-## 資料夾與 .zip 結構規範
+## Folder/.zip Structure
 
-為了確保模組能成功安裝，請將每個模組放置於 `BD2_Mods/` 路徑下各自獨立的資料夾或 `.zip` 壓縮檔中。檔案名稱必須與遊戲內部 Unity bundles 中使用的資產名稱完全一致。
+For mods to be installed successfully, each mod must be placed within its own dedicated folder or`.zip` file inside the `BD2_Mods/` directory. The filenames within your mod folder **must** exactly match the original asset names used in the game's Unity bundles.
 
-一個典型的檔案結構如下，此處以「Lathel: Dark Knight」的角色資產為例：
+Here is a typical layout, using assets for "Lathel: Dark Knight" as an example:
 
 ```
 📁 BD2_Mods/
 ├── 📁 Lathel_IDLE/
-│   ├── 📄 char000104.skel (或 .json)  # Spine 骨架檔案
-│   ├── 📄 char000104.atlas            # Atlas 材質貼圖集定義檔
-│   └── 🖼️ char000104.png              # 材質貼圖圖片
+│   ├── 📄 char000104.skel (or.json)  # The Spine skeleton data
+│   ├── 📄 char000104.atlas           # The atlas mapping file
+│   └── 🖼️ char000104.png             # The texture atlas image(s)
 │
 └── 📁 another_mod/
-    └── ... (其他模組檔案)
+    └── ... (other mod files)
 ```
 
-## 如何安裝模組
+## How to Install Mods
 
-1.  **選擇模組**: 在主畫面的列表中，勾選您想要安裝的一或多個模組。您現在可以同時選取屬於不同分組 (Target) 的模組。
-2.  **開始打包**: 點擊右下角的 **打勾 (✓)** 浮動按鈕。
-3.  **自動下載與打包**: 一個新的對話方塊會出現，即時顯示每一個模組群組的處理進度。應用程式會自動從官方伺服器為每個群組下載最新的原始遊戲檔案，並在背景平行處理所有打包任務。
-4.  **手動替換檔案**:
-    *   安裝成功後，新的、修改過的 `__data` 檔案會被儲存到您手機的 **`Download` (下載)** 資料夾中，檔名為 `__[hashed_name]`。
-    *   **您需要手動將這個檔案複製或移動到遊戲的對應資料夾中，覆蓋掉原始的 `__data` 檔案。**
-    *   您可以使用第三方檔案管理器 (需要特殊權限) 來完成此操作。對話框中會提供一鍵複製的 ADB 指令，可以透過 [ShizuTools](https://github.com/legendsayantan/ShizuTools) 在手機中執行自動替換指令。
+1.  **Select Mods**: On the main screen list, check one or more mods you want to install. You can now select mods from different groups (Targets) at the same time.
+2.  **Start Repacking**: Tap the floating action button with the **check mark (✓)** at the bottom right.
+3.  **Automatic Download & Repack**: A new dialog will appear, showing the live progress for each mod group. The app automatically downloads the latest original game files for each group from the official servers and repacks your selected mods in parallel.
+4.  **Manually Replace the File**:
+    *   After a successful installation, a new, modified `__data` file will be saved to your phone's **`Download`** folder with the filename `__[hashed_name]`.
+    *   **You need to manually copy or move this file to the corresponding game folder, overwriting the original `__data` file.**
+    *   You can use a third-party file manager (with special permissions) to do this. The dialog will provide a one-click ADB command that can be executed via [ShizuTools](https://github.com/legendsayantan/ShizuTools) to automate the replacement.
 
-## 常見問題
+## FAQ
 
-*   **Q: 為什麼 App 沒顯示我的模組？**
-    *   A: 請確認您已正確選擇了存放模組的「模組來源資料夾」。同時，請確保您的模組是 `.zip` 格式或已解壓縮的資料夾。
+*   **Q: Why aren't my mods showing up in the app?**
+    *   A: Please ensure you have correctly selected the "Mod Source Folder". Also, make sure your mods are in `.zip` format or are unzipped folders.
 
-*   **Q: 安裝失敗了怎麼辦？**
-    *   A: 安裝失敗可能由幾個原因造成： 1) 下載原始遊戲檔案時發生網路錯誤。 2) 模組檔案名稱不正確。 3) 打包過程中發生非預期的錯誤。請檢查對話方塊中顯示的錯誤訊息，並確保您的網路連線穩定。
+*   **Q: What should I do if the installation fails?**
+    *   A: Installation can fail for a few reasons: 1) A network error occurred while downloading the original game files. 2) The mod file names are incorrect. 3) An unexpected error occurred during the repacking process. Check the error message in the dialog for more details and ensure your internet connection is stable.
 
-*   **Q: 安裝完模組進到遊戲後發現畫面出錯了怎麼辦？**
-    *   A: 這很可能是因為模組缺少了 `.skel` 或 `.json` 檔案。一個完整的模組需要包含 `.png`、`.atlas` 和 `.skel` 或 `.json` 三種檔案才能正常運作。
+*   **Q: What if the graphics are corrupted after installing a mod and entering the game?**
+    *   A: This is likely because the mod is missing the `.skel` or `.json` file. A complete mod requires `.png`, `.atlas`, and `.skel` or `.json` files to function correctly.
 
 ---
 
-## 操作影片
+## Guide Video
 
 <p align="center">
   <img src="./guide_video.gif" width="240">
@@ -81,11 +81,11 @@
 
 ---
 
-## 致謝
+## Credits
 
-本應用程式的開發離不開以下開源專案和工具的貢獻，特此感謝：
+The development of this application would not have been possible without the contributions of the following open-source projects and tools. Special thanks to:
 
-*   **[browndust2-repacker-android](https://codeberg.org/kxdekxde/browndust2-repacker-android)**: 提供重新打包 `__data` 檔案的核心技術，包括 ASTC 紋理壓縮和 LZ4 壓縮的處理方法。
-*   **[ReDustX](https://github.com/Jelosus2/ReDustX)**: 提供將 `.json` 轉換成 `.skel` 與從伺服器下載原始 `__data` 檔案的核心技術。
-*   **[UnityPy](https://github.com/K0lb3/UnityPy)**: Python 函式庫，是讀取、修改和儲存 Unity 遊戲資產的基礎。
-*   **[ARM-software/astc-encoder](https://github.com/ARM-software/astc-encoder)**: ARM 官方提供的 ASTC 紋理編碼器，用於將模組紋理轉換為與遊戲相容的格式。
+*   **[browndust2-repacker-android](https://codeberg.org/kxdekxde/browndust2-repacker-android)**: Provided the core techniques for repacking `__data` files, including handling ASTC texture compression and LZ4 compression.
+*   **[ReDustX](https://github.com/Jelosus2/ReDustX)**: Provided the core techniques for `.json` to `.skel` mechanism and download Original `__data` file from game's CDN.
+*   **[UnityPy](https://github.com/K0lb3/UnityPy)**: A Python library that is fundamental for reading, modifying, and saving Unity game assets.
+*   **[ARM-software/astc-encoder](https://github.com/ARM-software/astc-encoder)**: The official ASTC texture encoder from ARM, used to convert mod textures into a format compatible with the game system.
