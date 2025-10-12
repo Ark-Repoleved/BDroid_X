@@ -73,12 +73,6 @@ Here is a typical layout, using assets for "Lathel: Dark Knight" as an example:
 
 ---
 
-## Guide Video
-
-https://github.com/Ark-Repoleved/bd2-android-mod-manager/blob/main/guide_video.mp4
-
----
-
 ## Credits
 
 The development of this application would not have been possible without the contributions of the following open-source projects and tools. Special thanks to:
