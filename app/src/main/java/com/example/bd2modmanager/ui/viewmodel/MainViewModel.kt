@@ -12,6 +12,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.chaquo.python.Python
 import com.example.bd2modmanager.service.ModdingService
+import com.example.bd2modmanager.SpinePreviewActivity
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
@@ -699,5 +700,78 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     private fun extractFileId(entryName: String): String? {
         return "(char\\d{6}|illust_dating\\d+|illust_special\\d+|illust_talk\\d+|npc\\d+|specialillust\\w+|storypack\\w+|\\bRhythmHitAnim\\b)".toRegex(RegexOption.IGNORE_CASE).find(entryName)?.value?.lowercase()
+    }
+
+    fun prepareAndShowPreview(context: Context, modInfo: ModInfo) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val tempDir = File(context.cacheDir, "spine_preview_${System.currentTimeMillis()}")
+            if (!tempDir.mkdirs()) {
+                // Handle error: failed to create directory
+                return@launch
+            }
+
+            var skelPath: String? = null
+            var atlasPath: String? = null
+
+            try {
+                if (modInfo.isDirectory) {
+                    val sourceDir = DocumentFile.fromTreeUri(context, modInfo.uri)
+                    sourceDir?.listFiles()?.forEach { file ->
+                        val fileName = file.name ?: ""
+                        if (fileName.endsWith(".skel") || fileName.endsWith(".json") || fileName.endsWith(".atlas") || fileName.endsWith(".png")) {
+                            val destFile = File(tempDir, fileName)
+                            context.contentResolver.openInputStream(file.uri)?.use { input ->
+                                destFile.outputStream().use { output ->
+                                    input.copyTo(output)
+                                }
+                            }
+                            if (fileName.endsWith(".skel") || fileName.endsWith(".json")) {
+                                skelPath = destFile.absolutePath
+                            } else if (fileName.endsWith(".atlas")) {
+                                atlasPath = destFile.absolutePath
+                            }
+                        }
+                    }
+                } else { // It's a zip file
+                    context.contentResolver.openInputStream(modInfo.uri)?.use { fis ->
+                        ZipInputStream(fis).use { zis ->
+                            var entry = zis.nextEntry
+                            while (entry != null) {
+                                val fileName = entry.name.substringAfterLast('/')
+                                if (fileName.endsWith(".skel") || fileName.endsWith(".json") || fileName.endsWith(".atlas") || fileName.endsWith(".png")) {
+                                    val destFile = File(tempDir, fileName)
+                                    destFile.outputStream().use { fos -> zis.copyTo(fos) }
+
+                                    if (fileName.endsWith(".skel") || fileName.endsWith(".json")) {
+                                        skelPath = destFile.absolutePath
+                                    } else if (fileName.endsWith(".atlas")) {
+                                        atlasPath = destFile.absolutePath
+                                    }
+                                }
+                                entry = zis.nextEntry
+                            }
+                        }
+                    }
+                }
+
+                if (skelPath != null && atlasPath != null) {
+                    withContext(Dispatchers.Main) {
+                        val intent = Intent(context, SpinePreviewActivity::class.java).apply {
+                            putExtra("skelPath", skelPath)
+                            putExtra("atlasPath", atlasPath)
+                            putExtra("tempDirPath", tempDir.absolutePath)
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        context.startActivity(intent)
+                    }
+                } else {
+                    // Handle error: necessary files not found in mod
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                // Cleanup in case of error
+                tempDir.deleteRecursively()
+            }
+        }
     }
 }
