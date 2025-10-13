@@ -45,6 +45,8 @@ import com.valentinilk.shimmer.shimmer
 
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 
 class MainActivity : ComponentActivity() {
 
@@ -575,7 +577,8 @@ fun ModScreen(
                                     ModCard(
                                         modInfo = modInfo,
                                         isSelected = modInfo.uri in selectedMods,
-                                        onToggleSelection = { viewModel.toggleModSelection(modInfo.uri) }
+                                        onToggleSelection = { viewModel.toggleModSelection(modInfo.uri) },
+                                        onLongPress = { viewModel.prepareAndShowPreview(context, modInfo) }
                                     )
                                 }
                             }
@@ -642,9 +645,9 @@ fun EmptyModsScreen() {
     }
 }
 
-
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit) {
+fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit, onLongPress: () -> Unit) {
     val elevation by animateDpAsState(if (isSelected) 4.dp else 1.dp, label = "elevation")
     ElevatedCard(
         elevation = CardDefaults.cardElevation(defaultElevation = elevation),
@@ -652,7 +655,12 @@ fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 2.dp)
             .clip(CardDefaults.shape)
-            .clickable(onClick = onToggleSelection)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onToggleSelection() },
+                    onLongPress = { onLongPress() }
+                )
+            }
     ) {
         Row(
             modifier = Modifier.padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
