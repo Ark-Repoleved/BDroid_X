@@ -13,6 +13,8 @@ No need for a PC to unpack and repack.
 *   **Automatic Scan & Grouping**: Automatically scans your specified mod folder and intelligently groups mods based on the game files they modify.
 *   **Parallel Processing**: Select mods from different groups and process them all in a single batch. The app handles everything concurrently.
 *   **On-Device Repacking**: Unpack, convert resources (ASTC), and repack mods directly on your phone without needing a computer.
+*   **Spine Animation Preview**: Long-press any mod in the list to open a live preview of the Spine animation before installation.
+*   **Standalone Bundle Unpacker**: A utility for advanced users to unpack any game asset bundle (`__data` file) directly on your device.
 
 ## System Requirements
 
@@ -59,6 +61,25 @@ Here is a typical layout, using assets for "Lathel: Dark Knight" as an example:
     *   After a successful installation, a new, modified `__data` file will be saved to your phone's **`Download`** folder with the filename `__[hashed_name]`.
     *   **You need to manually copy or move this file to the corresponding game folder, overwriting the original `__data` file.**
     *   You can use a third-party file manager (with special permissions) to do this. The dialog will provide a one-click ADB command that can be executed via [ShizuTools](https://github.com/legendsayantan/ShizuTools) to automate the replacement.
+
+## Other Features
+
+### Spine Animation Preview
+
+To ensure a mod looks right before you install it, you can preview its animation directly.
+
+1.  Find the mod you want to check in the main list.
+2.  **Long-press** on the mod's card.
+3.  A new screen will open, playing the `.skel` or `.json` animation.
+
+### Standalone Bundle Unpacker
+
+This tool allows you to extract the contents of any Unity bundle file from the game.
+
+1.  On the main screen, ensure no mods are selected.
+2.  Tap the floating action button with the **unarchive (📤)** icon at the bottom right.
+3.  Select the `__data` file you wish to unpack.
+4.  The contents will be extracted to your phone's **`Download/outputs`** folder.
 
 ## FAQ
 
