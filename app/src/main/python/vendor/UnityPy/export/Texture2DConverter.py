@@ -5,6 +5,14 @@ from io import BytesIO
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 
+# Modified: Import the custom decompressor
+
+try:
+    from unpacker import decompress_astc_ctypes
+except ImportError:
+    print("WARNING: Could not import decompress_astc_ctypes from unpacker. ASTC decompression will fail.")
+    decompress_astc_ctypes = None
+
 try:
     import astc_encoder
 except ImportError:
@@ -357,21 +365,18 @@ def atc(image_data: bytes, width: int, height: int, alpha: bool) -> Image.Image:
 
 
 def astc(image_data: bytes, width: int, height: int, block_size: tuple) -> Image.Image:
-    if not astc_encoder:
-        print("WARNING: astc_encoder module not found. Returning a black placeholder image.")
+    if not decompress_astc_ctypes:
+        print("WARNING: decompress_astc_ctypes not available. Returning a black placeholder image.")
         return Image.new("RGBA", (width, height), (0, 0, 0, 255))
 
-    image = astc_encoder.ASTCImage(astc_encoder.ASTCType.U8, width, height, 1)
-    texture_size = calculate_astc_compressed_size(width, height, block_size)
-    if len(image_data) < texture_size:
-        raise ValueError(f"Invalid ASTC data size: {len(image_data)} < {texture_size}")
+    block_x, block_y = block_size
+    decompressed_data, err = decompress_astc_ctypes(image_data, width, height, block_x, block_y)
 
-    context, lock = get_astc_context(block_size)
-    with lock:
-        context.decompress(image_data[:texture_size], image, astc_encoder.ASTCSwizzle.from_str("RGBA"))
-    assert image.data is not None, "Decompression failed, image data is None"
+    if err:
+        print(f"ERROR: ctypes ASTC decompression failed: {err}")
+        return Image.new("RGBA", (width, height), (0, 0, 0, 255))
 
-    return Image.frombytes("RGBA", (width, height), image.data, "raw", "RGBA")
+    return Image.frombytes("RGBA", (width, height), decompressed_data, "raw", "RGBA")
 
 
 ASTC_CONTEXTS: Dict[Tuple[int, int], Tuple[astc_encoder.ASTCContext, Lock]] = {}
