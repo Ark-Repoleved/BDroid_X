@@ -121,14 +121,6 @@ function onLoaded(loader, res) {
     }
 
     const skeleton = new PIXI.spine.Spine(spineResource.spineData);
-    skeleton.position.set(app.view.width / 2, app.view.height / 2);
-
-    const scale = +zoomInput.value / 100;
-    skeleton.scale.set(scale, scale);
-    skeleton.state.timeScale = +speedInput.value;
-    skeleton.state.data.defaultMix = +mixInput.value;
-    skeleton.autoUpdate = true;
-
     app.stage.addChild(skeleton);
 
     // Populate skins
@@ -173,6 +165,8 @@ function onLoaded(loader, res) {
         li.append(input, label);
         animationList.append(li);
     });
+
+    resetPosition();
 }
 
 // --- Event Listeners (from listener.js) ---
