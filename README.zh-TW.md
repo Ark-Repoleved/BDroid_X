@@ -62,6 +62,14 @@
     *   **您需要手動將這個檔案複製或移動到遊戲的對應資料夾中，覆蓋掉原始的 `__data` 檔案。**
     *   您可以使用第三方檔案管理器 (需要特殊權限) 來完成此操作。對話框中會提供一鍵複製的 ADB 指令，可以透過 [ShizuTools](https://github.com/legendsayantan/ShizuTools) 在手機中執行自動替換指令。
 
+## 操作影片
+
+<p align="center">
+  <img src="./guide_video.gif" width="240">
+</p>
+
+---
+
 ## 其他功能
 
 ### Spine 動畫預覽
@@ -91,14 +99,6 @@
 
 *   **Q: 安裝完模組進到遊戲後發現畫面出錯了怎麼辦？**
     *   A: 這很可能是因為模組本身不支援安卓版 BD2，或是缺少了 `.skel` 或 `.json` 檔案。一個完整的模組需要包含 `.png`、`.atlas` 和 `.skel` 或 `.json` 三種檔案才能正常運作。
-
----
-
-## 操作影片
-
-<p align="center">
-  <img src="./guide_video.gif" width="240">
-</p>
 
 ---
 
