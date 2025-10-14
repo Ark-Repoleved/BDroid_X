@@ -68,8 +68,6 @@
   <img src="./guide_video.gif" width="240">
 </p>
 
----
-
 ## 其他功能
 
 ### Spine 動畫預覽
