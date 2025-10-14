@@ -74,7 +74,7 @@ To ensure a mod looks right before you install it, you can preview its animation
 
 ### Standalone Bundle Unpacker
 
-This tool allows you to extract the contents of any Unity bundle file from the game.
+This tool allows you to extract bundles file from the game.
 
 1.  On the main screen, ensure no mods are selected.
 2.  Tap the floating action button with the **unarchive (📤)** icon at the bottom right.
