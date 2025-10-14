@@ -62,6 +62,12 @@ Here is a typical layout, using assets for "Lathel: Dark Knight" as an example:
     *   **You need to manually copy or move this file to the corresponding game folder, overwriting the original `__data` file.**
     *   You can use a third-party file manager (with special permissions) to do this. The dialog will provide a one-click ADB command that can be executed via [ShizuTools](https://github.com/legendsayantan/ShizuTools) to automate the replacement.
 
+## Guide Video
+
+<p align="center">
+  <img src="./guide_video.gif" width="240">
+</p>
+
 ## Other Features
 
 ### Spine Animation Preview
@@ -91,14 +97,6 @@ This tool allows you to extract bundles file from the game.
 
 *   **Q: What if the graphics are corrupted after installing a mod and entering the game?**
     *   A: This is likely because the mod itself doesn't support Android BD2, or missing the `.skel` or `.json` file. A complete mod requires `.png`, `.atlas`, and `.skel` or `.json` files to function correctly.
-
----
-
-## Guide Video
-
-<p align="center">
-  <img src="./guide_video.gif" width="240">
-</p>
 
 ---
 
