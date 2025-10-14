@@ -282,12 +282,15 @@ function setupEventListeners() {
     // Panel Collapse Logic
     const mainPanel = getById('main');
     const toggleButton = getById('toggle-button');
+    const updateButtonText = () => {
+        toggleButton.innerText = mainPanel.classList.contains('side-collapsed') ? '‹' : '›';
+    };
     toggleButton.addEventListener('click', () => {
         mainPanel.classList.toggle('side-collapsed');
-        toggleButton.innerText = mainPanel.classList.contains('side-collapsed') ? '>' : '<';
+        updateButtonText();
     });
     // Set initial state for toggle button text
-    toggleButton.innerText = mainPanel.classList.contains('side-collapsed') ? '>' : '<';
+    updateButtonText();
 }
 
 // --- Main Loading Logic ---
