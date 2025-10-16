@@ -531,7 +531,7 @@ fun ModScreen(
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background)
                             ) {
                                 Box(
-                                    modifier = Modifier.size(48.dp),
+                                    modifier = Modifier.size(width = 48.dp, height = 40.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     val allModsCount = modsList.size
@@ -549,7 +549,9 @@ fun ModScreen(
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             ElevatedCard(
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier
+                                    .height(40.dp)
+                                    .weight(1f),
                                 shape = RoundedCornerShape(16.dp)
                             ) {
                                 Row(
