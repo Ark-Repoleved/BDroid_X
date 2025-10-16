@@ -5,7 +5,7 @@ import com.chaquo.python.Python
 
 object ModdingService {
 
-    fun downloadBundle(hashedName: String, quality: String, outputDir: String, onProgress: (String) -> Unit): Pair<Boolean, String> {
+    fun downloadBundle(hashedName: String, quality: String, outputDir: String, cacheKey: String, onProgress: (String) -> Unit): Pair<Boolean, String> {
         return try {
             val py = Python.getInstance()
             val mainScript = py.getModule("main_script")
@@ -15,6 +15,7 @@ object ModdingService {
                 hashedName,
                 quality,
                 outputDir,
+                cacheKey,
                 PyObject.fromJava(onProgress)
             ).asList()
 
