@@ -119,6 +119,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _selectedMods = MutableStateFlow<Set<Uri>>(emptySet())
     val selectedMods: StateFlow<Set<Uri>> = _selectedMods.asStateFlow()
 
+    val useAstc: StateFlow<Boolean> = savedStateHandle.getStateFlow("use_astc", false)
+
     // --- New State Management for Parallel Installation ---
     private val _installJobs = MutableStateFlow<List<InstallJob>>(emptyList())
     val installJobs: StateFlow<List<InstallJob>> = _installJobs.asStateFlow()
@@ -207,6 +209,10 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             scanModSourceDirectory(context, uri)
         }
+    }
+
+    fun setUseAstc(useAstc: Boolean) {
+        savedStateHandle["use_astc"] = useAstc
     }
 
     fun toggleModSelection(modUri: Uri) {
@@ -303,7 +309,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             // 3. Repack bundle
             updateJobStatus(hashedName, JobStatus.Installing("Repacking bundle..."))
             val repackedDataCache = File(context.cacheDir, "__${hashedName}")
-            val (repackSuccess, repackMessage) = ModdingService.repackBundle(originalDataCache.absolutePath, modAssetsDir.absolutePath, repackedDataCache.absolutePath) { progress ->
+            val (repackSuccess, repackMessage) = ModdingService.repackBundle(originalDataCache.absolutePath, modAssetsDir.absolutePath, repackedDataCache.absolutePath, useAstc.value) { progress ->
                 updateJobStatus(hashedName, JobStatus.Installing(progress))
             }
 
