@@ -158,7 +158,7 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
     return bytes(comp_buf), None
 
 
-def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_path: str, progress_callback=None):
+def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_path: str, use_astc: bool, progress_callback=None):
     """Repacks a Unity bundle with assets from a specified mod folder."""
     def report_progress(message):
         if progress_callback:
@@ -222,22 +222,27 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                         if obj.type.name == "Texture2D":
                             report_progress(f"{current_progress}Replacing texture: {mod_filename}")
                             data = obj.read()
-
                             pil_img = Image.open(mod_filepath).convert("RGBA")
-                            flipped_img = pil_img.transpose(Image.FLIP_TOP_BOTTOM)
-                            
-                            report_progress(f"{current_progress}Compressing texture: {mod_filename}")
-                            block_x, block_y = 4, 4
-                            compressed_data, err = compress_image_astc(flipped_img.tobytes(), pil_img.width, pil_img.height, block_x, block_y)
 
-                            if err:
-                                report_progress(f"ERROR: ASTC compression failed for {mod_filename}: {err}")
-                                continue
+                            if use_astc:
+                                flipped_img = pil_img.transpose(Image.FLIP_TOP_BOTTOM)
+                                report_progress(f"{current_progress}Compressing texture to ASTC: {mod_filename}")
+                                block_x, block_y = 4, 4
+                                compressed_data, err = compress_image_astc(flipped_img.tobytes(), pil_img.width, pil_img.height, block_x, block_y)
+
+                                if err:
+                                    report_progress(f"ERROR: ASTC compression failed for {mod_filename}: {err}")
+                                    continue
+
+                                data.m_TextureFormat = 48 # ASTC_4x4
+                                data.image_data = compressed_data
+                                data.m_CompleteImageSize = len(compressed_data)
+                            else:
+                                report_progress(f"{current_progress}Using uncompressed RGBA32 for texture: {mod_filename}")
+                                data.m_TextureFormat = 4 # RGBA32
+                                data.image = pil_img
 
                             data.m_Width, data.m_Height = pil_img.size
-                            data.m_TextureFormat = 48
-                            data.image_data = compressed_data
-                            data.m_CompleteImageSize = len(compressed_data)
                             data.m_MipCount = 1
                             data.m_StreamData.offset = 0
                             data.m_StreamData.size = 0
