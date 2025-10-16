@@ -96,7 +96,7 @@ def update_character_data(output_dir: str):
         return False, error_message
 
 
-def main(original_bundle_path: str, modded_assets_folder: str, output_path: str, progress_callback=None):
+def main(original_bundle_path: str, modded_assets_folder: str, output_path: str, use_astc: bool, progress_callback=None):
     """
     Main entry point to be called from Kotlin.
     Returns a tuple: (success: Boolean, message: String)
@@ -107,6 +107,7 @@ def main(original_bundle_path: str, modded_assets_folder: str, output_path: str,
             original_bundle_path=original_bundle_path,
             modded_assets_folder=modded_assets_folder,
             output_path=output_path,
+            use_astc=use_astc,
             progress_callback=progress_callback
         )
         
