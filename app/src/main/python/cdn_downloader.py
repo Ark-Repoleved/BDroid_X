@@ -43,55 +43,54 @@ def get_cdn_version(quality):
 
     return maintenance_response.market_info.bundle_version if quality == 'HD' else maintenance_response.market_info.bundle_version_sd
 
-def download_catalog(output_dir, quality, version, cache, lock, progress_callback=None):
-    # Check the in-memory cache first
+def download_catalog(output_dir, quality, version, cache, progress_callback=None):
+    # Check the in-memory cache first.
+    # With the Kotlin-side semaphore limiting concurrency, the overhead of a Python-side lock
+    # outweighs the benefit, as it creates a bottleneck. A small chance of redundant downloads
+    # is acceptable for better overall throughput.
     if version in cache:
         if progress_callback: progress_callback(f"Catalog for version {version} found in memory cache.")
         return cache[version], None
 
-    # If not in cache, acquire lock and check again
-    with lock:
-        # Double-check if another thread populated the cache while we were waiting for the lock
-        if version in cache:
-            if progress_callback: progress_callback(f"Catalog for version {version} found in memory cache after lock.")
-            return cache[version], None
+    # --- If not in cache, proceed with download ---
+    filename = Path(output_dir).joinpath(f"catalog_{version}.json")
 
-        # --- If still not in cache, proceed with download ---
-        filename = Path(output_dir).joinpath(f"catalog_{version}.json")
-
-        # Clean up old physical catalogs to prevent using stale data in case of script failure
-        for f in Path(output_dir).glob("catalog_*.json"):
-            try:
-                os.remove(f)
-            except OSError as e:
-                if progress_callback: progress_callback(f"Error removing old catalog {f}: {e}")
-
-        url = f"https://cdn.bd2.pmang.cloud/ServerData/Android/{quality}/{version}/catalog_alpha.json"
-        if progress_callback: progress_callback(f"Downloading new catalog from {url}...")
-        
+    # Clean up old physical catalogs to prevent using stale data in case of script failure
+    # This is now more important as we don't have a lock.
+    for f in Path(output_dir).glob("catalog_*.json"):
         try:
-            response = requests.get(url)
-            response.raise_for_status()  # Raise an exception for bad status codes
-            
-            # Save the file to disk (for debugging and future single-use cases)
-            with open(filename, 'wb') as file:
-                file.write(response.content)
-            
-            # Parse the content and store it in the cache
-            catalog_content = json.loads(response.content)
-            cache[version] = catalog_content
-            
-            if progress_callback: progress_callback("Catalog downloaded and cached successfully.")
-            return catalog_content, None
-            
-        except requests.exceptions.RequestException as e:
-            error_message = f"Failed to download catalog: {e}"
-            if progress_callback: progress_callback(error_message)
-            return None, error_message
-        except json.JSONDecodeError as e:
-            error_message = f"Failed to parse downloaded catalog JSON: {e}"
-            if progress_callback: progress_callback(error_message)
-            return None, error_message
+            os.remove(f)
+        except OSError as e:
+            if progress_callback: progress_callback(f"Error removing old catalog {f}: {e}")
+
+    url = f"https://cdn.bd2.pmang.cloud/ServerData/Android/{quality}/{version}/catalog_alpha.json"
+    if progress_callback: progress_callback(f"Downloading new catalog from {url}...")
+    
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an exception for bad status codes
+        
+        # Save the file to disk (for debugging and future single-use cases)
+        with open(filename, 'wb') as file:
+            file.write(response.content)
+        
+        # Parse the content and store it in the cache
+        catalog_content = json.loads(response.content)
+        # Note: This operation is mostly atomic in CPython, making the lack of a lock here
+        # a low-risk trade-off for performance.
+        cache[version] = catalog_content
+        
+        if progress_callback: progress_callback("Catalog downloaded and cached successfully.")
+        return catalog_content, None
+        
+    except requests.exceptions.RequestException as e:
+        error_message = f"Failed to download catalog: {e}"
+        if progress_callback: progress_callback(error_message)
+        return None, error_message
+    except json.JSONDecodeError as e:
+        error_message = f"Failed to parse downloaded catalog JSON: {e}"
+        if progress_callback: progress_callback(error_message)
+        return None, error_message
 
 def read_int32_from_byte_array(byte_array, offset):
     return struct.unpack_from('<i', byte_array, offset)[0]
