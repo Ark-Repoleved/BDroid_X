@@ -11,6 +11,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,6 +29,7 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -516,28 +518,57 @@ fun ModScreen(
             if (modSourceDirectoryUri == null) {
                 WelcomeScreen(onSelectModSource)
             } else {
-                Box(modifier = Modifier.fillMaxSize().nestedScroll(pullToRefreshState.nestedScrollConnection)) {
-                    Column(modifier = Modifier.fillMaxSize()) {
+                Box(modifier = Modifier.nestedScroll(pullToRefreshState.nestedScrollConnection)) {
+                    Column {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "Use ASTC Compression",
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            val useAstc by viewModel.useAstc.collectAsState()
-                            Switch(
-                                checked = useAstc,
-                                onCheckedChange = { viewModel.setUseAstc(it) },
-                                modifier = Modifier.scale(0.8f)
-                            )
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background)
+                            ) {
+                                Box(
+                                    modifier = Modifier.size(48.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    val allModsCount = modsList.size
+                                    val selectedModsCount = selectedMods.size
+                                    val checkboxState = when {
+                                        selectedModsCount == 0 -> ToggleableState.Off
+                                        selectedModsCount == allModsCount -> ToggleableState.On
+                                        else -> ToggleableState.Indeterminate
+                                    }
+                                    TriStateCheckbox(
+                                        state = checkboxState,
+                                        onClick = { viewModel.toggleSelectAll() }
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            ElevatedCard(
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                        Text("Use ASTC Compression", style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                    val useAstc by viewModel.useAstc.collectAsState()
+                                    Switch(
+                                        checked = useAstc,
+                                        onCheckedChange = { viewModel.setUseAstc(it) },
+                                        modifier = Modifier.scale(0.8f)
+                                    )
+                                }
+                            }
                         }
-                        HorizontalDivider()
-                        
+
                         if (isLoading && modsList.isEmpty()) {
                             ShimmerLoadingScreen()
                         } else if (modsList.isEmpty()) {
