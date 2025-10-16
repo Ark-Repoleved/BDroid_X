@@ -27,7 +27,7 @@ object ModdingService {
         }
     }
 
-    fun repackBundle(originalBundlePath: String, moddedAssetsFolder: String, outputPath: String, onProgress: (String) -> Unit): Pair<Boolean, String> {
+    fun repackBundle(originalBundlePath: String, moddedAssetsFolder: String, outputPath: String, useAstc: Boolean, onProgress: (String) -> Unit): Pair<Boolean, String> {
         return try {
             val py = Python.getInstance()
             val mainScript = py.getModule("main_script")
@@ -38,6 +38,7 @@ object ModdingService {
                 originalBundlePath,
                 moddedAssetsFolder,
                 outputPath,
+                useAstc,
                 PyObject.fromJava(onProgress)
             ).asList()
 
