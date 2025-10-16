@@ -270,22 +270,25 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 }
             }
 
+            // Generate a single cache key for this entire batch operation
+            val batchCacheKey = System.currentTimeMillis().toString()
+
             _installJobs.value.forEach { installJob ->
                 launch(Dispatchers.IO) { // Launch a concurrent coroutine for each job on an IO thread
-                    processSingleJob(context, installJob)
+                    processSingleJob(context, installJob, batchCacheKey)
                 }
             }
         }
     }
 
-    private suspend fun processSingleJob(context: Context, installJob: InstallJob) {
+    private suspend fun processSingleJob(context: Context, installJob: InstallJob, cacheKey: String) {
         val job = installJob.job
         val hashedName = job.hashedName
 
         try {
             // 1. Download original bundle
             updateJobStatus(hashedName, JobStatus.Downloading("Starting download..."))
-            val (downloadSuccess, messageOrPath) = ModdingService.downloadBundle(hashedName, "HD", context.cacheDir.absolutePath) { progress ->
+            val (downloadSuccess, messageOrPath) = ModdingService.downloadBundle(hashedName, "HD", context.cacheDir.absolutePath, cacheKey) { progress ->
                 updateJobStatus(hashedName, JobStatus.Downloading(progress))
             }
 
@@ -398,7 +401,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 if (!Python.isStarted()) {
                     Python.start(com.chaquo.python.android.AndroidPlatform(context))
                 }
-                ModdingService.downloadBundle(hashedName, "HD", context.cacheDir.absolutePath) { progress ->
+                // Use a unique cache key for the uninstall operation
+                val cacheKey = "uninstall_${System.currentTimeMillis()}"
+                ModdingService.downloadBundle(hashedName, "HD", context.cacheDir.absolutePath, cacheKey) { progress ->
                     viewModelScope.launch(Dispatchers.Main) {
                         _uninstallState.value = UninstallState.Downloading(hashedName, progress)
                     }
