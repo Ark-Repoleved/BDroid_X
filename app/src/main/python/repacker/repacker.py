@@ -13,86 +13,86 @@ import UnityPy
 # Configure UnityPy fallback version
 UnityPy.config.FALLBACK_UNITY_VERSION = '2022.3.22f1'
 
-# --- ctypes definitions for libastcenc ---
+# --- Lazy-loaded ASTC library and definitions ---
+_astcenc_lib = None
+_astcenc_structures = {}
 
-# Define enums and constants from astcenc.h
-ASTCENC_SUCCESS = 0
-ASTCENC_PRF_LDR_SRGB = 0
-ASTCENC_PRE_MEDIUM = 60.0
-ASTCENC_TYPE_U8 = 0
-ASTCENC_FLG_USE_DECODE_UNORM8 = 1 << 1
+def _load_astcenc_library():
+    """
+    Loads the astcenc library dynamically, defines ctypes structures, 
+    and sets function prototypes. This ensures the heavy library is only
+    loaded into memory when absolutely needed.
+    """
+    global _astcenc_lib
+    if _astcenc_lib is not None:
+        # Return cached library object, or None if previous load failed
+        return _astcenc_lib if _astcenc_lib else None
 
-# Define structures
-class astcenc_swizzle(Structure):
-    _fields_ = [("r", c_uint), ("g", c_uint), ("b", c_uint), ("a", c_uint)]
+    try:
+        lib = ctypes.cdll.LoadLibrary("libastcenc.so")
+    except OSError as e:
+        print(f"FATAL: Could not load libastcenc.so. Make sure it's in jniLibs. Error: {e}")
+        _astcenc_lib = False  # Mark as failed
+        return None
 
-class astcenc_config(Structure):
-    _fields_ = [
-        ("profile", c_uint),
-        ("flags", c_uint),
-        ("block_x", c_uint),
-        ("block_y", c_uint),
-        ("block_z", c_uint),
-        ("cw_r_weight", c_float),
-        ("cw_g_weight", c_float),
-        ("cw_b_weight", c_float),
-        ("cw_a_weight", c_float),
-        ("a_scale_radius", c_uint),
-        ("rgbm_m_scale", c_float),
-        ("tune_partition_count_limit", c_uint),
-        ("tune_2partition_index_limit", c_uint),
-        ("tune_3partition_index_limit", c_uint),
-        ("tune_4partition_index_limit", c_uint),
-        ("tune_block_mode_limit", c_uint),
-        ("tune_refinement_limit", c_uint),
-        ("tune_candidate_limit", c_uint),
-        ("tune_2partitioning_candidate_limit", c_uint),
-        ("tune_3partitioning_candidate_limit", c_uint),
-        ("tune_4partitioning_candidate_limit", c_uint),
-        ("tune_db_limit", c_float),
-        ("tune_mse_overshoot", c_float),
-        ("tune_2partition_early_out_limit_factor", c_float),
-        ("tune_3partition_early_out_limit_factor", c_float),
-        ("tune_2plane_early_out_limit_correlation", c_float),
-        ("tune_search_mode0_enable", c_float),
-        ("progress_callback", c_void_p), # Ignoring progress callback for now
-    ]
+    # Define enums and constants
+    _astcenc_structures['ASTCENC_SUCCESS'] = 0
+    _astcenc_structures['ASTCENC_PRF_LDR_SRGB'] = 0
+    _astcenc_structures['ASTCENC_PRE_MEDIUM'] = 60.0
+    _astcenc_structures['ASTCENC_TYPE_U8'] = 0
+    _astcenc_structures['ASTCENC_FLG_USE_DECODE_UNORM8'] = 1 << 1
 
-class astcenc_image(Structure):
-    _fields_ = [
-        ("dim_x", c_uint),
-        ("dim_y", c_uint),
-        ("dim_z", c_uint),
-        ("data_type", c_uint),
-        ("data", POINTER(c_void_p)),
-    ]
+    # Define structures
+    class astcenc_swizzle(Structure):
+        _fields_ = [("r", c_uint), ("g", c_uint), ("b", c_uint), ("a", c_uint)]
+    _astcenc_structures['astcenc_swizzle'] = astcenc_swizzle
 
-# Load the shared library
-try:
-    astcenc = ctypes.cdll.LoadLibrary("libastcenc.so")
-except OSError as e:
-    print(f"FATAL: Could not load libastcenc.so. Make sure it's in jniLibs. Error: {e}")
-    astcenc = None
+    class astcenc_config(Structure):
+        _fields_ = [
+            ("profile", c_uint), ("flags", c_uint), ("block_x", c_uint),
+            ("block_y", c_uint), ("block_z", c_uint), ("cw_r_weight", c_float),
+            ("cw_g_weight", c_float), ("cw_b_weight", c_float), ("cw_a_weight", c_float),
+            ("a_scale_radius", c_uint), ("rgbm_m_scale", c_float),
+            ("tune_partition_count_limit", c_uint), ("tune_2partition_index_limit", c_uint),
+            ("tune_3partition_index_limit", c_uint), ("tune_4partition_index_limit", c_uint),
+            ("tune_block_mode_limit", c_uint), ("tune_refinement_limit", c_uint),
+            ("tune_candidate_limit", c_uint), ("tune_2partitioning_candidate_limit", c_uint),
+            ("tune_3partitioning_candidate_limit", c_uint), ("tune_4partitioning_candidate_limit", c_uint),
+            ("tune_db_limit", c_float), ("tune_mse_overshoot", c_float),
+            ("tune_2partition_early_out_limit_factor", c_float), ("tune_3partition_early_out_limit_factor", c_float),
+            ("tune_2plane_early_out_limit_correlation", c_float), ("tune_search_mode0_enable", c_float),
+            ("progress_callback", c_void_p),
+        ]
+    _astcenc_structures['astcenc_config'] = astcenc_config
 
-if astcenc:
+    class astcenc_image(Structure):
+        _fields_ = [
+            ("dim_x", c_uint), ("dim_y", c_uint), ("dim_z", c_uint),
+            ("data_type", c_uint), ("data", POINTER(c_void_p)),
+        ]
+    _astcenc_structures['astcenc_image'] = astcenc_image
+    
     # Define function prototypes
-    astcenc.astcenc_config_init.argtypes = [c_uint, c_uint, c_uint, c_uint, c_float, c_uint, POINTER(astcenc_config)]
-    astcenc.astcenc_config_init.restype = c_int
+    lib.astcenc_config_init.argtypes = [c_uint, c_uint, c_uint, c_uint, c_float, c_uint, POINTER(astcenc_config)]
+    lib.astcenc_config_init.restype = c_int
 
-    astcenc.astcenc_context_alloc.argtypes = [POINTER(astcenc_config), c_uint, POINTER(c_void_p)]
-    astcenc.astcenc_context_alloc.restype = c_int
+    lib.astcenc_context_alloc.argtypes = [POINTER(astcenc_config), c_uint, POINTER(c_void_p)]
+    lib.astcenc_context_alloc.restype = c_int
 
-    astcenc.astcenc_compress_image.argtypes = [c_void_p, POINTER(astcenc_image), POINTER(astcenc_swizzle), POINTER(c_ubyte), c_size_t, c_uint]
-    astcenc.astcenc_compress_image.restype = c_int
+    lib.astcenc_compress_image.argtypes = [c_void_p, POINTER(astcenc_image), POINTER(astcenc_swizzle), POINTER(c_ubyte), c_size_t, c_uint]
+    lib.astcenc_compress_image.restype = c_int
 
-    astcenc.astcenc_context_free.argtypes = [c_void_p]
-    astcenc.astcenc_context_free.restype = None
+    lib.astcenc_context_free.argtypes = [c_void_p]
+    lib.astcenc_context_free.restype = None
 
-    astcenc.astcenc_get_error_string.argtypes = [c_int]
-    astcenc.astcenc_get_error_string.restype = c_char_p
+    lib.astcenc_get_error_string.argtypes = [c_int]
+    lib.astcenc_get_error_string.restype = c_char_p
 
-def get_error_string(status):
-    return astcenc.astcenc_get_error_string(status).decode('utf-8')
+    _astcenc_lib = lib
+    return _astcenc_lib
+
+def get_error_string(astcenc_lib, status):
+    return astcenc_lib.astcenc_get_error_string(status).decode('utf-8')
 
 def find_modded_asset(folder: str, filename: str) -> str:
     """Recursively search for a file in a directory, ignoring case."""
@@ -105,26 +105,35 @@ def find_modded_asset(folder: str, filename: str) -> str:
 
 def compress_image_astc(image_bytes, width, height, block_x, block_y):
     """Compresses an RGBA image using libastcenc."""
+    astcenc = _load_astcenc_library()
     if not astcenc:
-        return None, "libastcenc.so not loaded."
+        return None, "libastcenc.so could not be loaded."
+        
+    # Get constants and structures from the loaded library context
+    ASTCENC_SUCCESS = _astcenc_structures['ASTCENC_SUCCESS']
+    ASTCENC_PRF_LDR_SRGB = _astcenc_structures['ASTCENC_PRF_LDR_SRGB']
+    ASTCENC_PRE_MEDIUM = _astcenc_structures['ASTCENC_PRE_MEDIUM']
+    ASTCENC_TYPE_U8 = _astcenc_structures['ASTCENC_TYPE_U8']
+    ASTCENC_FLG_USE_DECODE_UNORM8 = _astcenc_structures['ASTCENC_FLG_USE_DECODE_UNORM8']
+    astcenc_config = _astcenc_structures['astcenc_config']
+    astcenc_image = _astcenc_structures['astcenc_image']
+    astcenc_swizzle = _astcenc_structures['astcenc_swizzle']
 
     # 1. Initialize config
     config = astcenc_config()
     quality = ASTCENC_PRE_MEDIUM
     profile = ASTCENC_PRF_LDR_SRGB
-    # IMPORTANT: Add flags based on reference script
     flags = ASTCENC_FLG_USE_DECODE_UNORM8
     status = astcenc.astcenc_config_init(profile, block_x, block_y, 1, quality, flags, byref(config))
     if status != ASTCENC_SUCCESS:
-        return None, f"astcenc_config_init failed: {get_error_string(status)}"
+        return None, f"astcenc_config_init failed: {get_error_string(astcenc, status)}"
 
     # 2. Allocate context
     context = c_void_p()
-    # Use all available CPU cores to accelerate compression.
     thread_count = os.cpu_count() or 1
     status = astcenc.astcenc_context_alloc(byref(config), thread_count, byref(context))
     if status != ASTCENC_SUCCESS:
-        return None, f"astcenc_context_alloc failed: {get_error_string(status)}"
+        return None, f"astcenc_context_alloc failed: {get_error_string(astcenc, status)}"
 
     # 3. Prepare image structure
     image_data_p = (c_void_p * 1)()
@@ -153,7 +162,7 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
     astcenc.astcenc_context_free(context)
 
     if status != ASTCENC_SUCCESS:
-        return None, f"astcenc_compress_image failed: {get_error_string(status)}"
+        return None, f"astcenc_compress_image failed: {get_error_string(astcenc, status)}"
 
     return bytes(comp_buf), None
 
