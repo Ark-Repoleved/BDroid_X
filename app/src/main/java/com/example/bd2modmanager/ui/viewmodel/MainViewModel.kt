@@ -16,7 +16,10 @@ import com.example.bd2modmanager.SpinePreviewActivity
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -272,10 +275,16 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
             // Generate a single cache key for this entire batch operation
             val batchCacheKey = System.currentTimeMillis().toString()
-
+            val semaphore = Semaphore(5) // Limit to 5 concurrent jobs
+            
             _installJobs.value.forEach { installJob ->
-                launch(Dispatchers.IO) { // Launch a concurrent coroutine for each job on an IO thread
-                    processSingleJob(context, installJob, batchCacheKey)
+                launch(Dispatchers.IO) { // Launch a coroutine for each job
+                    semaphore.acquire() // Acquire a permit before starting
+                    try {
+                        processSingleJob(context, installJob, batchCacheKey)
+                    } finally {
+                        semaphore.release() // Release the permit when done
+                    }
                 }
             }
         }
