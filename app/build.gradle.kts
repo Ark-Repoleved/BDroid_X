@@ -40,7 +40,7 @@ android {
     buildTypes {
         debug {
             ndk {
-                abiFilters.addAll(listOf("x88_64", "arm64-v8a"))
+                abiFilters.addAll(listOf("x86_64", "arm64-v8a"))
             }
         }
         release {
