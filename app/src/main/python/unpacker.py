@@ -2,8 +2,8 @@ import os
 import sys
 import ctypes
 from ctypes import *
+import gc
 
-# Add the project's vendored UnityPy to the path
 vendor_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")
 sys.path.insert(0, vendor_path)
 
@@ -14,7 +14,6 @@ except ImportError:
     print(f"Error: Could not import UnityPy. Make sure it exists in '{vendor_path}'")
     sys.exit(1)
 
-# --- ctypes definitions for libastcenc ---
 ASTCENC_SUCCESS = 0
 ASTCENC_PRF_LDR_SRGB = 0
 ASTCENC_PRE_MEDIUM = 60.0
@@ -79,7 +78,7 @@ try:
     astcenc.astcenc_get_error_string.argtypes = [c_int]
     astcenc.astcenc_get_error_string.restype = c_char_p
 except OSError as e:
-    print(f"WARNING: Could not load libastcenc.so from {lib_path}. ASTC decompression will not work. Error: {e}")
+    print(f"WARNING: Could not load libastcenc.so. ASTC decompression will not work. Error: {e}")
     astcenc = None
 
 def get_error_string(status):
@@ -103,8 +102,7 @@ def decompress_astc_ctypes(image_data, width, height, block_x, block_y):
     if status != ASTCENC_SUCCESS:
         return None, f"astcenc_context_alloc failed: {get_error_string(status)}"
 
-    # Prepare output buffer (decompressed data)
-    decompressed_size = width * height * 4  # RGBA
+    decompressed_size = width * height * 4
     decompressed_buffer = (c_ubyte * decompressed_size)()
     
     image_out_p = (c_void_p * 1)()
@@ -117,9 +115,8 @@ def decompress_astc_ctypes(image_data, width, height, block_x, block_y):
     image_out.data_type = ASTCENC_TYPE_U8
     image_out.data = image_out_p
 
-    swizzle = astcenc_swizzle(r=0, g=1, b=2, a=3) # R, G, B, A
+    swizzle = astcenc_swizzle(r=0, g=1, b=2, a=3)
 
-    # Prepare input buffer (compressed data)
     comp_buf = (c_ubyte * len(image_data)).from_buffer_copy(image_data)
 
     status = astcenc.astcenc_decompress_image(context, comp_buf, len(image_data), byref(image_out), byref(swizzle), 0)
@@ -133,9 +130,6 @@ def decompress_astc_ctypes(image_data, width, height, block_x, block_y):
 
 
 def unpack_bundle(bundle_path, output_dir, progress_callback=print):
-    """
-    Unpacks a Unity bundle file to a specified directory.
-    """
     progress_callback(f"Starting to unpack '{os.path.basename(bundle_path)}'...")
     
     if not os.path.exists(bundle_path):
@@ -148,6 +142,7 @@ def unpack_bundle(bundle_path, output_dir, progress_callback=print):
     TypeTreeHelper.read_typetree_boost = False
     UnityPy.config.FALLBACK_UNITY_VERSION = '2022.3.22f1'
     
+    env = None
     try:
         env = UnityPy.load(bundle_path)
         total_objects = len(env.objects)
@@ -194,6 +189,11 @@ def unpack_bundle(bundle_path, output_dir, progress_callback=print):
                 error_message = f"FAILED to export asset '{asset_name}': {e}"
                 progress_callback(error_message)
                 print(traceback.format_exc())
+            finally:
+                if 'data' in locals():
+                    del data
+                if (i + 1) % 10 == 0:
+                    gc.collect() 
         
         progress_callback("Unpacking complete.")
         return (True, "Unpacking complete.")
@@ -204,3 +204,7 @@ def unpack_bundle(bundle_path, output_dir, progress_callback=print):
         progress_callback(error_message)
         print(traceback.format_exc())
         return (False, error_message)
+    finally:
+        if env:
+            del env
+        gc.collect()
