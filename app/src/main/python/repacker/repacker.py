@@ -4,6 +4,8 @@ import ctypes
 from ctypes import *
 from .json_to_skel import json_to_skel
 import tempfile
+import gc
+import traceback
 
 from UnityPy.helpers import TypeTreeHelper
 TypeTreeHelper.read_typetree_boost = False
@@ -192,6 +194,10 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                             data.save()
                             edited = True
                             report_progress(f"{current_progress}Successfully replaced animation for {mod_filename}")
+                            
+                            # Clean up large temporary objects
+                            del skel_binary_data
+                            
                         finally:
                             if os.path.exists(temp_skel_path):
                                 os.remove(temp_skel_path)
@@ -205,6 +211,10 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                             report_progress(f"{current_progress}Replacing texture: {mod_filename}")
                             data = obj.read()
                             pil_img = Image.open(mod_filepath).convert("RGBA")
+                            
+                            # Define variables to hold potentially large data
+                            flipped_img = None
+                            compressed_data = None
 
                             if use_astc:
                                 flipped_img = pil_img.transpose(Image.FLIP_TOP_BOTTOM)
@@ -214,6 +224,7 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
 
                                 if err:
                                     report_progress(f"ERROR: ASTC compression failed for {mod_filename}: {err}")
+                                    del pil_img, flipped_img
                                     continue
 
                                 data.m_TextureFormat = 48
@@ -231,6 +242,14 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                             data.m_StreamData.path = ""
                             data.save()
                             edited = True
+                            
+                            # Clean up large temporary objects
+                            del pil_img
+                            if flipped_img:
+                                del flipped_img
+                            if compressed_data:
+                                del compressed_data
+                                
                     continue
 
                 target_asset_name = mod_filename.lower()
@@ -240,18 +259,26 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                         report_progress(f"{current_progress}Replacing asset: {mod_filename}")
                         data = obj.read()
                         with open(mod_filepath, "rb") as f:
-                            data.m_Script = f.read().decode("utf-8", "surrogateescape")
+                            file_content = f.read()
+                            data.m_Script = file_content.decode("utf-8", "surrogateescape")
                         data.save()
                         edited = True
+                        del file_content
 
             except Exception as e:
-                import traceback
                 report_progress(f"Error processing asset {mod_filename}: {traceback.format_exc()}")
+            finally:
+                # Explicitly run garbage collection after each file to free memory
+                gc.collect()
 
         if edited:
             report_progress("Saving modified game file...")
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             try:
+                # Clean up before the final save
+                del asset_map
+                gc.collect()
+                
                 env.file.save(outfile=output_path, packer="lz4")
                 report_progress("Saved successfully!")
                 return True
@@ -263,7 +290,6 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
             return False
 
     except Exception as e:
-        import traceback
         message = f"Error processing bundle: {traceback.format_exc()}"
         report_progress(message)
         return False
