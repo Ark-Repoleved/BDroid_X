@@ -1,7 +1,6 @@
 import sys
 import os
 import threading
-import traceback
 
 # Add the vendor directory to the sys.path to allow importing bundled packages
 sys.path.append(os.path.join(os.path.dirname(__file__), "vendor"))
@@ -9,40 +8,17 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "vendor"))
 from repacker.repacker import repack_bundle
 import character_scraper
 import cdn_downloader
-
-# --- MODIFICATION START ---
-# Import both unpack methods from the unpacker module and give them aliases
 from unpacker import unpack_bundle as unpacker_main
-from unpacker import unpack_bundle_by_fd as unpacker_main_by_fd
-# --- MODIFICATION END ---
-
 
 # --- Global Cache for CDN Catalog ---
+# In-memory cache for the catalog JSON content.
+# The key is the version, the value is the parsed JSON content.
 catalog_cache = {}
+# A lock to ensure thread-safe access to the cache.
 catalog_cache_lock = threading.Lock()
+# A variable to track the current cache key (e.g., a timestamp for the batch install)
+# to ensure that different installation processes use different caches.
 current_cache_key = None
-
-# --- NEW FUNCTION START ---
-def unpack_bundle_by_fd(bundle_fd: int, output_dir: str, progress_callback=None):
-    """
-    Entry point for Kotlin to unpack a bundle using a file descriptor.
-    Returns a tuple: (success: Boolean, message: String)
-    """
-    try:
-        success, message = unpacker_main_by_fd(
-            bundle_fd=bundle_fd,
-            output_dir=output_dir,
-            progress_callback=progress_callback
-        )
-        print(message)
-        return success, message
-    except Exception as e:
-        error_message = traceback.format_exc()
-        print(f"An error occurred during unpack by fd: {error_message}")
-        if progress_callback:
-            progress_callback(f"An error occurred: {e}")
-        return False, error_message
-# --- NEW FUNCTION END ---
 
 def unpack_bundle(bundle_path: str, output_dir: str, progress_callback=None):
     """
@@ -50,14 +26,18 @@ def unpack_bundle(bundle_path: str, output_dir: str, progress_callback=None):
     Returns a tuple: (success: Boolean, message: String)
     """
     try:
+        # The progress callback will handle printing.
         success, message = unpacker_main(
             bundle_path=bundle_path,
             output_dir=output_dir,
             progress_callback=progress_callback
         )
+        
         print(message)
         return success, message
+            
     except Exception as e:
+        import traceback
         error_message = traceback.format_exc()
         print(f"An error occurred during unpack: {error_message}")
         if progress_callback:
@@ -77,18 +57,22 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
         print(message)
 
     try:
+        # --- Cache Management ---
+        # If the cache key from the client has changed, it signifies a new batch operation.
+        # We should clear the cache to ensure we fetch the latest catalog for the new batch.
         with catalog_cache_lock:
             if current_cache_key != cache_key:
                 report_progress("New batch installation detected, clearing catalog cache.")
                 catalog_cache.clear()
                 current_cache_key = cache_key
-
+        
         report_progress(f"Fetching CDN version for {quality} quality...")
         version = cdn_downloader.get_cdn_version(quality)
         if not version:
             return False, "Failed to get CDN version."
-
+        
         report_progress(f"Latest version is {version}. Checking catalog...")
+        # The download_catalog function will now use the shared cache
         catalog_content, error = cdn_downloader.download_catalog(
             output_dir, quality, version, catalog_cache, catalog_cache_lock, progress_callback
         )
@@ -96,6 +80,7 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
             return False, error
 
         report_progress(f"Searching for bundle {hashed_name} in catalog...")
+        # find_and_download_bundle now takes the catalog content directly
         output_file_path, error = cdn_downloader.find_and_download_bundle(
             catalog_content=catalog_content,
             version=version,
@@ -107,9 +92,11 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
 
         if error:
             return False, error
-
+        
         return True, output_file_path
+
     except Exception as e:
+        import traceback
         error_message = traceback.format_exc()
         report_progress(f"A critical error occurred: {error_message}")
         return False, error_message
@@ -130,6 +117,7 @@ def update_character_data(output_dir: str):
             print(message)
             return False, message
     except Exception as e:
+        import traceback
         error_message = traceback.format_exc()
         print(f"An error occurred during scraping: {error_message}")
         return False, error_message
@@ -141,6 +129,7 @@ def main(original_bundle_path: str, modded_assets_folder: str, output_path: str,
     Returns a tuple: (success: Boolean, message: String)
     """
     try:
+        # The progress callback will handle printing, so we can remove the print statements here.
         success = repack_bundle(
             original_bundle_path=original_bundle_path,
             modded_assets_folder=modded_assets_folder,
@@ -148,7 +137,7 @@ def main(original_bundle_path: str, modded_assets_folder: str, output_path: str,
             use_astc=use_astc,
             progress_callback=progress_callback
         )
-
+        
         if success:
             message = "Repack process completed successfully."
             print(message)
@@ -157,7 +146,9 @@ def main(original_bundle_path: str, modded_assets_folder: str, output_path: str,
             message = "Repack process failed without an exception."
             print(message)
             return False, message
+            
     except Exception as e:
+        import traceback
         error_message = traceback.format_exc()
         print(f"An error occurred: {error_message}")
         return False, error_message
