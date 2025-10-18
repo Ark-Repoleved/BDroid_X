@@ -264,18 +264,13 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
         if edited:
             report_progress("Saving modified game file...")
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            
-            temp_output_path = output_path + ".tmp"
             try:
-                with open(temp_output_path, "wb") as f:
-                    env.file.save(writer=f, packer="lz4")
-
-                os.rename(temp_output_path, output_path)
+                with open(output_path, "wb") as f:
+                    bundle_data = env.file.save(packer="lz4")
+                    f.write(bundle_data)
                 report_progress("Saved successfully!")
                 return True
             except Exception as e:
-                if os.path.exists(temp_output_path):
-                    os.remove(temp_output_path)
                 report_progress(f"Error saving bundle: {e}")
                 return False
         else:
