@@ -5,44 +5,33 @@ from ctypes import *
 from .json_to_skel import json_to_skel
 import tempfile
 
-# The following two lines are crucial for running in Chaquopy
 from UnityPy.helpers import TypeTreeHelper
 TypeTreeHelper.read_typetree_boost = False
 import UnityPy
 
-# Configure UnityPy fallback version
 UnityPy.config.FALLBACK_UNITY_VERSION = '2022.3.22f1'
 
-# --- Lazy-loaded ASTC library and definitions ---
 _astcenc_lib = None
 _astcenc_structures = {}
 
 def _load_astcenc_library():
-    """
-    Loads the astcenc library dynamically, defines ctypes structures, 
-    and sets function prototypes. This ensures the heavy library is only
-    loaded into memory when absolutely needed.
-    """
     global _astcenc_lib
     if _astcenc_lib is not None:
-        # Return cached library object, or None if previous load failed
         return _astcenc_lib if _astcenc_lib else None
 
     try:
         lib = ctypes.cdll.LoadLibrary("libastcenc.so")
     except OSError as e:
         print(f"FATAL: Could not load libastcenc.so. Make sure it's in jniLibs. Error: {e}")
-        _astcenc_lib = False  # Mark as failed
+        _astcenc_lib = False
         return None
 
-    # Define enums and constants
     _astcenc_structures['ASTCENC_SUCCESS'] = 0
     _astcenc_structures['ASTCENC_PRF_LDR_SRGB'] = 0
     _astcenc_structures['ASTCENC_PRE_MEDIUM'] = 60.0
     _astcenc_structures['ASTCENC_TYPE_U8'] = 0
     _astcenc_structures['ASTCENC_FLG_USE_DECODE_UNORM8'] = 1 << 1
 
-    # Define structures
     class astcenc_swizzle(Structure):
         _fields_ = [("r", c_uint), ("g", c_uint), ("b", c_uint), ("a", c_uint)]
     _astcenc_structures['astcenc_swizzle'] = astcenc_swizzle
@@ -72,7 +61,6 @@ def _load_astcenc_library():
         ]
     _astcenc_structures['astcenc_image'] = astcenc_image
     
-    # Define function prototypes
     lib.astcenc_config_init.argtypes = [c_uint, c_uint, c_uint, c_uint, c_float, c_uint, POINTER(astcenc_config)]
     lib.astcenc_config_init.restype = c_int
 
@@ -95,7 +83,6 @@ def get_error_string(astcenc_lib, status):
     return astcenc_lib.astcenc_get_error_string(status).decode('utf-8')
 
 def find_modded_asset(folder: str, filename: str) -> str:
-    """Recursively search for a file in a directory, ignoring case."""
     search_filename_lower = filename.lower()
     for root, dirs, files in os.walk(folder):
         for f in files:
@@ -104,12 +91,10 @@ def find_modded_asset(folder: str, filename: str) -> str:
     return None
 
 def compress_image_astc(image_bytes, width, height, block_x, block_y):
-    """Compresses an RGBA image using libastcenc."""
     astcenc = _load_astcenc_library()
     if not astcenc:
         return None, "libastcenc.so could not be loaded."
         
-    # Get constants and structures from the loaded library context
     ASTCENC_SUCCESS = _astcenc_structures['ASTCENC_SUCCESS']
     ASTCENC_PRF_LDR_SRGB = _astcenc_structures['ASTCENC_PRF_LDR_SRGB']
     ASTCENC_PRE_MEDIUM = _astcenc_structures['ASTCENC_PRE_MEDIUM']
@@ -119,7 +104,6 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
     astcenc_image = _astcenc_structures['astcenc_image']
     astcenc_swizzle = _astcenc_structures['astcenc_swizzle']
 
-    # 1. Initialize config
     config = astcenc_config()
     quality = ASTCENC_PRE_MEDIUM
     profile = ASTCENC_PRF_LDR_SRGB
@@ -128,14 +112,12 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
     if status != ASTCENC_SUCCESS:
         return None, f"astcenc_config_init failed: {get_error_string(astcenc, status)}"
 
-    # 2. Allocate context
     context = c_void_p()
     thread_count = os.cpu_count() or 1
     status = astcenc.astcenc_context_alloc(byref(config), thread_count, byref(context))
     if status != ASTCENC_SUCCESS:
         return None, f"astcenc_context_alloc failed: {get_error_string(astcenc, status)}"
 
-    # 3. Prepare image structure
     image_data_p = (c_void_p * 1)()
     image_data_p[0] = ctypes.cast(image_bytes, c_void_p)
 
@@ -146,19 +128,15 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
     image.data_type = ASTCENC_TYPE_U8
     image.data = image_data_p
 
-    # 4. Prepare swizzle
-    swizzle = astcenc_swizzle(r=0, g=1, b=2, a=3) # R, G, B, A
+    swizzle = astcenc_swizzle(r=0, g=1, b=2, a=3)
 
-    # 5. Prepare output buffer
     blocks_x = (width + block_x - 1) // block_x
     blocks_y = (height + block_y - 1) // block_y
     buf_size = blocks_x * blocks_y * 16
     comp_buf = (c_ubyte * buf_size)()
 
-    # 6. Compress
     status = astcenc.astcenc_compress_image(context, byref(image), byref(swizzle), comp_buf, buf_size, 0)
     
-    # 7. Free context
     astcenc.astcenc_context_free(context)
 
     if status != ASTCENC_SUCCESS:
@@ -168,7 +146,6 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
 
 
 def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_path: str, use_astc: bool, progress_callback=None):
-    """Repacks a Unity bundle with assets from a specified mod folder."""
     def report_progress(message):
         if progress_callback:
             progress_callback(message)
@@ -181,10 +158,8 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
 
         report_progress("Scanning for moddable assets...")
         
-        # Create a map of all assets in the bundle for quick lookup
         asset_map = {obj.read().m_Name.lower(): obj for obj in env.objects if hasattr(obj.read(), 'm_Name')}
 
-        # Find all mod files first
         mod_files = []
         for root, _, files in os.walk(modded_assets_folder):
             for f in files:
@@ -196,7 +171,6 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
             current_progress = f"({i+1}/{total_assets}) "
 
             try:
-                # Handle JSON to SKEL conversion
                 if mod_filename.lower().endswith('.json'):
                     base_name, _ = os.path.splitext(mod_filename)
                     target_asset_name = (base_name + ".skel").lower()
@@ -221,9 +195,8 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                         finally:
                             if os.path.exists(temp_skel_path):
                                 os.remove(temp_skel_path)
-                    continue # Move to next file
+                    continue
 
-                # Handle Texture2D
                 if mod_filename.lower().endswith('.png'):
                     target_asset_name = os.path.splitext(mod_filename)[0].lower()
                     if target_asset_name in asset_map:
@@ -243,12 +216,12 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                                     report_progress(f"ERROR: ASTC compression failed for {mod_filename}: {err}")
                                     continue
 
-                                data.m_TextureFormat = 48 # ASTC_4x4
+                                data.m_TextureFormat = 48
                                 data.image_data = compressed_data
                                 data.m_CompleteImageSize = len(compressed_data)
                             else:
                                 report_progress(f"{current_progress}Using uncompressed RGBA32 for texture: {mod_filename}")
-                                data.m_TextureFormat = 4 # RGBA32
+                                data.m_TextureFormat = 4
                                 data.image = pil_img
 
                             data.m_Width, data.m_Height = pil_img.size
@@ -260,7 +233,6 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                             edited = True
                     continue
 
-                # Handle other TextAssets (like .atlas)
                 target_asset_name = mod_filename.lower()
                 if target_asset_name in asset_map:
                     obj = asset_map[target_asset_name]
@@ -280,9 +252,7 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
             report_progress("Saving modified game file...")
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             try:
-                with open(output_path, "wb") as f:
-                    bundle_data = env.file.save(packer="lz4")
-                    f.write(bundle_data)
+                env.file.save(outfile=output_path, packer="lz4")
                 report_progress("Saved successfully!")
                 return True
             except Exception as e:
