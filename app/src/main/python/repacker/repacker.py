@@ -281,8 +281,8 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             try:
                 with open(output_path, "wb") as f:
-                    # CORRECTED: Pass 'f' as a positional argument
-                    env.file.save(f, packer="lz4")
+                    # CORRECTED: Use positional arguments for this version of UnityPy
+                    env.file.save(f, "lz4")
                 report_progress("Saved successfully!")
                 return True
             except Exception as e:
