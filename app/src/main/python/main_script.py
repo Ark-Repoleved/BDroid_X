@@ -1,154 +1,147 @@
-import sys
 import os
-import threading
+import sys
+import ctypes
+from ctypes import *
+import traceback
 
-# Add the vendor directory to the sys.path to allow importing bundled packages
-sys.path.append(os.path.join(os.path.dirname(__file__), "vendor"))
+vendor_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")
+sys.path.insert(0, vendor_path)
 
-from repacker.repacker import repack_bundle
-import character_scraper
-import cdn_downloader
-from unpacker import unpack_bundle as unpacker_main
+try:
+    import UnityPy
+    from UnityPy.helpers import TypeTreeHelper
+except ImportError:
+    print(f"Error: Could not import UnityPy. Make sure it exists in '{vendor_path}'")
+    sys.exit(1)
 
-# --- Global Cache for CDN Catalog ---
-# In-memory cache for the catalog JSON content.
-# The key is the version, the value is the parsed JSON content.
-catalog_cache = {}
-# A lock to ensure thread-safe access to the cache.
-catalog_cache_lock = threading.Lock()
-# A variable to track the current cache key (e.g., a timestamp for the batch install)
-# to ensure that different installation processes use different caches.
-current_cache_key = None
+ASTCENC_SUCCESS = 0
+ASTCENC_PRF_LDR_SRGB = 0
+ASTCENC_PRE_MEDIUM = 60.0
+ASTCENC_TYPE_U8 = 0
+ASTCENC_FLG_USE_DECODE_UNORM8 = 1 << 1
 
-def unpack_bundle(bundle_path: str, output_dir: str, progress_callback=None):
-    """
-    Entry point for Kotlin to unpack a bundle.
-    Returns a tuple: (success: Boolean, message: String)
-    """
+class astcenc_swizzle(Structure):
+    _fields_ = [("r", c_uint), ("g", c_uint), ("b", c_uint), ("a", c_uint)]
+
+class astcenc_config(Structure):
+    _fields_ = [
+        ("profile", c_uint),("flags", c_uint),("block_x", c_uint),("block_y", c_uint),("block_z", c_uint),("cw_r_weight", c_float),("cw_g_weight", c_float),("cw_b_weight", c_float),("cw_a_weight", c_float),("a_scale_radius", c_uint),("rgbm_m_scale", c_float),("tune_partition_count_limit", c_uint),("tune_2partition_index_limit", c_uint),("tune_3partition_index_limit", c_uint),("tune_4partition_index_limit", c_uint),("tune_block_mode_limit", c_uint),("tune_refinement_limit", c_uint),("tune_candidate_limit", c_uint),("tune_2partitioning_candidate_limit", c_uint),("tune_3partitioning_candidate_limit", c_uint),("tune_4partitioning_candidate_limit", c_uint),("tune_db_limit", c_float),("tune_mse_overshoot", c_float),("tune_2partition_early_out_limit_factor", c_float),("tune_3partition_early_out_limit_factor", c_float),("tune_2plane_early_out_limit_correlation", c_float),("tune_search_mode0_enable", c_float),("progress_callback", c_void_p),
+    ]
+
+class astcenc_image(Structure):
+    _fields_ = [
+        ("dim_x", c_uint),("dim_y", c_uint),("dim_z", c_uint),("data_type", c_uint),("data", POINTER(c_void_p)),
+    ]
+
+try:
+    astcenc = ctypes.cdll.LoadLibrary("libastcenc.so")
+    astcenc.astcenc_config_init.argtypes = [c_uint, c_uint, c_uint, c_uint, c_float, c_uint, POINTER(astcenc_config)]
+    astcenc.astcenc_config_init.restype = c_int
+    astcenc.astcenc_context_alloc.argtypes = [POINTER(astcenc_config), c_uint, POINTER(c_void_p)]
+    astcenc.astcenc_context_alloc.restype = c_int
+    astcenc.astcenc_decompress_image.argtypes = [c_void_p, POINTER(c_ubyte), c_size_t, POINTER(astcenc_image), POINTER(astcenc_swizzle), c_uint]
+    astcenc.astcenc_decompress_image.restype = c_int
+    astcenc.astcenc_context_free.argtypes = [c_void_p]
+    astcenc.astcenc_context_free.restype = None
+    astcenc.astcenc_get_error_string.argtypes = [c_int]
+    astcenc.astcenc_get_error_string.restype = c_char_p
+except OSError as e:
+    print(f"WARNING: Could not load libastcenc.so. ASTC decompression will not work. Error: {e}")
+    astcenc = None
+
+def get_error_string(status):
+    return astcenc.astcenc_get_error_string(status).decode('utf-8')
+
+def decompress_astc_ctypes(image_data, width, height, block_x, block_y):
+    if not astcenc: return None, "libastcenc.so not loaded."
+    config = astcenc_config()
+    quality = ASTCENC_PRE_MEDIUM
+    profile = ASTCENC_PRF_LDR_SRGB
+    flags = ASTCENC_FLG_USE_DECODE_UNORM8
+    status = astcenc.astcenc_config_init(profile, block_x, block_y, 1, quality, flags, byref(config))
+    if status != ASTCENC_SUCCESS: return None, f"astcenc_config_init failed: {get_error_string(status)}"
+    context = c_void_p()
+    thread_count = os.cpu_count() or 1
+    status = astcenc.astcenc_context_alloc(byref(config), thread_count, byref(context))
+    if status != ASTCENC_SUCCESS: return None, f"astcenc_context_alloc failed: {get_error_string(status)}"
+    decompressed_size = width * height * 4
+    decompressed_buffer = (c_ubyte * decompressed_size)()
+    image_out_p = (c_void_p * 1)()
+    image_out_p[0] = ctypes.cast(decompressed_buffer, c_void_p)
+    image_out = astcenc_image(dim_x=width, dim_y=height, dim_z=1, data_type=ASTCENC_TYPE_U8, data=image_out_p)
+    swizzle = astcenc_swizzle(r=0, g=1, b=2, a=3)
+    comp_buf = (c_ubyte * len(image_data)).from_buffer_copy(image_data)
+    status = astcenc.astcenc_decompress_image(context, comp_buf, len(image_data), byref(image_out), byref(swizzle), 0)
+    astcenc.astcenc_context_free(context)
+    if status != ASTCENC_SUCCESS: return None, f"astcenc_decompress_image failed: {get_error_string(status)}"
+    return bytes(decompressed_buffer), None
+
+def _process_bundle_objects(env, output_dir, progress_callback):
+    total_objects = len(env.objects)
+    if progress_callback: progress_callback(f"Successfully loaded bundle. Found {total_objects} assets.")
+    for i, obj in enumerate(env.objects):
+        try:
+            data = obj.read()
+            if not hasattr(data, 'm_Name') or not data.m_Name: continue
+            dest_name = data.m_Name.replace('/', '_')
+            dest_path = os.path.join(output_dir, dest_name)
+            if progress_callback: progress_callback(f"Processing asset {i+1}/{total_objects}: {dest_name}")
+            if obj.type.name == "Texture2D":
+                if not dest_path.lower().endswith((".png", ".jpg", ".jpeg")): dest_path += ".png"
+                data.image.save(dest_path)
+            elif obj.type.name == "TextAsset":
+                with open(dest_path, "wb") as f:
+                    content = data.m_Script
+                    if isinstance(content, str): content = content.encode('utf-8', 'surrogateescape')
+                    f.write(content)
+            elif obj.type.name == "MonoBehaviour":
+                 if ".skel" in dest_name:
+                     with open(dest_path, "wb") as f:
+                        content = data.m_Script
+                        if isinstance(content, str): content = content.encode('utf-8', 'surrogateescape')
+                        f.write(content)
+        except Exception as e:
+            asset_name = "Unknown"
+            if 'data' in locals() and hasattr(data, 'm_Name'): asset_name = data.m_Name
+            error_message = f"FAILED to export asset '{asset_name}': {e}"
+            if progress_callback: progress_callback(error_message)
+            print(traceback.format_exc())
+
+def unpack_bundle(bundle_path, output_dir, progress_callback=print):
+    if progress_callback: progress_callback(f"Starting to unpack '{os.path.basename(bundle_path)}'...")
+    if not os.path.exists(bundle_path):
+        msg = f"Error: Bundle file not found at '{bundle_path}'"
+        if progress_callback: progress_callback(msg)
+        return (False, msg)
+    os.makedirs(output_dir, exist_ok=True)
+    if progress_callback: progress_callback(f"Output directory '{output_dir}' is ready.")
+    TypeTreeHelper.read_typetree_boost = False
+    UnityPy.config.FALLBACK_UNITY_VERSION = '2022.3.22f1'
     try:
-        # The progress callback will handle printing.
-        success, message = unpacker_main(
-            bundle_path=bundle_path,
-            output_dir=output_dir,
-            progress_callback=progress_callback
-        )
-        
-        print(message)
-        return success, message
-            
+        env = UnityPy.load(bundle_path)
+        _process_bundle_objects(env, output_dir, progress_callback)
+        if progress_callback: progress_callback("Unpacking complete.")
+        return (True, "Unpacking complete.")
     except Exception as e:
-        import traceback
-        error_message = traceback.format_exc()
-        print(f"An error occurred during unpack: {error_message}")
-        if progress_callback:
-            progress_callback(f"An error occurred: {e}")
-        return False, error_message
+        error_message = f"Failed to load bundle: {e}"
+        if progress_callback: progress_callback(error_message)
+        print(traceback.format_exc())
+        return (False, error_message)
 
-def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callback=None):
-    """
-    Entry point for Kotlin to download a bundle from the CDN.
-    Manages a shared in-memory cache for the catalog file to avoid redundant downloads.
-    Returns a tuple: (success: Boolean, message_or_path: String)
-    """
-    global current_cache_key
-    def report_progress(message):
-        if progress_callback:
-            progress_callback(message)
-        print(message)
-
+def unpack_bundle_by_fd(bundle_fd, output_dir, progress_callback=print):
+    if progress_callback: progress_callback("Starting to unpack from file descriptor...")
+    os.makedirs(output_dir, exist_ok=True)
+    if progress_callback: progress_callback(f"Output directory '{output_dir}' is ready.")
+    TypeTreeHelper.read_typetree_boost = False
+    UnityPy.config.FALLBACK_UNITY_VERSION = '2022.3.22f1'
     try:
-        # --- Cache Management ---
-        # If the cache key from the client has changed, it signifies a new batch operation.
-        # We should clear the cache to ensure we fetch the latest catalog for the new batch.
-        with catalog_cache_lock:
-            if current_cache_key != cache_key:
-                report_progress("New batch installation detected, clearing catalog cache.")
-                catalog_cache.clear()
-                current_cache_key = cache_key
-        
-        report_progress(f"Fetching CDN version for {quality} quality...")
-        version = cdn_downloader.get_cdn_version(quality)
-        if not version:
-            return False, "Failed to get CDN version."
-        
-        report_progress(f"Latest version is {version}. Checking catalog...")
-        # The download_catalog function will now use the shared cache
-        catalog_content, error = cdn_downloader.download_catalog(
-            output_dir, quality, version, catalog_cache, catalog_cache_lock, progress_callback
-        )
-        if error:
-            return False, error
-
-        report_progress(f"Searching for bundle {hashed_name} in catalog...")
-        # find_and_download_bundle now takes the catalog content directly
-        output_file_path, error = cdn_downloader.find_and_download_bundle(
-            catalog_content=catalog_content,
-            version=version,
-            quality=quality,
-            hashed_name=hashed_name,
-            output_dir=output_dir,
-            progress_callback=progress_callback
-        )
-
-        if error:
-            return False, error
-        
-        return True, output_file_path
-
+        with os.fdopen(bundle_fd, 'rb') as bundle_file:
+            env = UnityPy.load(bundle_file)
+            _process_bundle_objects(env, output_dir, progress_callback)
+        if progress_callback: progress_callback("Unpacking complete.")
+        return (True, "Unpacking complete.")
     except Exception as e:
-        import traceback
-        error_message = traceback.format_exc()
-        report_progress(f"A critical error occurred: {error_message}")
-        return False, error_message
-
-def update_character_data(output_dir: str):
-    """
-    Entry point for Kotlin to run the character data scraper.
-    Returns a tuple: (success: Boolean, message: String)
-    """
-    try:
-        success = character_scraper.scrape_and_save(output_dir)
-        if success:
-            message = "Scraper completed successfully."
-            print(message)
-            return True, message
-        else:
-            message = "Scraper failed without an exception."
-            print(message)
-            return False, message
-    except Exception as e:
-        import traceback
-        error_message = traceback.format_exc()
-        print(f"An error occurred during scraping: {error_message}")
-        return False, error_message
-
-
-def main(original_bundle_path: str, modded_assets_folder: str, output_path: str, use_astc: bool, progress_callback=None):
-    """
-    Main entry point to be called from Kotlin.
-    Returns a tuple: (success: Boolean, message: String)
-    """
-    try:
-        # The progress callback will handle printing, so we can remove the print statements here.
-        success = repack_bundle(
-            original_bundle_path=original_bundle_path,
-            modded_assets_folder=modded_assets_folder,
-            output_path=output_path,
-            use_astc=use_astc,
-            progress_callback=progress_callback
-        )
-        
-        if success:
-            message = "Repack process completed successfully."
-            print(message)
-            return True, message
-        else:
-            message = "Repack process failed without an exception."
-            print(message)
-            return False, message
-            
-    except Exception as e:
-        import traceback
-        error_message = traceback.format_exc()
-        print(f"An error occurred: {error_message}")
-        return False, error_message
+        error_message = f"Failed to load bundle from file descriptor: {e}"
+        if progress_callback: progress_callback(error_message)
+        print(traceback.format_exc())
+        return (False, error_message)
