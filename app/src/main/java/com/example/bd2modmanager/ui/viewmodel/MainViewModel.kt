@@ -122,7 +122,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _selectedMods = MutableStateFlow<Set<Uri>>(emptySet())
     val selectedMods: StateFlow<Set<Uri>> = _selectedMods.asStateFlow()
 
-    val useAstc: StateFlow<Boolean> = savedStateHandle.getStateFlow("use_astc", false)
+    val useAstc: StateFlow<Boolean> = savedStateHandle.getStateFlow("use_astc", true)
 
     // --- New State Management for Parallel Installation ---
     private val _installJobs = MutableStateFlow<List<InstallJob>>(emptyList())
