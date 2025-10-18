@@ -33,7 +33,6 @@ object ModdingService {
             val py = Python.getInstance()
             val mainScript = py.getModule("main_script")
 
-            // Pass the Kotlin lambda as a progress_callback to the Python function.
             val result = mainScript.callAttr(
                 "main",
                 originalBundlePath,
@@ -70,6 +69,23 @@ object ModdingService {
         } catch (e: Exception) {
             e.printStackTrace()
             Pair(false, e.message ?: "An unknown error occurred in Kotlin during unpack.")
+        }
+    }
+
+    fun unpackBundleByFd(bundleFd: Int, outputPath: String, onProgress: (String) -> Unit): Pair<Boolean, String> {
+        return try {
+            val py = Python.getInstance()
+            val mainScript = py.getModule("main_script")
+            val result = mainScript.callAttr(
+                "unpack_bundle_by_fd",
+                bundleFd,
+                outputPath,
+                PyObject.fromJava(onProgress)
+            ).asList()
+            Pair(result[0].toBoolean(), result[1].toString())
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Pair(false, e.message ?: "An unknown error occurred in Kotlin during unpack by fd.")
         }
     }
 }
