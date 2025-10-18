@@ -3,7 +3,9 @@ import sys
 import ctypes
 from ctypes import *
 import gc
+from PIL import Image
 
+# Add the project's vendored UnityPy to the path
 vendor_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")
 sys.path.insert(0, vendor_path)
 
@@ -14,6 +16,7 @@ except ImportError:
     print(f"Error: Could not import UnityPy. Make sure it exists in '{vendor_path}'")
     sys.exit(1)
 
+# --- ctypes definitions for libastcenc ---
 ASTCENC_SUCCESS = 0
 ASTCENC_PRF_LDR_SRGB = 0
 ASTCENC_PRE_MEDIUM = 60.0
@@ -65,6 +68,7 @@ class astcenc_image(Structure):
     ]
 
 try:
+    # Ensure you have libastcenc.so in your jniLibs/arm64-v8a folder
     astcenc = ctypes.cdll.LoadLibrary("libastcenc.so")
 
     astcenc.astcenc_config_init.argtypes = [c_uint, c_uint, c_uint, c_uint, c_float, c_uint, POINTER(astcenc_config)]
@@ -100,6 +104,7 @@ def decompress_astc_ctypes(image_data, width, height, block_x, block_y):
     thread_count = os.cpu_count() or 1
     status = astcenc.astcenc_context_alloc(byref(config), thread_count, byref(context))
     if status != ASTCENC_SUCCESS:
+        astcenc.astcenc_config_free(byref(config))
         return None, f"astcenc_context_alloc failed: {get_error_string(status)}"
 
     decompressed_size = width * height * 4
@@ -129,6 +134,17 @@ def decompress_astc_ctypes(image_data, width, height, block_x, block_y):
     return bytes(decompressed_buffer), None
 
 
+# Map Unity TextureFormat enums to ASTC block sizes
+ASTC_FORMATS = {
+    47: (4, 4),  # ASTC_RGB_4x4
+    48: (4, 4),  # ASTC_RGBA_4x4
+    49: (5, 5),  # ASTC_RGBA_5x5
+    50: (6, 6),  # ASTC_RGBA_6x6
+    51: (8, 8),  # ASTC_RGBA_8x8
+    52: (10, 10),# ASTC_RGBA_10x10
+    53: (12, 12),# ASTC_RGBA_12x12
+}
+
 def unpack_bundle(bundle_path, output_dir, progress_callback=print):
     progress_callback(f"Starting to unpack '{os.path.basename(bundle_path)}'...")
     
@@ -149,6 +165,7 @@ def unpack_bundle(bundle_path, output_dir, progress_callback=print):
         progress_callback(f"Successfully loaded bundle. Found {total_objects} assets.")
 
         for i, obj in enumerate(env.objects):
+            data = None
             try:
                 data = obj.read()
                 
@@ -164,36 +181,56 @@ def unpack_bundle(bundle_path, output_dir, progress_callback=print):
                 if obj.type.name == "Texture2D":
                     if not dest_path.lower().endswith((".png", ".jpg", ".jpeg")):
                         dest_path += ".png"
-                    data.image.save(dest_path)
+                    
+                    img = None
+                    decompressed_data = None
+                    try:
+                        # NEW: Manual memory management for textures
+                        texture_format = getattr(data, 'm_TextureFormat', 0)
+                        if astcenc and texture_format in ASTC_FORMATS:
+                            # Use our controlled decompressor for ASTC
+                            block_x, block_y = ASTC_FORMATS[texture_format]
+                            decompressed_data, err = decompress_astc_ctypes(
+                                data.image_data, data.m_Width, data.m_Height, block_x, block_y
+                            )
+                            if err:
+                                progress_callback(f"ASTC decompression failed for {dest_name}: {err}. Falling back.")
+                                img = data.image # Fallback to UnityPy's internal decompressor
+                            else:
+                                img = Image.frombytes("RGBA", (data.m_Width, data.m_Height), decompressed_data)
+                        else:
+                            # Use UnityPy's default for other formats
+                            img = data.image
+                        
+                        img.save(dest_path)
 
-                elif obj.type.name == "TextAsset":
+                    finally:
+                        # Aggressively clean up large memory objects immediately
+                        if img:
+                            del img
+                        if decompressed_data:
+                            del decompressed_data
+
+                elif obj.type.name == "TextAsset" or (obj.type.name == "MonoBehaviour" and ".skel" in dest_name):
                     with open(dest_path, "wb") as f:
                         content = data.m_Script
                         if isinstance(content, str):
                             content = content.encode('utf-8', 'surrogateescape')
                         f.write(content)
 
-                elif obj.type.name == "MonoBehaviour":
-                     if ".skel" in dest_name:
-                         with open(dest_path, "wb") as f:
-                            content = data.m_Script
-                            if isinstance(content, str):
-                                content = content.encode('utf-8', 'surrogateescape')
-                            f.write(content)
-
             except Exception as e:
                 import traceback
                 asset_name = "Unknown"
-                if 'data' in locals() and hasattr(data, 'm_Name'):
+                if data and hasattr(data, 'm_Name'):
                     asset_name = data.m_Name
                 error_message = f"FAILED to export asset '{asset_name}': {e}"
                 progress_callback(error_message)
                 print(traceback.format_exc())
             finally:
-                if 'data' in locals():
+                # Free memory after every single asset, not just batches
+                if data:
                     del data
-                if (i + 1) % 10 == 0:
-                    gc.collect() 
+                gc.collect() 
         
         progress_callback("Unpacking complete.")
         return (True, "Unpacking complete.")
