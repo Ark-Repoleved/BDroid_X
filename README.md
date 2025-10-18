@@ -33,7 +33,7 @@ Before you can start installing mods, you need to complete a one-time authorizat
 1.  Open the app, and you will see a welcome screen.
 2.  Tap the **"Select Mod Source Folder"** button.
 3.  In the file picker that appears, navigate to where you store your mod files (e.g., `.zip` archives or extracted folders), and then tap **"Use this folder"**.
-    *   *Recommendation:* Create a folder named `BD2_Mods` in your phone's storage and place all your downloaded mods there.
+    *   *Recommendation:* Create a folder named `.BD2_Mods` in your phone's storage and place all your downloaded mods there.
 
 ## Folder/.zip Structure
 
@@ -42,7 +42,7 @@ For mods to be installed successfully, each mod must be placed within its own de
 Here is a typical layout, using assets for "Lathel: Dark Knight" as an example:
 
 ```
-📁 BD2_Mods/
+📁 .BD2_Mods/
 ├── 📁 Lathel_IDLE/
 │   ├── 📄 char000104.skel (or.json)  # The Spine skeleton data
 │   ├── 📄 char000104.atlas           # The atlas mapping file
