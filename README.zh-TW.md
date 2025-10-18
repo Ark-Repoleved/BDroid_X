@@ -37,12 +37,12 @@
 
 ## 資料夾與 .zip 結構規範
 
-為了確保模組能成功安裝，請將每個模組放置於 `BD2_Mods/` 路徑下各自獨立的資料夾或 `.zip` 壓縮檔中。檔案名稱必須與遊戲內部 Unity bundles 中使用的資產名稱完全一致。
+為了確保模組能成功安裝，請將每個模組放置於 `.BD2_Mods/` 路徑下各自獨立的資料夾或 `.zip` 壓縮檔中。檔案名稱必須與遊戲內部 Unity bundles 中使用的資產名稱完全一致。
 
 一個典型的檔案結構如下，此處以「Lathel: Dark Knight」的角色資產為例：
 
 ```
-📁 BD2_Mods/
+📁 .BD2_Mods/
 ├── 📁 Lathel_IDLE/
 │   ├── 📄 char000104.skel (或 .json)  # Spine 骨架檔案
 │   ├── 📄 char000104.atlas            # Atlas 材質貼圖集定義檔
