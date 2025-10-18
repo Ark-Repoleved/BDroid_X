@@ -68,7 +68,6 @@ class astcenc_image(Structure):
     ]
 
 try:
-    # Ensure you have libastcenc.so in your jniLibs/arm64-v8a folder
     astcenc = ctypes.cdll.LoadLibrary("libastcenc.so")
 
     astcenc.astcenc_config_init.argtypes = [c_uint, c_uint, c_uint, c_uint, c_float, c_uint, POINTER(astcenc_config)]
@@ -86,6 +85,7 @@ except OSError as e:
     astcenc = None
 
 def get_error_string(status):
+    if not astcenc: return "astcenc library not loaded"
     return astcenc.astcenc_get_error_string(status).decode('utf-8')
 
 def decompress_astc_ctypes(image_data, width, height, block_x, block_y):
@@ -104,52 +104,48 @@ def decompress_astc_ctypes(image_data, width, height, block_x, block_y):
     thread_count = os.cpu_count() or 1
     status = astcenc.astcenc_context_alloc(byref(config), thread_count, byref(context))
     if status != ASTCENC_SUCCESS:
-        astcenc.astcenc_config_free(byref(config))
+        # CORRECTED: No need to free config. Just return the error.
         return None, f"astcenc_context_alloc failed: {get_error_string(status)}"
 
-    decompressed_size = width * height * 4
-    decompressed_buffer = (c_ubyte * decompressed_size)()
-    
-    image_out_p = (c_void_p * 1)()
-    image_out_p[0] = ctypes.cast(decompressed_buffer, c_void_p)
+    decompressed_buffer = None
+    try:
+        decompressed_size = width * height * 4
+        decompressed_buffer = (c_ubyte * decompressed_size)()
+        
+        image_out_p = (c_void_p * 1)()
+        image_out_p[0] = ctypes.cast(decompressed_buffer, c_void_p)
 
-    image_out = astcenc_image()
-    image_out.dim_x = width
-    image_out.dim_y = height
-    image_out.dim_z = 1
-    image_out.data_type = ASTCENC_TYPE_U8
-    image_out.data = image_out_p
+        image_out = astcenc_image()
+        image_out.dim_x = width
+        image_out.dim_y = height
+        image_out.dim_z = 1
+        image_out.data_type = ASTCENC_TYPE_U8
+        image_out.data = image_out_p
 
-    swizzle = astcenc_swizzle(r=0, g=1, b=2, a=3)
+        swizzle = astcenc_swizzle(r=0, g=1, b=2, a=3)
+        comp_buf = (c_ubyte * len(image_data)).from_buffer_copy(image_data)
 
-    comp_buf = (c_ubyte * len(image_data)).from_buffer_copy(image_data)
+        status = astcenc.astcenc_decompress_image(context, comp_buf, len(image_data), byref(image_out), byref(swizzle), 0)
+        
+        if status != ASTCENC_SUCCESS:
+            return None, f"astcenc_decompress_image failed: {get_error_string(status)}"
 
-    status = astcenc.astcenc_decompress_image(context, comp_buf, len(image_data), byref(image_out), byref(swizzle), 0)
-    
-    astcenc.astcenc_context_free(context)
-
-    if status != ASTCENC_SUCCESS:
-        return None, f"astcenc_decompress_image failed: {get_error_string(status)}"
-
-    return bytes(decompressed_buffer), None
+        return bytes(decompressed_buffer), None
+    finally:
+        astcenc.astcenc_context_free(context)
+        if decompressed_buffer:
+            del decompressed_buffer
 
 
-# Map Unity TextureFormat enums to ASTC block sizes
 ASTC_FORMATS = {
-    47: (4, 4),  # ASTC_RGB_4x4
-    48: (4, 4),  # ASTC_RGBA_4x4
-    49: (5, 5),  # ASTC_RGBA_5x5
-    50: (6, 6),  # ASTC_RGBA_6x6
-    51: (8, 8),  # ASTC_RGBA_8x8
-    52: (10, 10),# ASTC_RGBA_10x10
-    53: (12, 12),# ASTC_RGBA_12x12
+    47: (4, 4), 48: (4, 4), 49: (5, 5), 50: (6, 6),
+    51: (8, 8), 52: (10, 10), 53: (12, 12),
 }
 
 def unpack_bundle(bundle_path, output_dir, progress_callback=print):
     progress_callback(f"Starting to unpack '{os.path.basename(bundle_path)}'...")
     
     if not os.path.exists(bundle_path):
-        progress_callback(f"Error: Bundle file not found at '{bundle_path}'")
         return (False, f"Bundle file not found at '{bundle_path}'")
 
     os.makedirs(output_dir, exist_ok=True)
@@ -183,35 +179,36 @@ def unpack_bundle(bundle_path, output_dir, progress_callback=print):
                         dest_path += ".png"
                     
                     img = None
-                    decompressed_data = None
                     try:
-                        # NEW: Manual memory management for textures
                         texture_format = getattr(data, 'm_TextureFormat', 0)
+                        
+                        # Prioritize controlled ASTC decompression
                         if astcenc and texture_format in ASTC_FORMATS:
-                            # Use our controlled decompressor for ASTC
                             block_x, block_y = ASTC_FORMATS[texture_format]
                             decompressed_data, err = decompress_astc_ctypes(
                                 data.image_data, data.m_Width, data.m_Height, block_x, block_y
                             )
                             if err:
-                                progress_callback(f"ASTC decompression failed for {dest_name}: {err}. Falling back.")
-                                img = data.image # Fallback to UnityPy's internal decompressor
+                                progress_callback(f"ASTC decompression failed for {dest_name}: {err}. Falling back to UnityPy.")
+                                img = data.image
                             else:
                                 img = Image.frombytes("RGBA", (data.m_Width, data.m_Height), decompressed_data)
+                                del decompressed_data # free the large bytes object immediately
                         else:
-                            # Use UnityPy's default for other formats
+                            # For non-ASTC formats, still use UnityPy but manage memory aggressively
                             img = data.image
                         
                         img.save(dest_path)
 
                     finally:
-                        # Aggressively clean up large memory objects immediately
                         if img:
                             del img
-                        if decompressed_data:
-                            del decompressed_data
 
-                elif obj.type.name == "TextAsset" or (obj.type.name == "MonoBehaviour" and ".skel" in dest_name):
+                elif obj.type.name in ["TextAsset", "MonoBehaviour"]:
+                    # Handle both TextAsset and MonoBehaviour .skel files
+                    if obj.type.name == "MonoBehaviour" and ".skel" not in dest_name.lower():
+                        continue # Skip non-skel MonoBehaviours
+                    
                     with open(dest_path, "wb") as f:
                         content = data.m_Script
                         if isinstance(content, str):
@@ -227,7 +224,6 @@ def unpack_bundle(bundle_path, output_dir, progress_callback=print):
                 progress_callback(error_message)
                 print(traceback.format_exc())
             finally:
-                # Free memory after every single asset, not just batches
                 if data:
                     del data
                 gc.collect() 
