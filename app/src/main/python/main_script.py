@@ -1,5 +1,3 @@
-# main_script.py
-
 import sys
 import os
 import threading
