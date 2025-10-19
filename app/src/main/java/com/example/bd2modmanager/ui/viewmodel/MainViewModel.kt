@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -133,6 +135,23 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     val useAstc: StateFlow<Boolean> = savedStateHandle.getStateFlow("use_astc", false)
 
+    // --- Search State ---
+    private val _isSearchActive = MutableStateFlow(false)
+    val isSearchActive: StateFlow<Boolean> = _isSearchActive.asStateFlow()
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    // --- Filtered Mods List ---
+    val filteredModsList: StateFlow<List<ModInfo>> =
+        combine(_modsList, _searchQuery) { mods, query ->
+            if (query.isBlank()) {
+                mods
+            } else {
+                mods.filter { it.name.startsWith(query, ignoreCase = true) }
+            }
+        }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), emptyList())
+
     // --- New State Management for Parallel Installation ---
     private val _installJobs = MutableStateFlow<List<InstallJob>>(emptyList())
     val installJobs: StateFlow<List<InstallJob>> = _installJobs.asStateFlow()
@@ -232,6 +251,18 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     fun setUseAstc(useAstc: Boolean) {
         savedStateHandle["use_astc"] = useAstc
+    }
+
+    // --- Search Actions ---
+    fun setSearchActive(isActive: Boolean) {
+        _isSearchActive.value = isActive
+        if (!isActive) {
+            _searchQuery.value = "" // Clear query when closing
+        }
+    }
+
+    fun onSearchQueryChanged(query: String) {
+        _searchQuery.value = query
     }
 
     fun toggleModSelection(modUri: Uri) {
@@ -586,7 +617,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                                 val oldDirDoc = originalModDoc.createDirectory(".old")
                                 oldDirDoc?.let {
                                     copyDirectoryToSaf(context, file, it)
-                                }
+                                 }
                             }
                         }
                         _mergeState.value = MergeState.Finished("Successfully merged mod in-place!")
