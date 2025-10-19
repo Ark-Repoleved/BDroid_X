@@ -41,6 +41,7 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          APP_VERSION_NAME: ${{ github.event.inputs.tag }}
 
       - name: Create Release and Upload APK
         uses: softprops/action-gh-release@v2
