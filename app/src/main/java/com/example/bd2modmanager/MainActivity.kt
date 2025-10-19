@@ -639,19 +639,20 @@ fun ModScreen(
                                 val transition = updateTransition(isSearchActive, label = "search_transition")
                                 val collapsedSearchWidth = 40.dp
                                 val collapsedAstcWidth = 60.dp
+                                val spacerWidth = 8.dp
 
                                 val astcCardWidth by transition.animateDp(
                                     label = "astc_card_width",
                                     transitionSpec = { tween(350) }
                                 ) { active ->
-                                    if (active) collapsedAstcWidth else maxWidth - collapsedSearchWidth
+                                    if (active) collapsedAstcWidth else maxWidth - collapsedSearchWidth - spacerWidth
                                 }
 
                                 val searchCardWidth by transition.animateDp(
                                     label = "search_card_width",
                                     transitionSpec = { tween(350) }
                                 ) { active ->
-                                    if (active) maxWidth - collapsedAstcWidth else collapsedSearchWidth
+                                    if (active) maxWidth - collapsedAstcWidth - spacerWidth else collapsedSearchWidth
                                 }
 
                                 val searchCornerRadius by transition.animateDp(
@@ -673,26 +674,33 @@ fun ModScreen(
                                         Row(
                                             modifier = Modifier.fillMaxSize(),
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.Start
+                                            horizontalArrangement = if (isSearchActive) Arrangement.Center else Arrangement.Start
                                         ) {
-                                            AnimatedVisibility(
-                                                visible = !isSearchActive,
-                                                modifier = Modifier.weight(1f).padding(start = 12.dp)
+                                            Box(
+                                                modifier = if (isSearchActive) Modifier else Modifier.weight(1f),
+                                                contentAlignment = Alignment.Center
                                             ) {
-                                                Text(
-                                                    "Use ASTC Compression",
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    maxLines = 1
-                                                )
+                                                AnimatedVisibility(visible = !isSearchActive) {
+                                                    Text(
+                                                        text = "Use ASTC Compression",
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        maxLines = 1,
+                                                        modifier = Modifier.padding(start = 12.dp)
+                                                    )
+                                                }
                                             }
                                             val useAstc by viewModel.useAstc.collectAsState()
                                             Switch(
                                                 checked = useAstc,
                                                 onCheckedChange = { viewModel.setUseAstc(it) },
-                                                modifier = Modifier.scale(0.8f).padding(horizontal = 4.dp)
+                                                modifier = Modifier
+                                                    .scale(0.8f)
+                                                    .padding(horizontal = 4.dp)
                                             )
                                         }
                                     }
+
+                                    Spacer(Modifier.width(spacerWidth))
 
                                     ElevatedCard(
                                         modifier = Modifier.size(width = searchCardWidth, height = 40.dp),
