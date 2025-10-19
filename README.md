@@ -32,12 +32,12 @@ Before you can start installing mods, you need to complete a one-time authorizat
 
 1.  Open the app, and you will see a welcome screen.
 2.  Tap the **"Select Mod Source Folder"** button.
-3.  In the file picker that appears, navigate to where you store your mod files (e.g., `.zip` archives or extracted folders), and then tap **"Use this folder"**.
+3.  In the file picker that appears, navigate to where you store your mod folders, and then tap **"Use this folder"**.
     *   *Recommendation:* Create a folder named `.BD2_Mods` in your phone's storage and place all your downloaded mods there.
 
-## Folder/.zip Structure
+## Folder Structure
 
-For mods to be installed successfully, each mod must be placed within its own dedicated folder or`.zip` file inside the `BD2_Mods/` directory. The filenames within your mod folder **must** exactly match the original asset names used in the game's Unity bundles.
+For mods to be installed successfully, each mod must be placed within its own dedicated folder inside the `.BD2_Mods/` directory. The filenames within your mod folder **must** exactly match the original asset names used in the game's Unity bundles.
 
 Here is a typical layout, using assets for "Lathel: Dark Knight" as an example:
 
