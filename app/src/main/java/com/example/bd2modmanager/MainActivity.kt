@@ -673,17 +673,17 @@ fun ModScreen(
                                     ) {
                                         Row(
                                             modifier = Modifier.fillMaxSize(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.Start
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             AnimatedVisibility(
                                                 visible = !isSearchActive,
-                                                modifier = Modifier.weight(1f).padding(start = 12.dp)
+                                                modifier = Modifier.weight(1f)
                                             ) {
                                                 Text(
                                                     "Use ASTC Compression",
                                                     style = MaterialTheme.typography.bodyMedium,
-                                                    maxLines = 1
+                                                    maxLines = 1,
+                                                    textAlign = TextAlign.Center
                                                 )
                                             }
                                             val useAstc by viewModel.useAstc.collectAsState()
