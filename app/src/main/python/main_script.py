@@ -9,6 +9,7 @@ from repacker.repacker import repack_bundle
 import character_scraper
 import cdn_downloader
 from unpacker import unpack_bundle as unpacker_main
+import spine_merger
 
 # --- Global Cache for CDN Catalog ---
 # In-memory cache for the catalog JSON content.
@@ -151,4 +152,24 @@ def main(original_bundle_path: str, modded_assets_folder: str, output_path: str,
         import traceback
         error_message = traceback.format_exc()
         print(f"An error occurred: {error_message}")
+        return False, error_message
+
+def merge_spine_assets(mod_dir_path: str, progress_callback=None):
+    """
+    Entry point for Kotlin to run the spine merger script.
+    Returns a tuple: (success: Boolean, message: String)
+    """
+    def report_progress(message):
+        if progress_callback:
+            progress_callback(message)
+        print(message)
+
+    try:
+        message = spine_merger.run(mod_dir_path, report_progress)
+        report_progress(message)
+        return True, message
+    except Exception as e:
+        import traceback
+        error_message = traceback.format_exc()
+        report_progress(f"An error occurred during spine merge: {error_message}")
         return False, error_message
