@@ -678,9 +678,7 @@ fun ModScreen(
                                         ) {
                                             AnimatedVisibility(
                                                 visible = !isSearchActive,
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .padding(start = 12.dp)
+                                                modifier = Modifier.weight(1f).padding(start = 12.dp)
                                             ) {
                                                 Text(
                                                     "Use ASTC Compression",
@@ -692,14 +690,12 @@ fun ModScreen(
                                             Switch(
                                                 checked = useAstc,
                                                 onCheckedChange = { viewModel.setUseAstc(it) },
-                                                modifier = Modifier
-                                                    .scale(0.8f)
-                                                    .padding(horizontal = 4.dp)
+                                                modifier = Modifier.scale(0.8f).padding(horizontal = 4.dp)
                                             )
                                         }
                                     }
-                                    
-                                    Spacer(Modifier.width(spacerWidth))
+
+                                    Spacer(modifier = Modifier.width(spacerWidth))
 
                                     ElevatedCard(
                                         modifier = Modifier.size(width = searchCardWidth, height = 40.dp),
@@ -903,7 +899,7 @@ fun EmptyModsScreen() {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit, onLongPress: () -> Unit) {
-    val elevation by animateDpAsState(if (isSelected) 4.dp else 1.dp, label = "elevation")
+    val elevation by androidx.compose.animation.core.animateDpAsState(if (isSelected) 4.dp else 1.dp, label = "elevation")
     ElevatedCard(
         elevation = CardDefaults.cardElevation(defaultElevation = elevation),
         modifier = Modifier
