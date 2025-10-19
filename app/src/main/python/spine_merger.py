@@ -50,11 +50,14 @@ def _generate_operations(base_dir, file_prefix, progress_callback):
     png_files = [f for f in all_files_in_dir if f.startswith(file_prefix) and f.endswith('.png')]
 
     def sort_key(filename):
+        # This handles the case where the base name is "prefix.png" and should come first
+        if filename == f"{file_prefix}.png":
+            return 1
+        # This handles numbered files like "prefix_2.png"
         match = re.search(r'_(\d+)\.png$', filename)
         if match:
             return int(match.group(1))
-        if filename == f"{file_prefix}.png":
-            return 1
+        # Fallback for any other unexpected format
         return float('inf')
 
     png_files.sort(key=sort_key)
@@ -65,7 +68,13 @@ def _generate_operations(base_dir, file_prefix, progress_callback):
     i = 0
     pair_index = 1
     while i < len(png_files):
-        output_filename = f"{file_prefix}_{pair_index}.png"
+        # --- MODIFIED LOGIC FOR FILENAME ---
+        if pair_index == 1:
+            output_filename = f"{file_prefix}.png"  # First file has no numeric suffix
+        else:
+            output_filename = f"{file_prefix}_{pair_index}.png" # Subsequent files get _2, _3, etc.
+        # --- END OF MODIFICATION ---
+            
         if i + 1 < len(png_files):
             op = {"type": "merge", "sources": [png_files[i], png_files[i+1]], "output": output_filename}
             operations.append(op)
@@ -77,7 +86,7 @@ def _generate_operations(base_dir, file_prefix, progress_callback):
         pair_index += 1
         
     progress_callback("  Generated the following operations:")
-    for op in operations: progress_callback(f"    - {op['type']}: {op['sources']}")
+    for op in operations: progress_callback(f"    - {op['type']}: {op['sources']} -> {op['output']}")
     return operations, source_pngs_for_backup
 
 def run(mod_dir_path, progress_callback=print):
