@@ -57,6 +57,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 
 import androidx.compose.material.icons.filled.Merge
+import androidx.compose.animation.animateContentSize
 
 class MainActivity : ComponentActivity() {
 
@@ -413,6 +414,7 @@ fun InstallJobRow(installJob: InstallJob) {
     }
 }
 
+
 @Composable
 fun UninstallConfirmationDialog(
     targetHash: String?,
@@ -635,85 +637,69 @@ fun ModScreen(
                             }
                             Spacer(modifier = Modifier.width(8.dp))
 
-                            BoxWithConstraints(
+                            ElevatedCard(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(40.dp),
-                                contentAlignment = Alignment.CenterEnd
+                                shape = RoundedCornerShape(16.dp)
                             ) {
-                                ElevatedCard(
-                                    modifier = Modifier.fillMaxSize(),
-                                    shape = RoundedCornerShape(16.dp)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .animateContentSize(animationSpec = tween(350)),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.End
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                            Text("Use ASTC Compression", style = MaterialTheme.typography.bodyMedium)
-                                        }
-                                        val useAstc by viewModel.useAstc.collectAsState()
-                                        Switch(
-                                            checked = useAstc,
-                                            onCheckedChange = { viewModel.setUseAstc(it) },
-                                            modifier = Modifier.scale(0.8f)
+                                    AnimatedVisibility(visible = isSearchActive) {
+                                        BasicTextField(
+                                            value = searchQuery,
+                                            onValueChange = viewModel::onSearchQueryChanged,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(start = 16.dp, end = 8.dp),
+                                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            ),
+                                            singleLine = true,
+                                            decorationBox = { innerTextField ->
+                                                if (searchQuery.isEmpty()) {
+                                                    Text(
+                                                        "Search by name...",
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                                innerTextField()
+                                            }
                                         )
                                     }
-                                }
 
-                                val transition = updateTransition(isSearchActive, label = "search_transition")
-                                val searchCardWidth by transition.animateDp(
-                                    label = "search_card_width",
-                                    transitionSpec = { tween(350) }
-                                ) { active ->
-                                    if (active) maxWidth else 40.dp
-                                }
-                                val cornerRadius by transition.animateDp(
-                                    label = "search_card_corner_radius",
-                                    transitionSpec = { tween(350) }
-                                ) { active ->
-                                    if (active) 16.dp else 20.dp
-                                }
-
-                                Card(
-                                    modifier = Modifier.size(width = searchCardWidth, height = 40.dp),
-                                    shape = RoundedCornerShape(cornerRadius),
-                                    onClick = { if (!isSearchActive) viewModel.setSearchActive(true) },
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceBright),
-                                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxSize(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.End
-                                    ) {
-                                        AnimatedVisibility(visible = isSearchActive, modifier = Modifier.weight(1f)) {
-                                            BasicTextField(
-                                                value = searchQuery,
-                                                onValueChange = viewModel::onSearchQueryChanged,
-                                                modifier = Modifier.padding(start = 16.dp, end = 8.dp),
-                                                textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                                    color = MaterialTheme.colorScheme.onSurface
-                                                ),
-                                                singleLine = true,
-                                                decorationBox = { innerTextField ->
-                                                    if (searchQuery.isEmpty()) {
-                                                        Text(
-                                                            "Search by name...",
-                                                            style = MaterialTheme.typography.bodyMedium,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                        )
-                                                    }
-                                                    innerTextField()
-                                                }
+                                    AnimatedVisibility(visible = !isSearchActive) {
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(horizontal = 12.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                "Use ASTC Compression",
+                                                style = MaterialTheme.typography.bodyMedium
                                             )
                                         }
-                                        IconButton(onClick = { viewModel.setSearchActive(!isSearchActive) }) {
-                                            Icon(
-                                                imageVector = if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
-                                                contentDescription = "Toggle Search"
-                                            )
-                                        }
+                                    }
+
+                                    val useAstc by viewModel.useAstc.collectAsState()
+                                    Switch(
+                                        checked = useAstc,
+                                        onCheckedChange = { viewModel.setUseAstc(it) },
+                                        modifier = Modifier.scale(0.8f)
+                                    )
+
+                                    IconButton(onClick = { viewModel.setSearchActive(!isSearchActive) }) {
+                                        Icon(
+                                            imageVector = if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
+                                            contentDescription = "Toggle Search"
+                                        )
                                     }
                                 }
                             }
