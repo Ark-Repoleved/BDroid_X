@@ -12,6 +12,8 @@ import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
@@ -636,64 +638,39 @@ fun ModScreen(
                             }
                             Spacer(modifier = Modifier.width(8.dp))
 
-                            BoxWithConstraints(
+                            ElevatedCard(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(40.dp),
-                                contentAlignment = Alignment.CenterEnd
+                                shape = RoundedCornerShape(16.dp)
                             ) {
-                                ElevatedCard(
-                                    modifier = Modifier.fillMaxSize(),
-                                    shape = RoundedCornerShape(16.dp)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(start = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.End
                                 ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .padding(start = 12.dp, end = 48.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                                    Box(
+                                        modifier = Modifier.weight(1f),
+                                        contentAlignment = Alignment.CenterStart
                                     ) {
-                                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                            Text("Use ASTC Compression", style = MaterialTheme.typography.bodyMedium)
+                                        this.AnimatedVisibility(
+                                            visible = !isSearchActive,
+                                            enter = fadeIn(animationSpec = tween(durationMillis = 150, delayMillis = 200)),
+                                            exit = fadeOut(animationSpec = tween(durationMillis = 150))
+                                        ) {
+                                            Text("Use ASTC Compression", style = MaterialTheme.typography.bodyMedium, maxLines = 1)
                                         }
-                                        val useAstc by viewModel.useAstc.collectAsState()
-                                        Switch(
-                                            checked = useAstc,
-                                            onCheckedChange = { viewModel.setUseAstc(it) },
-                                            modifier = Modifier.scale(0.8f)
-                                        )
-                                    }
-                                }
 
-                                val transition = updateTransition(isSearchActive, label = "search_transition")
-                                val searchCardWidth by transition.animateDp(
-                                    label = "search_card_width",
-                                    transitionSpec = { tween(350) }
-                                ) { active ->
-                                    if (active) maxWidth else 40.dp
-                                }
-                                val cornerRadius by transition.animateDp(
-                                    label = "search_card_corner_radius",
-                                    transitionSpec = { tween(350) }
-                                ) { active ->
-                                    if (active) 16.dp else 20.dp
-                                }
-
-                                ElevatedCard(
-                                    modifier = Modifier.size(width = searchCardWidth, height = 40.dp),
-                                    shape = RoundedCornerShape(cornerRadius),
-                                    onClick = { if (!isSearchActive) viewModel.setSearchActive(true) },
-                                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxSize(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.End
-                                    ) {
-                                        AnimatedVisibility(visible = isSearchActive, modifier = Modifier.weight(1f)) {
+                                        this.AnimatedVisibility(
+                                            visible = isSearchActive,
+                                            enter = fadeIn(animationSpec = tween(durationMillis = 150, delayMillis = 200)),
+                                            exit = fadeOut(animationSpec = tween(durationMillis = 150))
+                                        ) {
                                             BasicTextField(
                                                 value = searchQuery,
                                                 onValueChange = viewModel::onSearchQueryChanged,
-                                                modifier = Modifier.padding(start = 16.dp, end = 8.dp),
                                                 textStyle = MaterialTheme.typography.bodyMedium.copy(
                                                     color = MaterialTheme.colorScheme.onSurface
                                                 ),
@@ -710,12 +687,20 @@ fun ModScreen(
                                                 }
                                             )
                                         }
-                                        IconButton(onClick = { viewModel.setSearchActive(!isSearchActive) }) {
-                                            Icon(
-                                                imageVector = if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
-                                                contentDescription = "Toggle Search"
-                                            )
-                                        }
+                                    }
+
+                                    val useAstc by viewModel.useAstc.collectAsState()
+                                    Switch(
+                                        checked = useAstc,
+                                        onCheckedChange = { viewModel.setUseAstc(it) },
+                                        modifier = Modifier.scale(0.8f)
+                                    )
+
+                                    IconButton(onClick = { viewModel.setSearchActive(!isSearchActive) }) {
+                                        Icon(
+                                            imageVector = if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
+                                            contentDescription = "Toggle Search"
+                                        )
                                     }
                                 }
                             }
