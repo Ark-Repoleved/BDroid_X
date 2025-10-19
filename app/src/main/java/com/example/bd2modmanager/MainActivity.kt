@@ -11,17 +11,17 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
@@ -29,25 +29,29 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.state.ToggleableState
 import com.example.bd2modmanager.ui.theme.BD2ModManagerTheme
 import com.example.bd2modmanager.ui.viewmodel.*
 import com.example.bd2modmanager.utils.SafManager
 import com.valentinilk.shimmer.shimmer
+
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+
+import androidx.compose.material.icons.filled.Merge
 
 class MainActivity : ComponentActivity() {
 
@@ -536,14 +540,11 @@ fun ModScreen(
     onMergeRequest: () -> Unit
 ) {
     val modSourceDirectoryUri by viewModel.modSourceDirectoryUri.collectAsState()
-    val modsList by viewModel.filteredModsList.collectAsState()
-    val allModsList by viewModel.modsList.collectAsState()
+    val modsList by viewModel.modsList.collectAsState()
     val groupedMods = modsList.groupBy { it.targetHashedName ?: "Unknown" }
     val selectedMods by viewModel.selectedMods.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val context = LocalContext.current
-    val isSearchActive by viewModel.isSearchActive.collectAsState()
-    val searchQuery by viewModel.searchQuery.collectAsState()
 
     val pullToRefreshState = rememberPullToRefreshState()
     if (pullToRefreshState.isRefreshing) {
@@ -610,7 +611,7 @@ fun ModScreen(
                                     modifier = Modifier.size(width = 48.dp, height = 40.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    val allModsCount = allModsList.size
+                                    val allModsCount = modsList.size
                                     val selectedModsCount = selectedMods.size
                                     val checkboxState = when {
                                         selectedModsCount == 0 -> ToggleableState.Off
@@ -624,106 +625,32 @@ fun ModScreen(
                                 }
                             }
                             Spacer(modifier = Modifier.width(8.dp))
-
-                            BoxWithConstraints(
+                            ElevatedCard(
                                 modifier = Modifier
-                                    .weight(1f)
                                     .height(40.dp)
+                                    .weight(1f),
+                                shape = RoundedCornerShape(16.dp)
                             ) {
-                                ElevatedCard(
-                                    modifier = Modifier.fillMaxSize(),
-                                    shape = RoundedCornerShape(16.dp)
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Box(
-                                            modifier = Modifier.weight(1f),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                "Use ASTC Compression",
-                                                style = MaterialTheme.typography.bodyMedium
-                                            )
-                                        }
-                                        val useAstc by viewModel.useAstc.collectAsState()
-                                        Switch(
-                                            checked = useAstc,
-                                            onCheckedChange = { viewModel.setUseAstc(it) },
-                                            modifier = Modifier.scale(0.8f)
-                                        )
+                                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                        Text("Use ASTC Compression", style = MaterialTheme.typography.bodyMedium)
                                     }
-                                }
-
-                                val animatedWidth by animateDpAsState(
-                                    targetValue = if (isSearchActive) maxWidth else 40.dp,
-                                    label = "searchWidth"
-                                )
-                                val animatedShape by remember(isSearchActive) {
-                                    derivedStateOf {
-                                        if (isSearchActive) RoundedCornerShape(16.dp) else CircleShape
-                                    }
-                                }
-
-                                Card(
-                                    modifier = Modifier
-                                        .width(animatedWidth)
-                                        .fillMaxHeight(),
-                                    shape = animatedShape,
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                                ) {
-                                    Box(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (isSearchActive) {
-                                            OutlinedTextField(
-                                                value = searchQuery,
-                                                onValueChange = { viewModel.onSearchQueryChanged(it) },
-                                                placeholder = { Text("Search Mods...") },
-                                                textStyle = MaterialTheme.typography.bodyMedium,
-                                                singleLine = true,
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(start = 12.dp),
-                                                leadingIcon = {
-                                                    IconButton(onClick = { viewModel.toggleSearchActive() }) {
-                                                        Icon(
-                                                            Icons.Default.Search,
-                                                            contentDescription = "Toggle Search"
-                                                        )
-                                                    }
-                                                },
-                                                colors = OutlinedTextFieldDefaults.colors(
-                                                    focusedContainerColor = Color.Transparent,
-                                                    unfocusedContainerColor = Color.Transparent,
-                                                    focusedBorderColor = Color.Transparent,
-                                                    unfocusedBorderColor = Color.Transparent,
-                                                )
-                                            )
-                                        } else {
-                                            IconButton(
-                                                onClick = { viewModel.toggleSearchActive() },
-                                                modifier = Modifier.fillMaxSize()
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Search,
-                                                    contentDescription = "Search"
-                                                )
-                                            }
-                                        }
-                                    }
+                                    val useAstc by viewModel.useAstc.collectAsState()
+                                    Switch(
+                                        checked = useAstc,
+                                        onCheckedChange = { viewModel.setUseAstc(it) },
+                                        modifier = Modifier.scale(0.8f)
+                                    )
                                 }
                             }
                         }
 
                         if (isLoading && modsList.isEmpty()) {
                             ShimmerLoadingScreen()
-                        } else if (modsList.isEmpty() && searchQuery.isNotEmpty()) {
-                            EmptyModsScreen()
-                        }
-                        else if (modsList.isEmpty()) {
+                        } else if (modsList.isEmpty()) {
                             EmptyModsScreen()
                         } else {
                             LazyColumn(
@@ -923,34 +850,40 @@ fun ShimmerModCard() {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp)
+            .shimmer()
     ) {
-        Row(
-            modifier = Modifier
-                .padding(16.dp)
-                .shimmer(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(24.dp)
-                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-            )
-            Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth(0.7f)
-                        .height(20.dp)
+                        .size(24.dp)
                         .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.9f)
-                        .height(16.dp)
-                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-                )
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.7f)
+                            .height(20.dp)
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.9f)
+                            .height(16.dp)
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(100.dp)
+                            .height(32.dp)
+                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                    )
+                }
             }
         }
     }
-}
