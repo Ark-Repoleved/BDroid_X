@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
@@ -412,7 +413,6 @@ fun InstallJobRow(installJob: InstallJob) {
     }
 }
 
-
 @Composable
 fun UninstallConfirmationDialog(
     targetHash: String?,
@@ -534,7 +534,7 @@ fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
     )
 }
 
-@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ModScreen(
     viewModel: MainViewModel,
@@ -544,8 +544,8 @@ fun ModScreen(
     onMergeRequest: () -> Unit
 ) {
     val modSourceDirectoryUri by viewModel.modSourceDirectoryUri.collectAsState()
-    val modsList by viewModel.filteredModsList.collectAsState() // Use filtered list
-    val allModsList by viewModel.modsList.collectAsState() // Keep original for counts
+    val modsList by viewModel.filteredModsList.collectAsState()
+    val allModsList by viewModel.modsList.collectAsState()
     val groupedMods = modsList.groupBy { it.targetHashedName ?: "Unknown" }
     val selectedMods by viewModel.selectedMods.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -635,14 +635,12 @@ fun ModScreen(
                             }
                             Spacer(modifier = Modifier.width(8.dp))
 
-                            // Box containing ASTC Card and animated Search Card
                             BoxWithConstraints(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(40.dp),
                                 contentAlignment = Alignment.CenterEnd
                             ) {
-                                // Background ASTC Card
                                 ElevatedCard(
                                     modifier = Modifier.fillMaxSize(),
                                     shape = RoundedCornerShape(16.dp)
@@ -663,7 +661,6 @@ fun ModScreen(
                                     }
                                 }
 
-                                // Foreground Search Component
                                 val transition = updateTransition(isSearchActive, label = "search_transition")
                                 val searchCardWidth by transition.animateDp(
                                     label = "search_card_width",
@@ -671,17 +668,16 @@ fun ModScreen(
                                 ) { active ->
                                     if (active) maxWidth else 40.dp
                                 }
-                                val searchCardShape by transition.animateValue(
-                                    typeConverter = Dp.VectorConverter.times(4),
-                                    label = "search_card_shape",
+                                val cornerRadius by transition.animateDp(
+                                    label = "search_card_corner_radius",
                                     transitionSpec = { tween(350) }
                                 ) { active ->
-                                    if (active) RoundedCornerShape(16.dp) else RoundedCornerShape(50)
+                                    if (active) 16.dp else 20.dp
                                 }
 
                                 Card(
                                     modifier = Modifier.size(width = searchCardWidth, height = 40.dp),
-                                    shape = searchCardShape,
+                                    shape = RoundedCornerShape(cornerRadius),
                                     onClick = { if (!isSearchActive) viewModel.setSearchActive(true) },
                                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceBright),
                                     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
@@ -723,11 +719,9 @@ fun ModScreen(
                             }
                         }
 
-
                         if (isLoading && modsList.isEmpty()) {
                             ShimmerLoadingScreen()
                         } else if (modsList.isEmpty()) {
-                            // Show a different message if search returns no results
                             if (searchQuery.isNotEmpty()) {
                                 NoSearchResultsScreen(searchQuery)
                             } else {
@@ -955,38 +949,38 @@ fun ShimmerModCard() {
             .padding(horizontal = 16.dp, vertical = 6.dp)
             .shimmer()
     ) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
                 Box(
                     modifier = Modifier
-                        .size(24.dp)
+                        .fillMaxWidth(0.7f)
+                        .height(20.dp)
                         .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                 )
-                Spacer(Modifier.width(16.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(0.7f)
-                            .height(20.dp)
-                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(0.9f)
-                            .height(16.dp)
-                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Box(
-                        modifier = Modifier
-                            .width(100.dp)
-                            .height(32.dp)
-                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-                    )
-                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .height(16.dp)
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(
+                    modifier = Modifier
+                        .width(100.dp)
+                        .height(32.dp)
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                )
             }
         }
     }
+}
