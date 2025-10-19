@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -58,6 +60,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 
 import androidx.compose.material.icons.filled.Merge
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 
 class MainActivity : ComponentActivity() {
 
@@ -610,6 +616,7 @@ fun ModScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .height(IntrinsicSize.Min)
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -637,73 +644,110 @@ fun ModScreen(
                             }
                             Spacer(modifier = Modifier.width(8.dp))
 
-                            ElevatedCard(
+                            Row(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(40.dp),
-                                shape = RoundedCornerShape(16.dp)
+                                    .fillMaxHeight(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Row(
+                                ElevatedCard(
                                     modifier = Modifier
-                                        .fillMaxSize()
+                                        .weight(1f)
+                                        .fillMaxHeight()
                                         .animateContentSize(animationSpec = tween(350)),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.End
+                                    shape = RoundedCornerShape(16.dp)
                                 ) {
-                                    AnimatedVisibility(visible = isSearchActive) {
+                                    Row(
+                                        modifier = Modifier.fillMaxSize(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        AnimatedVisibility(
+                                            visible = !isSearchActive,
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(horizontal = 12.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    "Use ASTC Compression",
+                                                    style = MaterialTheme.typography.bodyMedium
+                                                )
+                                            }
+                                        }
+
+                                        val useAstc by viewModel.useAstc.collectAsState()
+                                        Switch(
+                                            checked = useAstc,
+                                            onCheckedChange = { viewModel.setUseAstc(it) },
+                                            modifier = Modifier.scale(0.8f)
+                                        )
+                                    }
+                                }
+
+                                AnimatedVisibility(
+                                    visible = isSearchActive,
+                                    enter = fadeIn(animationSpec = tween(delayMillis = 150)) + slideInHorizontally(animationSpec = tween(350), initialOffsetX = { it }),
+                                    exit = fadeOut(animationSpec = tween(150)) + slideOutHorizontally(animationSpec = tween(350), targetOffsetX = { it })
+                                ) {
+                                    ElevatedCard(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight(),
+                                        shape = RoundedCornerShape(16.dp)
+                                    ) {
                                         BasicTextField(
                                             value = searchQuery,
                                             onValueChange = viewModel::onSearchQueryChanged,
                                             modifier = Modifier
-                                                .weight(1f)
-                                                .padding(start = 16.dp, end = 8.dp),
-                                            textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            ),
+                                                .fillMaxSize()
+                                                .padding(horizontal = 16.dp),
                                             singleLine = true,
+                                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
                                             decorationBox = { innerTextField ->
-                                                if (searchQuery.isEmpty()) {
-                                                    Text(
-                                                        "Search by name...",
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
+                                                Row(
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Box(modifier = Modifier.weight(1f)) {
+                                                        if (searchQuery.isEmpty()) {
+                                                            Text(
+                                                                "Search by name...",
+                                                                style = MaterialTheme.typography.bodyMedium,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                            )
+                                                        }
+                                                        innerTextField()
+                                                    }
+                                                    IconButton(onClick = { viewModel.setSearchActive(false) }) {
+                                                        Icon(Icons.Default.Close, "Close search")
+                                                    }
                                                 }
-                                                innerTextField()
                                             }
                                         )
                                     }
+                                }
 
-                                    AnimatedVisibility(visible = !isSearchActive) {
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .padding(horizontal = 12.dp),
-                                            contentAlignment = Alignment.Center
+                                AnimatedVisibility(
+                                    visible = !isSearchActive,
+                                    enter = fadeIn(animationSpec = tween(delayMillis = 150)),
+                                    exit = fadeOut(animationSpec = tween(150))
+                                ) {
+                                    ElevatedCard(shape = CircleShape, modifier = Modifier.size(40.dp)) {
+                                        IconButton(
+                                            onClick = { viewModel.setSearchActive(true) },
+                                            modifier = Modifier.fillMaxSize()
                                         ) {
-                                            Text(
-                                                "Use ASTC Compression",
-                                                style = MaterialTheme.typography.bodyMedium
-                                            )
+                                            Icon(Icons.Default.Search, "Search")
                                         }
-                                    }
-
-                                    val useAstc by viewModel.useAstc.collectAsState()
-                                    Switch(
-                                        checked = useAstc,
-                                        onCheckedChange = { viewModel.setUseAstc(it) },
-                                        modifier = Modifier.scale(0.8f)
-                                    )
-
-                                    IconButton(onClick = { viewModel.setSearchActive(!isSearchActive) }) {
-                                        Icon(
-                                            imageVector = if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
-                                            contentDescription = "Toggle Search"
-                                        )
                                     }
                                 }
                             }
                         }
+
 
                         if (isLoading && modsList.isEmpty()) {
                             ShimmerLoadingScreen()
