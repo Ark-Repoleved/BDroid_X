@@ -144,12 +144,8 @@ def run(mod_dir_path, progress_callback=print):
             w1, h1 = img1.size
             w2, h2 = img2.size
             
-            # --- MODIFIED LOGIC FOR IMAGE HEIGHT ---
-            # 新的寬度是兩者相加
             new_width = w1 + w2
-            # 新的高度取兩者中較大的值，以避免裁切
             new_height = max(h1, h2)
-            # --- END OF MODIFICATION ---
 
             new_img = Image.new('RGBA', (new_width, new_height))
             new_img.paste(img1, (0, 0))
