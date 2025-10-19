@@ -713,27 +713,31 @@ fun ModScreen(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.End
                                         ) {
-                                            AnimatedVisibility(visible = isSearchActive, modifier = Modifier.weight(1f)) {
-                                                BasicTextField(
-                                                    value = searchQuery,
-                                                    onValueChange = viewModel::onSearchQueryChanged,
-                                                    modifier = Modifier.padding(start = 16.dp, end = 8.dp),
-                                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                                        color = MaterialTheme.colorScheme.onSurface
-                                                    ),
-                                                    singleLine = true,
-                                                    decorationBox = { innerTextField ->
-                                                        if (searchQuery.isEmpty()) {
-                                                            Text(
-                                                                "Search by name...",
-                                                                style = MaterialTheme.typography.bodyMedium,
-                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                            )
+                                            // --- FIX STARTS HERE ---
+                                            Box(modifier = Modifier.weight(1f)) {
+                                                AnimatedVisibility(visible = isSearchActive) {
+                                                    BasicTextField(
+                                                        value = searchQuery,
+                                                        onValueChange = viewModel::onSearchQueryChanged,
+                                                        modifier = Modifier.padding(start = 16.dp, end = 8.dp),
+                                                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                                            color = MaterialTheme.colorScheme.onSurface
+                                                        ),
+                                                        singleLine = true,
+                                                        decorationBox = { innerTextField ->
+                                                            if (searchQuery.isEmpty()) {
+                                                                Text(
+                                                                    "Search by name...",
+                                                                    style = MaterialTheme.typography.bodyMedium,
+                                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                                )
+                                                            }
+                                                            innerTextField()
                                                         }
-                                                        innerTextField()
-                                                    }
-                                                )
+                                                    )
+                                                }
                                             }
+                                            // --- FIX ENDS HERE ---
                                             IconButton(onClick = { viewModel.setSearchActive(!isSearchActive) }) {
                                                 Icon(
                                                     imageVector = if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
