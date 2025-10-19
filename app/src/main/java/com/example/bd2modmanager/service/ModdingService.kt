@@ -72,4 +72,24 @@ object ModdingService {
             Pair(false, e.message ?: "An unknown error occurred in Kotlin during unpack.")
         }
     }
+
+    fun mergeSpineAssets(modPath: String, onProgress: (String) -> Unit): Pair<Boolean, String> {
+        return try {
+            val py = Python.getInstance()
+            val mainScript = py.getModule("main_script")
+
+            val result = mainScript.callAttr(
+                "merge_spine_assets",
+                modPath,
+                PyObject.fromJava(onProgress)
+            ).asList()
+
+            val success = result[0].toBoolean()
+            val message = result[1].toString()
+            Pair(success, message)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Pair(false, e.message ?: "An unknown error occurred in Kotlin during spine merge.")
+        }
+    }
 }
