@@ -670,7 +670,7 @@ fun ModScreen(
                                     modifier = Modifier
                                         .width(animatedWidth)
                                         .fillMaxHeight(),
-                                    shape = animatedShape.value,
+                                    shape = animatedShape,
                                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                                 ) {
                                     Box(
