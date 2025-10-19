@@ -674,10 +674,10 @@ fun ModScreen(
                                         Row(
                                             modifier = Modifier.fillMaxSize(),
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = if (isSearchActive) Arrangement.Center else Arrangement.Start
+                                            horizontalArrangement = Arrangement.End
                                         ) {
                                             Box(
-                                                modifier = if (isSearchActive) Modifier else Modifier.weight(1f),
+                                                modifier = Modifier.weight(1f),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 AnimatedVisibility(visible = !isSearchActive) {
@@ -685,7 +685,6 @@ fun ModScreen(
                                                         text = "Use ASTC Compression",
                                                         style = MaterialTheme.typography.bodyMedium,
                                                         maxLines = 1,
-                                                        modifier = Modifier.padding(start = 12.dp)
                                                     )
                                                 }
                                             }
@@ -713,7 +712,6 @@ fun ModScreen(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.End
                                         ) {
-                                            // --- FIX STARTS HERE ---
                                             Box(modifier = Modifier.weight(1f)) {
                                                 AnimatedVisibility(visible = isSearchActive) {
                                                     BasicTextField(
@@ -737,7 +735,6 @@ fun ModScreen(
                                                     )
                                                 }
                                             }
-                                            // --- FIX ENDS HERE ---
                                             IconButton(onClick = { viewModel.setSearchActive(!isSearchActive) }) {
                                                 Icon(
                                                     imageVector = if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
