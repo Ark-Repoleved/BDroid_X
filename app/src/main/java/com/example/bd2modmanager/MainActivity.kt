@@ -9,6 +9,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
@@ -540,11 +542,14 @@ fun ModScreen(
     onMergeRequest: () -> Unit
 ) {
     val modSourceDirectoryUri by viewModel.modSourceDirectoryUri.collectAsState()
-    val modsList by viewModel.modsList.collectAsState()
+    val modsList by viewModel.filteredModsList.collectAsState()
+    val allModsList by viewModel.modsList.collectAsState()
     val groupedMods = modsList.groupBy { it.targetHashedName ?: "Unknown" }
     val selectedMods by viewModel.selectedMods.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val context = LocalContext.current
+    val isSearchActive by viewModel.isSearchActive.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
 
     val pullToRefreshState = rememberPullToRefreshState()
     if (pullToRefreshState.isRefreshing) {
@@ -611,7 +616,7 @@ fun ModScreen(
                                     modifier = Modifier.size(width = 48.dp, height = 40.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    val allModsCount = modsList.size
+                                      val allModsCount = allModsList.size
                                     val selectedModsCount = selectedMods.size
                                     val checkboxState = when {
                                         selectedModsCount == 0 -> ToggleableState.Off
@@ -625,32 +630,58 @@ fun ModScreen(
                                 }
                             }
                             Spacer(modifier = Modifier.width(8.dp))
-                            ElevatedCard(
-                                modifier = Modifier
-                                    .height(40.dp)
-                                    .weight(1f),
-                                shape = RoundedCornerShape(16.dp)
+                            AnimatedVisibility(
+                                visible = !isSearchActive,
+                                enter = slideInHorizontally(initialOffsetX = { it }),
+                                exit = slideOutHorizontally(targetOffsetX = { it })
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                ElevatedCard(
+                                    modifier = Modifier
+                                        .height(40.dp)
+                                        .weight(1f),
+                                    shape = RoundedCornerShape(16.dp)
                                 ) {
-                                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                        Text("Use ASTC Compression", style = MaterialTheme.typography.bodyMedium)
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                            Text("Use ASTC Compression", style = MaterialTheme.typography.bodyMedium)
+                                        }
+                                        val useAstc by viewModel.useAstc.collectAsState()
+                                        Switch(
+                                            checked = useAstc,
+                                            onCheckedChange = { viewModel.setUseAstc(it) },
+                                            modifier = Modifier.scale(0.8f)
+                                        )
                                     }
-                                    val useAstc by viewModel.useAstc.collectAsState()
-                                    Switch(
-                                        checked = useAstc,
-                                        onCheckedChange = { viewModel.setUseAstc(it) },
-                                        modifier = Modifier.scale(0.8f)
-                                    )
                                 }
+                            }
+                            AnimatedVisibility(
+                                visible = isSearchActive,
+                                enter = slideInHorizontally(initialOffsetX = { it }),
+                                exit = slideOutHorizontally(targetOffsetX = { it })
+                            ) {
+                                OutlinedTextField(
+                                    value = searchQuery,
+                                    onValueChange = { viewModel.onSearchQueryChanged(it) },
+                                    modifier = Modifier.weight(1f).height(48.dp),
+                                    placeholder = { Text("Search Mods...") },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(16.dp),
+                                )
+                            }
+                            IconButton(onClick = { viewModel.toggleSearchActive() }) {
+                                Icon(Icons.Default.Search, contentDescription = "Search")
                             }
                         }
 
                         if (isLoading && modsList.isEmpty()) {
                             ShimmerLoadingScreen()
-                        } else if (modsList.isEmpty()) {
+                        } else if (modsList.isEmpty() && searchQuery.isNotEmpty()) {
+                            EmptyModsScreen()
+                        }
+                        else if (modsList.isEmpty()) {
                             EmptyModsScreen()
                         } else {
                             LazyColumn(
