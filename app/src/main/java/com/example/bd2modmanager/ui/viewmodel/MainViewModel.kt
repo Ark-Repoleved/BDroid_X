@@ -134,7 +134,15 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             if (query.isBlank()) {
                 mods
             } else {
-                mods.filter { it.name.startsWith(query, ignoreCase = true) }
+                val keywords = query.split(" ").filter { it.isNotBlank() }
+                mods.filter { modInfo ->
+                    keywords.all { keyword ->
+                        modInfo.name.contains(keyword, ignoreCase = true) ||
+                        modInfo.character.contains(keyword, ignoreCase = true) ||
+                        modInfo.costume.contains(keyword, ignoreCase = true) ||
+                        modInfo.type.contains(keyword, ignoreCase = true)
+                    }
+                }
             }
         }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -247,22 +255,23 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     fun toggleSelectAll() {
-        val allModUris = _modsList.value.map { it.uri }.toSet()
+        val filteredModUris = filteredModsList.value.map { it.uri }.toSet()
         val currentSelections = _selectedMods.value
+        val selectedFilteredUris = currentSelections.intersect(filteredModUris)
 
-        _selectedMods.value = if (currentSelections.size == allModUris.size) {
-            emptySet()
+        _selectedMods.value = if (selectedFilteredUris.size == filteredModUris.size && filteredModUris.isNotEmpty()) {
+            currentSelections - filteredModUris
         } else {
-            allModUris
+            currentSelections + filteredModUris
         }
     }
 
     fun toggleSelectAllForGroup(groupHash: String) {
-        val modsInGroup = _modsList.value.filter { it.targetHashedName == groupHash }.map { it.uri }.toSet()
+        val modsInGroup = filteredModsList.value.filter { it.targetHashedName == groupHash }.map { it.uri }.toSet()
         val currentSelections = _selectedMods.value
         val groupSelections = currentSelections.intersect(modsInGroup)
 
-        _selectedMods.value = if (groupSelections.size == modsInGroup.size) {
+        _selectedMods.value = if (groupSelections.size == modsInGroup.size && modsInGroup.isNotEmpty()) {
             currentSelections - modsInGroup
         } else {
             currentSelections + modsInGroup
