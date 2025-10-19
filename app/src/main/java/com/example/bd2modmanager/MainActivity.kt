@@ -8,7 +8,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -21,7 +20,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -59,11 +57,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 
 import androidx.compose.material.icons.filled.Merge
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 
 class MainActivity : ComponentActivity() {
 
@@ -616,7 +609,6 @@ fun ModScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(IntrinsicSize.Min)
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -644,41 +636,25 @@ fun ModScreen(
                             }
                             Spacer(modifier = Modifier.width(8.dp))
 
-                            Row(
+                            BoxWithConstraints(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .fillMaxHeight(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    .height(40.dp),
+                                contentAlignment = Alignment.CenterEnd
                             ) {
                                 ElevatedCard(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight()
-                                        .animateContentSize(animationSpec = tween(350)),
+                                    modifier = Modifier.fillMaxSize(),
                                     shape = RoundedCornerShape(16.dp)
                                 ) {
                                     Row(
-                                        modifier = Modifier.fillMaxSize(),
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(start = 12.dp, end = 48.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        AnimatedVisibility(
-                                            visible = !isSearchActive,
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .padding(horizontal = 12.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    "Use ASTC Compression",
-                                                    style = MaterialTheme.typography.bodyMedium
-                                                )
-                                            }
+                                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                            Text("Use ASTC Compression", style = MaterialTheme.typography.bodyMedium)
                                         }
-
                                         val useAstc by viewModel.useAstc.collectAsState()
                                         Switch(
                                             checked = useAstc,
@@ -688,66 +664,62 @@ fun ModScreen(
                                     }
                                 }
 
-                                AnimatedVisibility(
-                                    visible = isSearchActive,
-                                    enter = fadeIn(animationSpec = tween(delayMillis = 150)) + slideInHorizontally(animationSpec = tween(350), initialOffsetX = { it }),
-                                    exit = fadeOut(animationSpec = tween(150)) + slideOutHorizontally(animationSpec = tween(350), targetOffsetX = { it })
-                                ) {
-                                    ElevatedCard(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight(),
-                                        shape = RoundedCornerShape(16.dp)
-                                    ) {
-                                        BasicTextField(
-                                            value = searchQuery,
-                                            onValueChange = viewModel::onSearchQueryChanged,
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .padding(horizontal = 16.dp),
-                                            singleLine = true,
-                                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
-                                            decorationBox = { innerTextField ->
-                                                Row(
-                                                    modifier = Modifier.fillMaxSize(),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Box(modifier = Modifier.weight(1f)) {
-                                                        if (searchQuery.isEmpty()) {
-                                                            Text(
-                                                                "Search by name...",
-                                                                style = MaterialTheme.typography.bodyMedium,
-                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                            )
-                                                        }
-                                                        innerTextField()
-                                                    }
-                                                    IconButton(onClick = { viewModel.setSearchActive(false) }) {
-                                                        Icon(Icons.Default.Close, "Close search")
-                                                    }
-                                                }
-                                            }
-                                        )
-                                    }
+                                val transition = updateTransition(isSearchActive, label = "search_transition")
+                                val searchCardWidth by transition.animateDp(
+                                    label = "search_card_width",
+                                    transitionSpec = { tween(350) }
+                                ) { active ->
+                                    if (active) maxWidth else 40.dp
+                                }
+                                val cornerRadius by transition.animateDp(
+                                    label = "search_card_corner_radius",
+                                    transitionSpec = { tween(350) }
+                                ) { active ->
+                                    if (active) 16.dp else 20.dp
                                 }
 
-                                AnimatedVisibility(
-                                    visible = !isSearchActive,
-                                    enter = fadeIn(animationSpec = tween(delayMillis = 150)),
-                                    exit = fadeOut(animationSpec = tween(150))
+                                ElevatedCard(
+                                    modifier = Modifier.size(width = searchCardWidth, height = 40.dp),
+                                    shape = RoundedCornerShape(cornerRadius),
+                                    onClick = { if (!isSearchActive) viewModel.setSearchActive(true) },
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                                 ) {
-                                    ElevatedCard(shape = CircleShape, modifier = Modifier.size(40.dp)) {
-                                        IconButton(
-                                            onClick = { viewModel.setSearchActive(true) },
-                                            modifier = Modifier.fillMaxSize()
-                                        ) {
-                                            Icon(Icons.Default.Search, "Search")
+                                    Row(
+                                        modifier = Modifier.fillMaxSize(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.End
+                                    ) {
+                                        AnimatedVisibility(visible = isSearchActive, modifier = Modifier.weight(1f)) {
+                                            BasicTextField(
+                                                value = searchQuery,
+                                                onValueChange = viewModel::onSearchQueryChanged,
+                                                modifier = Modifier.padding(start = 16.dp, end = 8.dp),
+                                                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                ),
+                                                singleLine = true,
+                                                decorationBox = { innerTextField ->
+                                                    if (searchQuery.isEmpty()) {
+                                                        Text(
+                                                            "Search by name...",
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                    innerTextField()
+                                                }
+                                            )
+                                        }
+                                        IconButton(onClick = { viewModel.setSearchActive(!isSearchActive) }) {
+                                            Icon(
+                                                imageVector = if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
+                                                contentDescription = "Toggle Search"
+                                            )
                                         }
                                     }
                                 }
                             }
                         }
-
 
                         if (isLoading && modsList.isEmpty()) {
                             ShimmerLoadingScreen()
