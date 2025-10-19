@@ -50,14 +50,11 @@ def _generate_operations(base_dir, file_prefix, progress_callback):
     png_files = [f for f in all_files_in_dir if f.startswith(file_prefix) and f.endswith('.png')]
 
     def sort_key(filename):
-        # This handles the case where the base name is "prefix.png" and should come first
         if filename == f"{file_prefix}.png":
             return 1
-        # This handles numbered files like "prefix_2.png"
         match = re.search(r'_(\d+)\.png$', filename)
         if match:
             return int(match.group(1))
-        # Fallback for any other unexpected format
         return float('inf')
 
     png_files.sort(key=sort_key)
@@ -68,12 +65,10 @@ def _generate_operations(base_dir, file_prefix, progress_callback):
     i = 0
     pair_index = 1
     while i < len(png_files):
-        # --- MODIFIED LOGIC FOR FILENAME ---
         if pair_index == 1:
-            output_filename = f"{file_prefix}.png"  # First file has no numeric suffix
+            output_filename = f"{file_prefix}.png"
         else:
-            output_filename = f"{file_prefix}_{pair_index}.png" # Subsequent files get _2, _3, etc.
-        # --- END OF MODIFICATION ---
+            output_filename = f"{file_prefix}_{pair_index}.png"
             
         if i + 1 < len(png_files):
             op = {"type": "merge", "sources": [png_files[i], png_files[i+1]], "output": output_filename}
@@ -147,7 +142,15 @@ def run(mod_dir_path, progress_callback=print):
             img1 = Image.open(img1_path)
             img2 = Image.open(img2_path)
             w1, h1 = img1.size
-            new_width, new_height = w1 + img2.size[0], h1
+            w2, h2 = img2.size
+            
+            # --- MODIFIED LOGIC FOR IMAGE HEIGHT ---
+            # 新的寬度是兩者相加
+            new_width = w1 + w2
+            # 新的高度取兩者中較大的值，以避免裁切
+            new_height = max(h1, h2)
+            # --- END OF MODIFICATION ---
+
             new_img = Image.new('RGBA', (new_width, new_height))
             new_img.paste(img1, (0, 0))
             new_img.paste(img2, (w1, 0))
