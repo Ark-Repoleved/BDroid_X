@@ -6,17 +6,17 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -26,6 +26,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
@@ -35,23 +36,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.state.ToggleableState
 import com.example.bd2modmanager.ui.theme.BD2ModManagerTheme
 import com.example.bd2modmanager.ui.viewmodel.*
 import com.example.bd2modmanager.utils.SafManager
 import com.valentinilk.shimmer.shimmer
-
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.ui.input.pointer.pointerInput
 
 class MainActivity : ComponentActivity() {
 
@@ -629,63 +630,86 @@ fun ModScreen(
                             }
                             Spacer(modifier = Modifier.width(8.dp))
 
-                            ElevatedCard(
+                            BoxWithConstraints(
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(40.dp),
-                                shape = RoundedCornerShape(16.dp)
+                                contentAlignment = Alignment.CenterEnd
                             ) {
                                 val transition = updateTransition(isSearchActive, label = "search_transition")
+                                val collapsedSearchWidth = 40.dp
+                                val collapsedAstcWidth = 60.dp
 
-                                val textWeight by transition.animateFloat(
-                                    label = "text_weight",
-                                    transitionSpec = { tween(durationMillis = 300) }
-                                ) { searching -> if (searching) 0f else 1f }
+                                val astcCardWidth by transition.animateDp(
+                                    label = "astc_card_width",
+                                    transitionSpec = { tween(350) }
+                                ) { active ->
+                                    if (active) collapsedAstcWidth else maxWidth - collapsedSearchWidth
+                                }
 
-                                val searchWeight by transition.animateFloat(
-                                    label = "search_weight",
-                                    transitionSpec = { tween(durationMillis = 300) }
-                                ) { searching -> if (searching) 1f else 0f }
+                                val searchCardWidth by transition.animateDp(
+                                    label = "search_card_width",
+                                    transitionSpec = { tween(350) }
+                                ) { active ->
+                                    if (active) maxWidth - collapsedAstcWidth else collapsedSearchWidth
+                                }
+
+                                val searchCornerRadius by transition.animateDp(
+                                    label = "search_card_corner_radius",
+                                    transitionSpec = { tween(350) }
+                                ) { active ->
+                                    if (active) 16.dp else 20.dp
+                                }
 
                                 Row(
-                                    modifier = Modifier.fillMaxSize(),
-                                    verticalAlignment = Alignment.CenterVertically
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.End
                                 ) {
-                                    if (textWeight > 0.01f) {
-                                        Box(modifier = Modifier.weight(textWeight)) {
+                                    ElevatedCard(
+                                        modifier = Modifier.size(width = astcCardWidth, height = 40.dp),
+                                        shape = RoundedCornerShape(16.dp),
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxSize(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Start
+                                        ) {
                                             AnimatedVisibility(
                                                 visible = !isSearchActive,
-                                                enter = fadeIn(tween(150, 150)),
-                                                exit = fadeOut(tween(150))
+                                                modifier = Modifier.weight(1f).padding(start = 12.dp)
                                             ) {
                                                 Text(
-                                                    text = "Use ASTC Compression",
+                                                    "Use ASTC Compression",
                                                     style = MaterialTheme.typography.bodyMedium,
-                                                    maxLines = 1,
-                                                    modifier = Modifier.padding(start = 12.dp)
+                                                    maxLines = 1
                                                 )
                                             }
+                                            val useAstc by viewModel.useAstc.collectAsState()
+                                            Switch(
+                                                checked = useAstc,
+                                                onCheckedChange = { viewModel.setUseAstc(it) },
+                                                modifier = Modifier.scale(0.8f).padding(horizontal = 4.dp)
+                                            )
                                         }
                                     }
 
-                                    val useAstc by viewModel.useAstc.collectAsState()
-                                    Switch(
-                                        checked = useAstc,
-                                        onCheckedChange = { viewModel.setUseAstc(it) },
-                                        modifier = Modifier.scale(0.8f)
-                                    )
-
-                                    if (searchWeight > 0.01f) {
-                                        Box(modifier = Modifier.weight(searchWeight)) {
-                                            AnimatedVisibility(
-                                                visible = isSearchActive,
-                                                enter = fadeIn(tween(150, 150)),
-                                                exit = fadeOut(tween(150))
-                                            ) {
+                                    ElevatedCard(
+                                        modifier = Modifier.size(width = searchCardWidth, height = 40.dp),
+                                        shape = RoundedCornerShape(searchCornerRadius),
+                                        onClick = { if (!isSearchActive) viewModel.setSearchActive(true) },
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxSize(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.End
+                                        ) {
+                                            AnimatedVisibility(visible = isSearchActive, modifier = Modifier.weight(1f)) {
                                                 BasicTextField(
                                                     value = searchQuery,
                                                     onValueChange = viewModel::onSearchQueryChanged,
-                                                    modifier = Modifier.padding(end = 4.dp),
+                                                    modifier = Modifier.padding(start = 16.dp, end = 8.dp),
                                                     textStyle = MaterialTheme.typography.bodyMedium.copy(
                                                         color = MaterialTheme.colorScheme.onSurface
                                                     ),
@@ -702,14 +726,13 @@ fun ModScreen(
                                                     }
                                                 )
                                             }
+                                            IconButton(onClick = { viewModel.setSearchActive(!isSearchActive) }) {
+                                                Icon(
+                                                    imageVector = if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
+                                                    contentDescription = "Toggle Search"
+                                                )
+                                            }
                                         }
-                                    }
-
-                                    IconButton(onClick = { viewModel.setSearchActive(!isSearchActive) }) {
-                                        Icon(
-                                            imageVector = if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
-                                            contentDescription = "Toggle Search"
-                                        )
                                     }
                                 }
                             }
@@ -873,7 +896,7 @@ fun EmptyModsScreen() {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit, onLongPress: () -> Unit) {
-    val elevation by animateDpAsState(if (isSelected) 4.dp else 1.dp, label = "elevation")
+    val elevation by androidx.compose.animation.core.animateDpAsState(if (isSelected) 4.dp else 1.dp, label = "elevation")
     ElevatedCard(
         elevation = CardDefaults.cardElevation(defaultElevation = elevation),
         modifier = Modifier
