@@ -30,6 +30,7 @@ import java.io.FileOutputStream
 import java.net.URL
 import java.util.zip.ZipInputStream
 
+
 // Data class to hold information about a single mod
 data class ModInfo(
     val name: String,
@@ -100,6 +101,14 @@ sealed class UnpackState {
     data class Failed(val error: String) : UnpackState()
 }
 
+// Represents the state of the spine merge process
+sealed class MergeState {
+    object Idle : MergeState()
+    data class Merging(val progressMessage: String = "Initializing...") : MergeState()
+    data class Finished(val message: String) : MergeState()
+    data class Failed(val error: String) : MergeState()
+}
+
 class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel() {
 
     companion object {
@@ -144,6 +153,13 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     private val _unpackInputFile = MutableStateFlow<Uri?>(null)
     val unpackInputFile: StateFlow<Uri?> = _unpackInputFile.asStateFlow()
+
+    // --- Merge State ---
+    private val _mergeState = MutableStateFlow<MergeState>(MergeState.Idle)
+    val mergeState: StateFlow<MergeState> = _mergeState.asStateFlow()
+
+    private val _showMergeDialog = MutableStateFlow(false)
+    val showMergeDialog: StateFlow<Boolean> = _showMergeDialog.asStateFlow()
 
     private var characterLut: Map<String, List<CharacterInfo>> = emptyMap()
 
@@ -500,6 +516,135 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         _unpackInputFile.value = null
     }
 
+    // --- Merge Logic ---
+    fun initiateMerge(context: Context) {
+        if (selectedMods.value.size != 1) return
+
+        val modUri = selectedMods.value.first()
+        val modInfo = _modsList.value.find { it.uri == modUri } ?: return
+
+        _showMergeDialog.value = true
+        _mergeState.value = MergeState.Merging("Preparing files...")
+
+        viewModelScope.launch {
+            val tempDir = File(context.cacheDir, "temp_merge_${System.currentTimeMillis()}")
+            try {
+                // 1. Prepare temp directory with mod files
+                withContext(Dispatchers.IO) {
+                    if (tempDir.exists()) tempDir.deleteRecursively()
+                    tempDir.mkdirs()
+
+                    if (modInfo.isDirectory) {
+                        DocumentFile.fromTreeUri(context, modInfo.uri)?.let {
+                            copyDirectoryToCacheNonRecursive(context, it, tempDir)
+                        }
+                    } else { // Is a zip file
+                        context.contentResolver.openInputStream(modInfo.uri)?.use { fis ->
+                            ZipInputStream(fis).use { zis ->
+                                var entry = zis.nextEntry
+                                while (entry != null) {
+                                    if (!entry.isDirectory) {
+                                        val newFile = File(tempDir, entry.name.substringAfterLast('/'))
+                                        newFile.outputStream().use { fos -> zis.copyTo(fos) }
+                                    }
+                                    entry = zis.nextEntry
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 2. Run Python script
+                val (success, message) = withContext(Dispatchers.IO) {
+                    ModdingService.mergeSpineAssets(tempDir.absolutePath) { progress ->
+                        viewModelScope.launch(Dispatchers.Main) {
+                            _mergeState.value = MergeState.Merging(progress)
+                        }
+                    }
+                }
+
+                // 3. Process result
+                if (success) {
+                    val originalModDoc = DocumentFile.fromTreeUri(context, modInfo.uri)
+                    if (originalModDoc != null && originalModDoc.isDirectory) {
+                        // Selectively delete original assets that will be replaced
+                        val filesToDelete = originalModDoc.listFiles().filter {
+                            it.isFile && (it.name?.endsWith(".png") == true || it.name?.endsWith(".atlas") == true)
+                        }
+                        filesToDelete.forEach { it.delete() }
+
+                        // Copy back only the new/changed files and the .old directory
+                        tempDir.listFiles()?.forEach { file ->
+                            if (file.isFile && (file.name.endsWith(".png") || file.name.endsWith(".atlas"))) {
+                                val newFile = originalModDoc.createFile("application/octet-stream", file.name)
+                                newFile?.let {
+                                    context.contentResolver.openOutputStream(it.uri)?.use { output ->
+                                        file.inputStream().use { input -> input.copyTo(output) }
+                                    }
+                                }
+                            } else if (file.isDirectory && file.name == ".old") {
+                                val oldDirDoc = originalModDoc.createDirectory(".old")
+                                oldDirDoc?.let {
+                                    copyDirectoryToSaf(context, file, it)
+                                }
+                            }
+                        }
+                        _mergeState.value = MergeState.Finished("Successfully merged mod in-place!")
+                    } else {
+                        _mergeState.value = MergeState.Failed("Failed to access original mod directory.")
+                    }
+                } else {
+                    _mergeState.value = MergeState.Failed(message)
+                }
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _mergeState.value = MergeState.Failed(e.message ?: "An unknown error occurred.")
+            } finally {
+                withContext(Dispatchers.IO) {
+                    if (tempDir.exists()) tempDir.deleteRecursively()
+                }
+            }
+        }
+    }
+
+    fun resetMergeState() {
+        _mergeState.value = MergeState.Idle
+        _showMergeDialog.value = false
+    }
+
+    private fun copyDirectoryToCacheNonRecursive(context: Context, sourceDir: DocumentFile, destinationDir: File) {
+        if (!destinationDir.exists()) destinationDir.mkdirs()
+        sourceDir.listFiles().forEach { file ->
+            if (file.isFile) {
+                val destFile = File(destinationDir, file.name!!)
+                try {
+                    context.contentResolver.openInputStream(file.uri)?.use { input -> destFile.outputStream().use { output -> input.copyTo(output) } }
+                } catch (e: Exception) { e.printStackTrace() }
+            }
+        }
+    }
+
+    private fun copyDirectoryToSaf(context: Context, sourceDir: File, destinationDoc: DocumentFile) {
+        sourceDir.listFiles()?.forEach { file ->
+            if (file.isFile) {
+                val newFile = destinationDoc.createFile("application/octet-stream", file.name)
+                newFile?.let {
+                    context.contentResolver.openOutputStream(it.uri)?.use { output ->
+                        file.inputStream().use { input ->
+                            input.copyTo(output)
+                        }
+                    }
+                }
+            } else if (file.isDirectory) {
+                val newDir = destinationDoc.createDirectory(file.name)
+                newDir?.let {
+                    copyDirectoryToSaf(context, file, it)
+                }
+            }
+        }
+    }
+
 
     // --- PRIVATE HELPERS ---
     fun scanModSourceDirectory(context: Context, dirUri: Uri) {
@@ -680,28 +825,23 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private fun extractModDetailsFromDirectory(context: Context, dirUri: Uri): ModDetails {
         val fileNames = mutableListOf<String>()
         var fileId: String? = null
-        fun findDetails(currentDir: DocumentFile) {
-            currentDir.listFiles().forEach { file ->
+        try {
+            DocumentFile.fromTreeUri(context, dirUri)?.listFiles()?.forEach { file ->
                 val entryName = file.name ?: ""
                 fileNames.add(entryName) // Store all names for keyword matching
-                if (file.isDirectory) {
-                    findDetails(file)
-                } else {
+                if (file.isFile) {
                     if (fileId == null) fileId = extractFileId(entryName)
                 }
             }
-        }
-        try { DocumentFile.fromTreeUri(context, dirUri)?.let { findDetails(it) } } catch (e: Exception) { e.printStackTrace() }
+        } catch (e: Exception) { e.printStackTrace() }
         return ModDetails(fileId, fileNames)
     }
 
     private fun copyDirectoryToCache(context: Context, sourceDir: DocumentFile, destinationDir: File) {
         if (!destinationDir.exists()) destinationDir.mkdirs()
         sourceDir.listFiles().forEach { file ->
-            val destFile = File(destinationDir, file.name!!)
-            if (file.isDirectory) {
-                copyDirectoryToCache(context, file, destFile)
-            } else {
+            if (file.isFile) {
+                val destFile = File(destinationDir, file.name!!)
                 try {
                     context.contentResolver.openInputStream(file.uri)?.use { input -> destFile.outputStream().use { output -> input.copyTo(output) } }
                 } catch (e: Exception) { e.printStackTrace() }
