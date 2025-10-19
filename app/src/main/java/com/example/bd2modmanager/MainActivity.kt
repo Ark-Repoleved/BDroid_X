@@ -51,6 +51,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 
+import androidx.compose.material.icons.filled.Merge
+
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
@@ -83,7 +85,8 @@ class MainActivity : ComponentActivity() {
                         viewModel = viewModel,
                         onSelectModSource = { modSourceDirLauncher.launch(Unit) },
                         onUninstallRequest = { hash -> uninstallConfirmationTarget = hash },
-                        onUnpackRequest = { showUnpackDialog = true }
+                        onUnpackRequest = { showUnpackDialog = true },
+                        onMergeRequest = { viewModel.initiateMerge(this) }
                     )
                 }
 
@@ -92,6 +95,14 @@ class MainActivity : ComponentActivity() {
                     ParallelInstallDialog(
                         viewModel = viewModel,
                         onDismiss = { viewModel.closeInstallDialog() }
+                    )
+                }
+
+                val showMergeDialog by viewModel.showMergeDialog.collectAsState()
+                if (showMergeDialog) {
+                    MergeConfirmationDialog(
+                        viewModel = viewModel,
+                        onDismiss = { viewModel.resetMergeState() }
                     )
                 }
 
@@ -121,6 +132,64 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
+
+@Composable
+fun MergeConfirmationDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
+    val mergeState by viewModel.mergeState.collectAsState()
+
+    AlertDialog(
+        onDismissRequest = {
+            if (mergeState !is MergeState.Merging) {
+                onDismiss()
+            }
+        },
+        icon = {
+            when (mergeState) {
+                is MergeState.Merging -> Icon(Icons.Default.Merge, contentDescription = "Merging")
+                is MergeState.Finished -> Icon(Icons.Default.CheckCircle, contentDescription = "Success")
+                is MergeState.Failed -> Icon(Icons.Default.Error, contentDescription = "Failed")
+                else -> {}
+            }
+        },
+        title = {
+            val text = when (mergeState) {
+                is MergeState.Merging -> "Merging Spine Assets..."
+                is MergeState.Finished -> "Merge Successful!"
+                is MergeState.Failed -> "Merge Failed"
+                else -> ""
+            }
+            Text(text)
+        },
+        text = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                when (val state = mergeState) {
+                    is MergeState.Merging -> {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(16.dp))
+                        Text(state.progressMessage, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                    }
+                    is MergeState.Finished -> {
+                        Text(state.message, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    is MergeState.Failed -> {
+                        Text(state.error, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                    }
+                    else -> {}
+                }
+            }
+        },
+        confirmButton = {
+            if (mergeState !is MergeState.Merging) {
+                Button(onClick = onDismiss) {
+                    Text("OK")
+                }
+            }
+        }
+    )
 }
 
 @Composable
@@ -467,7 +536,8 @@ fun ModScreen(
     viewModel: MainViewModel,
     onSelectModSource: () -> Unit,
     onUninstallRequest: (String) -> Unit,
-    onUnpackRequest: () -> Unit
+    onUnpackRequest: () -> Unit,
+    onMergeRequest: () -> Unit
 ) {
     val modSourceDirectoryUri by viewModel.modSourceDirectoryUri.collectAsState()
     val modsList by viewModel.modsList.collectAsState()
@@ -491,7 +561,14 @@ fun ModScreen(
 
     Scaffold(
         floatingActionButton = {
-            Box {
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                AnimatedVisibility(visible = selectedMods.size == 1) {
+                    ExtendedFloatingActionButton(
+                        onClick = onMergeRequest,
+                        icon = { Icon(Icons.Default.Merge, contentDescription = "Merge") },
+                        text = { Text("Merge Spine") }
+                    )
+                }
                 AnimatedVisibility(visible = modSourceDirectoryUri != null && selectedMods.isEmpty()) {
                     FloatingActionButton(
                         onClick = onUnpackRequest,
