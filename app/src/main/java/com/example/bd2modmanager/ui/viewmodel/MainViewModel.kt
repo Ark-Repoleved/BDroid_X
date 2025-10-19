@@ -22,9 +22,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -128,29 +125,6 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _modsList = MutableStateFlow<List<ModInfo>>(emptyList())
     val modsList: StateFlow<List<ModInfo>> = _modsList.asStateFlow()
 
-    private val _isSearchActive = MutableStateFlow(false)
-    val isSearchActive: StateFlow<Boolean> = _isSearchActive.asStateFlow()
-
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
-
-    val filteredModsList: StateFlow<List<ModInfo>> = combine(
-        _modsList,
-        _searchQuery
-    ) { mods, query ->
-        if (query.isBlank()) {
-            mods
-        } else {
-            mods.filter {
-                it.name.startsWith(query, ignoreCase = true)
-            }
-        }
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = _modsList.value
-    )
-
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
@@ -248,17 +222,6 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     // --- PUBLIC ACTIONS ---
-    fun onSearchQueryChanged(query: String) {
-        _searchQuery.value = query
-    }
-
-    fun toggleSearchActive() {
-        _isSearchActive.value = !_isSearchActive.value
-        if (!_isSearchActive.value) {
-            onSearchQueryChanged("")
-        }
-    }
-
     fun setModSourceDirectoryUri(context: Context, uri: Uri?) {
         savedStateHandle["mod_source_dir_uri"] = uri
         if (uri != null) {
