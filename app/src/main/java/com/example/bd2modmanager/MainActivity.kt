@@ -566,25 +566,47 @@ fun ModScreen(
         floatingActionButton = {
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 AnimatedVisibility(visible = selectedMods.size == 1) {
-                    ExtendedFloatingActionButton(
+                    ElevatedCard(
                         onClick = onMergeRequest,
-                        icon = { Icon(Icons.Default.Merge, contentDescription = "Merge") },
-                        text = { Text("Merge Spine") }
-                    )
+                        shape = RoundedCornerShape(16.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Merge, contentDescription = "Merge")
+                            Spacer(Modifier.width(12.dp))
+                            Text("Merge Spine")
+                        }
+                    }
                 }
                 AnimatedVisibility(visible = modSourceDirectoryUri != null && selectedMods.isEmpty()) {
-                    FloatingActionButton(
+                    ElevatedCard(
                         onClick = onUnpackRequest,
+                        shape = RoundedCornerShape(16.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                     ) {
-                        Icon(Icons.Default.Unarchive, contentDescription = "Unpack Bundle")
+                        Box(modifier = Modifier.padding(12.dp)) {
+                            Icon(Icons.Default.Unarchive, contentDescription = "Unpack Bundle")
+                        }
                     }
                 }
                 AnimatedVisibility(visible = selectedMods.isNotEmpty()) {
-                    ExtendedFloatingActionButton(
+                    ElevatedCard(
                         onClick = { viewModel.initiateBatchRepack(context) },
-                        icon = { Icon(Icons.Default.Done, contentDescription = "Repack") },
-                        text = { Text("Repack Selected") }
-                    )
+                        shape = RoundedCornerShape(16.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Done, contentDescription = "Repack")
+                            Spacer(Modifier.width(12.dp))
+                            Text("Repack Selected")
+                        }
+                    }
                 }
             }
         }
