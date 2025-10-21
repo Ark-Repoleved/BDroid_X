@@ -134,16 +134,12 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
         env = UnityPy.load(original_bundle_path)
         edited = False
 
-        report_progress("Building a lightweight asset map...")
-        asset_map = {}
-        for obj in env.objects:
-            try:
-                if hasattr(obj, 'm_Name'):
-                    asset_map[obj.m_Name.lower()] = obj
-            except Exception:
-                pass
-        
+        report_progress("Building asset map...")
+        asset_map = {obj.read().m_Name.lower(): obj for obj in env.objects if hasattr(obj.read(), 'm_Name')}
         report_progress(f"Asset map created with {len(asset_map)} entries.")
+
+        if not asset_map:
+             report_progress("Warning: Asset map is empty. No assets could be identified in the bundle.")
 
         total_mods = sum(len(files) for _, _, files in os.walk(modded_assets_folder))
         mod_count = 0
