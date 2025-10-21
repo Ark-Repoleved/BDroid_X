@@ -5,7 +5,6 @@ from ctypes import *
 from .json_to_skel import json_to_skel
 import tempfile
 import gc
-import traceback
 
 from UnityPy.helpers import TypeTreeHelper
 TypeTreeHelper.read_typetree_boost = False
@@ -62,7 +61,7 @@ def _load_astcenc_library():
             ("data_type", c_uint), ("data", POINTER(c_void_p)),
         ]
     _astcenc_structures['astcenc_image'] = astcenc_image
-
+    
     lib.astcenc_config_init.argtypes = [c_uint, c_uint, c_uint, c_uint, c_float, c_uint, POINTER(astcenc_config)]
     lib.astcenc_config_init.restype = c_int
 
@@ -96,7 +95,7 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
     astcenc = _load_astcenc_library()
     if not astcenc:
         return None, "libastcenc.so could not be loaded."
-
+        
     ASTCENC_SUCCESS = _astcenc_structures['ASTCENC_SUCCESS']
     ASTCENC_PRF_LDR_SRGB = _astcenc_structures['ASTCENC_PRF_LDR_SRGB']
     ASTCENC_PRE_MEDIUM = _astcenc_structures['ASTCENC_PRE_MEDIUM']
@@ -138,7 +137,7 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
     comp_buf = (c_ubyte * buf_size)()
 
     status = astcenc.astcenc_compress_image(context, byref(image), byref(swizzle), comp_buf, buf_size, 0)
-
+    
     astcenc.astcenc_context_free(context)
 
     if status != ASTCENC_SUCCESS:
@@ -146,12 +145,13 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
 
     return bytes(comp_buf), None
 
+
 def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_path: str, use_astc: bool, progress_callback=None):
     def report_progress(message):
         if progress_callback:
             progress_callback(message)
         print(message)
-
+        
     env = None
     try:
         report_progress("Loading original game file...")
@@ -159,7 +159,7 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
         edited = False
 
         report_progress("Scanning for moddable assets...")
-
+        
         asset_map = {obj.read().m_Name.lower(): obj for obj in env.objects if hasattr(obj.read(), 'm_Name')}
 
         mod_files = []
@@ -176,7 +176,7 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                 if mod_filename.lower().endswith('.json'):
                     base_name, _ = os.path.splitext(mod_filename)
                     target_asset_name = (base_name + ".skel").lower()
-
+                    
                     if target_asset_name in asset_map:
                         report_progress(f"{current_progress}Converting and replacing animation: {mod_filename}")
                         obj = asset_map[target_asset_name]
@@ -184,12 +184,12 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
 
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".skel") as tmp_skel_file:
                             temp_skel_path = tmp_skel_file.name
-
+                        
                         try:
                             json_to_skel(mod_filepath, temp_skel_path)
                             with open(temp_skel_path, 'rb') as f:
                                 skel_binary_data = f.read()
-
+                            
                             data.m_Script = skel_binary_data.decode("utf-8", "surrogateescape")
                             data.save()
                             edited = True
@@ -206,35 +206,38 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                         if obj.type.name == "Texture2D":
                             report_progress(f"{current_progress}Replacing texture: {mod_filename}")
                             data = obj.read()
-                            with Image.open(mod_filepath).convert("RGBA") as pil_img:
-                                if use_astc:
-                                    with pil_img.transpose(Image.FLIP_TOP_BOTTOM) as flipped_img:
-                                        report_progress(f"{current_progress}Compressing texture to ASTC: {mod_filename}")
-                                        block_x, block_y = 4, 4
-                                        compressed_data, err = compress_image_astc(flipped_img.tobytes(), pil_img.width, pil_img.height, block_x, block_y)
-                                    
-                                    gc.collect()
+                            pil_img = Image.open(mod_filepath).convert("RGBA")
 
-                                    if err:
-                                        report_progress(f"ERROR: ASTC compression failed for {mod_filename}: {err}")
-                                        continue
+                            if use_astc:
+                                flipped_img = pil_img.transpose(Image.FLIP_TOP_BOTTOM)
+                                report_progress(f"{current_progress}Compressing texture to ASTC: {mod_filename}")
+                                block_x, block_y = 4, 4
+                                compressed_data, err = compress_image_astc(flipped_img.tobytes(), pil_img.width, pil_img.height, block_x, block_y)
+                                
+                                del flipped_img
+                                gc.collect()
 
-                                    data.m_TextureFormat = 48
-                                    data.image_data = compressed_data
-                                    data.m_CompleteImageSize = len(compressed_data)
-                                else:
-                                    report_progress(f"{current_progress}Using uncompressed RGBA32 for texture: {mod_filename}")
-                                    data.m_TextureFormat = 4
-                                    data.image = pil_img
+                                if err:
+                                    report_progress(f"ERROR: ASTC compression failed for {mod_filename}: {err}")
+                                    continue
 
-                                data.m_Width, data.m_Height = pil_img.size
-                                data.m_MipCount = 1
-                                data.m_StreamData.offset = 0
-                                data.m_StreamData.size = 0
-                                data.m_StreamData.path = ""
-                                data.save()
-                                edited = True
+                                data.m_TextureFormat = 48
+                                data.image_data = compressed_data
+                                data.m_CompleteImageSize = len(compressed_data)
+                            else:
+                                report_progress(f"{current_progress}Using uncompressed RGBA32 for texture: {mod_filename}")
+                                data.m_TextureFormat = 4
+                                data.image = pil_img
+
+                            data.m_Width, data.m_Height = pil_img.size
+                            data.m_MipCount = 1
+                            data.m_StreamData.offset = 0
+                            data.m_StreamData.size = 0
+                            data.m_StreamData.path = ""
+                            data.save()
+                            edited = True
                             
+                            del pil_img
                             gc.collect()
 
                     continue
@@ -251,8 +254,9 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                         edited = True
 
             except Exception as e:
+                import traceback
                 report_progress(f"Error processing asset {mod_filename}: {traceback.format_exc()}")
-
+        
         del asset_map
         del mod_files
         gc.collect()
@@ -262,7 +266,8 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             try:
                 with open(output_path, "wb") as f:
-                    env.file.save(f, packer="lz4")
+                    bundle_data = env.file.save(packer="lz4")
+                    f.write(bundle_data)
                 report_progress("Saved successfully!")
                 return True
             except Exception as e:
@@ -273,6 +278,7 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
             return False
 
     except Exception as e:
+        import traceback
         message = f"Error processing bundle: {traceback.format_exc()}"
         report_progress(message)
         return False
