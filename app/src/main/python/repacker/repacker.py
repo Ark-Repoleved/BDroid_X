@@ -5,6 +5,7 @@ from ctypes import *
 from .json_to_skel import json_to_skel
 import tempfile
 import gc
+import traceback
 
 from UnityPy.helpers import TypeTreeHelper
 TypeTreeHelper.read_typetree_boost = False
@@ -61,7 +62,7 @@ def _load_astcenc_library():
             ("data_type", c_uint), ("data", POINTER(c_void_p)),
         ]
     _astcenc_structures['astcenc_image'] = astcenc_image
-    
+
     lib.astcenc_config_init.argtypes = [c_uint, c_uint, c_uint, c_uint, c_float, c_uint, POINTER(astcenc_config)]
     lib.astcenc_config_init.restype = c_int
 
@@ -95,7 +96,7 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
     astcenc = _load_astcenc_library()
     if not astcenc:
         return None, "libastcenc.so could not be loaded."
-        
+
     ASTCENC_SUCCESS = _astcenc_structures['ASTCENC_SUCCESS']
     ASTCENC_PRF_LDR_SRGB = _astcenc_structures['ASTCENC_PRF_LDR_SRGB']
     ASTCENC_PRE_MEDIUM = _astcenc_structures['ASTCENC_PRE_MEDIUM']
@@ -137,7 +138,7 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
     comp_buf = (c_ubyte * buf_size)()
 
     status = astcenc.astcenc_compress_image(context, byref(image), byref(swizzle), comp_buf, buf_size, 0)
-    
+
     astcenc.astcenc_context_free(context)
 
     if status != ASTCENC_SUCCESS:
@@ -145,144 +146,135 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
 
     return bytes(comp_buf), None
 
-
 def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_path: str, use_astc: bool, progress_callback=None):
     def report_progress(message):
         if progress_callback:
             progress_callback(message)
         print(message)
-        
-    env = None
+
+    edited = False
     try:
-        report_progress("Loading original game file...")
-        env = UnityPy.load(original_bundle_path)
-        edited = False
+        with UnityPy.load(original_bundle_path) as env:
+            report_progress("Loading original game file...")
+            edited = False
 
-        report_progress("Scanning for moddable assets...")
-        
-        asset_map = {obj.read().m_Name.lower(): obj for obj in env.objects if hasattr(obj.read(), 'm_Name')}
+            report_progress("Scanning for moddable assets...")
 
-        mod_files = []
-        for root, _, files in os.walk(modded_assets_folder):
-            for f in files:
-                mod_files.append(os.path.join(root, f))
+            asset_map = {obj.read().m_Name.lower(): obj for obj in env.objects if hasattr(obj.read(), 'm_Name')}
 
-        total_assets = len(mod_files)
-        for i, mod_filepath in enumerate(mod_files):
-            mod_filename = os.path.basename(mod_filepath)
-            current_progress = f"({i+1}/{total_assets}) "
+            mod_files = []
+            for root, _, files in os.walk(modded_assets_folder):
+                for f in files:
+                    mod_files.append(os.path.join(root, f))
 
-            try:
-                if mod_filename.lower().endswith('.json'):
-                    base_name, _ = os.path.splitext(mod_filename)
-                    target_asset_name = (base_name + ".skel").lower()
-                    
-                    if target_asset_name in asset_map:
-                        report_progress(f"{current_progress}Converting and replacing animation: {mod_filename}")
-                        obj = asset_map[target_asset_name]
-                        data = obj.read()
+            total_assets = len(mod_files)
+            for i, mod_filepath in enumerate(mod_files):
+                mod_filename = os.path.basename(mod_filepath)
+                current_progress = f"({i+1}/{total_assets}) "
 
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".skel") as tmp_skel_file:
-                            temp_skel_path = tmp_skel_file.name
-                        
-                        try:
-                            json_to_skel(mod_filepath, temp_skel_path)
-                            with open(temp_skel_path, 'rb') as f:
-                                skel_binary_data = f.read()
-                            
-                            data.m_Script = skel_binary_data.decode("utf-8", "surrogateescape")
-                            data.save()
-                            edited = True
-                            report_progress(f"{current_progress}Successfully replaced animation for {mod_filename}")
-                        finally:
-                            if os.path.exists(temp_skel_path):
-                                os.remove(temp_skel_path)
-                    continue
+                try:
+                    if mod_filename.lower().endswith('.json'):
+                        base_name, _ = os.path.splitext(mod_filename)
+                        target_asset_name = (base_name + ".skel").lower()
 
-                if mod_filename.lower().endswith('.png'):
-                    target_asset_name = os.path.splitext(mod_filename)[0].lower()
-                    if target_asset_name in asset_map:
-                        obj = asset_map[target_asset_name]
-                        if obj.type.name == "Texture2D":
-                            report_progress(f"{current_progress}Replacing texture: {mod_filename}")
+                        if target_asset_name in asset_map:
+                            report_progress(f"{current_progress}Converting and replacing animation: {mod_filename}")
+                            obj = asset_map[target_asset_name]
                             data = obj.read()
-                            pil_img = Image.open(mod_filepath).convert("RGBA")
 
-                            if use_astc:
-                                flipped_img = pil_img.transpose(Image.FLIP_TOP_BOTTOM)
-                                report_progress(f"{current_progress}Compressing texture to ASTC: {mod_filename}")
-                                block_x, block_y = 4, 4
-                                compressed_data, err = compress_image_astc(flipped_img.tobytes(), pil_img.width, pil_img.height, block_x, block_y)
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".skel") as tmp_skel_file:
+                                temp_skel_path = tmp_skel_file.name
+
+                            try:
+                                json_to_skel(mod_filepath, temp_skel_path)
+                                with open(temp_skel_path, 'rb') as f:
+                                    skel_binary_data = f.read()
+
+                                data.m_Script = skel_binary_data.decode("utf-8", "surrogateescape")
+                                data.save()
+                                edited = True
+                                report_progress(f"{current_progress}Successfully replaced animation for {mod_filename}")
+                            finally:
+                                if os.path.exists(temp_skel_path):
+                                    os.remove(temp_skel_path)
+                        continue
+
+                    if mod_filename.lower().endswith('.png'):
+                        target_asset_name = os.path.splitext(mod_filename)[0].lower()
+                        if target_asset_name in asset_map:
+                            obj = asset_map[target_asset_name]
+                            if obj.type.name == "Texture2D":
+                                report_progress(f"{current_progress}Replacing texture: {mod_filename}")
+                                data = obj.read()
+                                with Image.open(mod_filepath).convert("RGBA") as pil_img:
+                                    if use_astc:
+                                        with pil_img.transpose(Image.FLIP_TOP_BOTTOM) as flipped_img:
+                                            report_progress(f"{current_progress}Compressing texture to ASTC: {mod_filename}")
+                                            block_x, block_y = 4, 4
+                                            compressed_data, err = compress_image_astc(flipped_img.tobytes(), pil_img.width, pil_img.height, block_x, block_y)
+                                        
+                                        gc.collect()
+
+                                        if err:
+                                            report_progress(f"ERROR: ASTC compression failed for {mod_filename}: {err}")
+                                            continue
+
+                                        data.m_TextureFormat = 48
+                                        data.image_data = compressed_data
+                                        data.m_CompleteImageSize = len(compressed_data)
+                                    else:
+                                        report_progress(f"{current_progress}Using uncompressed RGBA32 for texture: {mod_filename}")
+                                        data.m_TextureFormat = 4
+                                        data.image = pil_img
+
+                                    data.m_Width, data.m_Height = pil_img.size
+                                    data.m_MipCount = 1
+                                    data.m_StreamData.offset = 0
+                                    data.m_StreamData.size = 0
+                                    data.m_StreamData.path = ""
+                                    data.save()
+                                    edited = True
                                 
-                                del flipped_img
                                 gc.collect()
 
-                                if err:
-                                    report_progress(f"ERROR: ASTC compression failed for {mod_filename}: {err}")
-                                    continue
+                        continue
 
-                                data.m_TextureFormat = 48
-                                data.image_data = compressed_data
-                                data.m_CompleteImageSize = len(compressed_data)
-                            else:
-                                report_progress(f"{current_progress}Using uncompressed RGBA32 for texture: {mod_filename}")
-                                data.m_TextureFormat = 4
-                                data.image = pil_img
-
-                            data.m_Width, data.m_Height = pil_img.size
-                            data.m_MipCount = 1
-                            data.m_StreamData.offset = 0
-                            data.m_StreamData.size = 0
-                            data.m_StreamData.path = ""
+                    target_asset_name = mod_filename.lower()
+                    if target_asset_name in asset_map:
+                        obj = asset_map[target_asset_name]
+                        if obj.type.name == "TextAsset":
+                            report_progress(f"{current_progress}Replacing asset: {mod_filename}")
+                            data = obj.read()
+                            with open(mod_filepath, "rb") as f:
+                                data.m_Script = f.read().decode("utf-8", "surrogateescape")
                             data.save()
                             edited = True
-                            
-                            del pil_img
-                            gc.collect()
 
-                    continue
+                except Exception as e:
+                    report_progress(f"Error processing asset {mod_filename}: {traceback.format_exc()}")
 
-                target_asset_name = mod_filename.lower()
-                if target_asset_name in asset_map:
-                    obj = asset_map[target_asset_name]
-                    if obj.type.name == "TextAsset":
-                        report_progress(f"{current_progress}Replacing asset: {mod_filename}")
-                        data = obj.read()
-                        with open(mod_filepath, "rb") as f:
-                            data.m_Script = f.read().decode("utf-8", "surrogateescape")
-                        data.save()
-                        edited = True
+            del asset_map
+            del mod_files
+            gc.collect()
 
-            except Exception as e:
-                import traceback
-                report_progress(f"Error processing asset {mod_filename}: {traceback.format_exc()}")
-        
-        del asset_map
-        del mod_files
-        gc.collect()
-
-        if edited:
-            report_progress("Saving modified game file...")
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            try:
-                with open(output_path, "wb") as f:
-                    bundle_data = env.file.save(packer="lz4")
-                    f.write(bundle_data)
-                report_progress("Saved successfully!")
-                return True
-            except Exception as e:
-                report_progress(f"Error saving bundle: {e}")
+            if edited:
+                report_progress("Saving modified game file...")
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                try:
+                    with open(output_path, "wb") as f:
+                        env.file.save(f, packer="lz4")
+                    report_progress("Saved successfully!")
+                    return True
+                except Exception as e:
+                    report_progress(f"Error saving bundle: {e}")
+                    return False
+            else:
+                report_progress("No modifications were made.")
                 return False
-        else:
-            report_progress("No modifications were made.")
-            return False
 
     except Exception as e:
-        import traceback
         message = f"Error processing bundle: {traceback.format_exc()}"
         report_progress(message)
         return False
     finally:
-        if env is not None:
-            del env
         gc.collect()
