@@ -45,6 +45,16 @@ class EndianBinaryWriter:
         self.Position = self.stream.tell()
         return ret
 
+    def write_stream(self, source: IOBase, length: int):
+        chunk_size = 4096
+        while length > 0:
+            read_size = min(length, chunk_size)
+            chunk = source.read(read_size)
+            if not chunk:
+                break
+            self.write(chunk)
+            length -= len(chunk)
+
     def write_byte(self, value: int):
         self.write(pack(self.endian + "b", value))
 
