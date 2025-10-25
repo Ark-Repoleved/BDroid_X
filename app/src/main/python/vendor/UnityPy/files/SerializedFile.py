@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import tempfile
+
 from ntpath import basename
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
@@ -385,111 +387,132 @@ class SerializedFile(File.File):
 
         return cab
 
-    def save(self, packer: Optional[str] = None) -> bytes:
+    def save(self, writer: IOBase = None) -> Optional[bytes]:
+        close_writer = False
+        if writer is None:
+            writer = EndianBinaryWriter()
+            close_writer = True
+        elif not isinstance(writer, EndianBinaryWriter):
+            writer = EndianBinaryWriter(writer)
+
         # 1. header -> has to be delayed until the very end
         # 2. data -> types, objects, scripts, ...
 
         # so write the data first
         header = self.header
         meta_writer = EndianBinaryWriter(endian=header.endian)
-        data_writer = EndianBinaryWriter(endian=header.endian)
+        data_file = tempfile.TemporaryFile()
+        data_writer = EndianBinaryWriter(data_file, endian=header.endian)
 
-        if header.version >= 7:
-            meta_writer.write_string_to_null(self.unity_version)
+        try:
+            if header.version >= 7:
+                meta_writer.write_string_to_null(self.unity_version)
 
-        if header.version >= 8:
-            meta_writer.write_int(self._m_target_platform)
+            if header.version >= 8:
+                meta_writer.write_int(self._m_target_platform)
 
-        if header.version >= 13:
-            meta_writer.write_boolean(self._enable_type_tree)
+            if header.version >= 13:
+                meta_writer.write_boolean(self._enable_type_tree)
 
-        # ReadTypes
-        meta_writer.write_int(len(self.types))
-        for typ in self.types:
-            typ.write(self, meta_writer, False)
+            # ReadTypes
+            meta_writer.write_int(len(self.types))
+            for typ in self.types:
+                typ.write(self, meta_writer, False)
 
-        if 7 <= header.version < 14:
-            meta_writer.write_int(self.big_id_enabled)
+            if 7 <= header.version < 14:
+                meta_writer.write_int(self.big_id_enabled)
 
-        # ReadObjects
-        meta_writer.write_int(len(self.objects))
-        for obj in self.objects.values():
-            obj.write(header, meta_writer, data_writer)
-            data_writer.align_stream(8)
+            # ReadObjects
+            meta_writer.write_int(len(self.objects))
+            for obj in self.objects.values():
+                obj.write(header, meta_writer, data_writer)
+                data_writer.align_stream(8)
 
-        # Read Scripts
-        if header.version >= 11:
-            meta_writer.write_int(len(self.script_types))
-            for script_type in self.script_types:
-                script_type.write(header, meta_writer)
+            # Read Scripts
+            if header.version >= 11:
+                meta_writer.write_int(len(self.script_types))
+                for script_type in self.script_types:
+                    script_type.write(header, meta_writer)
 
-        # Read Externals
-        meta_writer.write_int(len(self.externals))
-        for external in self.externals:
-            external.write(header, meta_writer)
+            # Read Externals
+            meta_writer.write_int(len(self.externals))
+            for external in self.externals:
+                external.write(header, meta_writer)
 
-        if header.version >= 20:
-            assert self.ref_types is not None
-            meta_writer.write_int(len(self.ref_types))
-            for ref_type in self.ref_types:
-                ref_type.write(self, meta_writer, True)
+            if header.version >= 20:
+                assert self.ref_types is not None
+                meta_writer.write_int(len(self.ref_types))
+                for ref_type in self.ref_types:
+                    ref_type.write(self, meta_writer, True)
 
-        if header.version >= 5:
-            assert self.userInformation is not None
-            meta_writer.write_string_to_null(self.userInformation)
+            if header.version >= 5:
+                assert self.userInformation is not None
+                meta_writer.write_string_to_null(self.userInformation)
 
-        # prepare header
-        writer = EndianBinaryWriter()
-        header_size = 16  # 4*4
-        metadata_size = meta_writer.Length
-        data_size = data_writer.Length
-        if header.version >= 9:
-            # 1 bool + 3 reserved + extra header 4 + 3*8
-            header_size += 4 if header.version < 22 else 4 + 28
-            data_offset = header_size + metadata_size
-            # align data_offset
-            data_offset += (16 - data_offset % 16) % 16
-            file_size = data_offset + data_size
-            if header.version < 22:
-                writer.write_u_int(metadata_size)
-                writer.write_u_int(file_size)
-                writer.write_u_int(header.version)
-                # reader.Position = header.file_size - header.metadata_size
-                # so data follows right after this header -> after 32
-                writer.write_u_int(data_offset)
-                writer.write_boolean(">" == header.endian)
-                writer.write_bytes(header.reserved)
+            # prepare header
+            header_writer = EndianBinaryWriter(endian=writer.endian)
+            metadata_size = meta_writer.Length
+            data_size = data_writer.Position
+
+            if header.version >= 9:
+                header_size = 20 if header.version < 22 else 48
+                data_offset = header_size + metadata_size
+                # align data_offset
+                data_offset += (16 - data_offset % 16) % 16
+                file_size = data_offset + data_size
+                if header.version < 22:
+                    header_writer.write_u_int(metadata_size)
+                    header_writer.write_u_int(file_size)
+                    header_writer.write_u_int(header.version)
+                    header_writer.write_u_int(data_offset)
+                else:
+                    header_writer.write_u_int(0) # metadata_size
+                    header_writer.write_u_int(0) # file_size
+                    header_writer.write_u_int(header.version)
+                    header_writer.write_u_int(0) # data_offset
+
+                header_writer.write_boolean(">" == header.endian)
+                header_writer.write_bytes(header.reserved)
+                
+                if header.version >= 22:
+                    header_writer.write_u_int(metadata_size)
+                    header_writer.write_long(file_size)
+                    header_writer.write_long(data_offset)
+                    header_writer.write_long(self.unknown)
+
+            else: # version < 9
+                header_size = 16
+                metadata_size_with_endian = metadata_size + 1
+                file_size = header_size + metadata_size_with_endian + data_size
+                data_offset = header_size
+                header_writer.write_u_int(metadata_size_with_endian)
+                header_writer.write_u_int(file_size)
+                header_writer.write_u_int(header.version)
+                header_writer.write_u_int(data_offset)
+
+            # WRITE EVERYTHING
+            writer.Position = 0
+            writer.write(header_writer.bytes)
+            header_writer.dispose()
+
+            if header.version >= 9:
+                writer.write(meta_writer.bytes)
+                writer.align_stream(16)
+                data_file.seek(0)
+                writer.write_stream(data_file, data_size)
             else:
-                # old header
-                writer.write_u_int(0)
-                writer.write_u_int(0)
-                writer.write_u_int(header.version)
-                writer.write_u_int(0)
+                data_file.seek(0)
+                writer.write_stream(data_file, data_size)
                 writer.write_boolean(">" == header.endian)
-                writer.write_bytes(header.reserved)
-                writer.write_u_int(metadata_size)
-                writer.write_long(file_size)
-                writer.write_long(data_offset)
-                writer.write_long(self.unknown)
+                writer.write(meta_writer.bytes)
 
-            writer.write_bytes(meta_writer.bytes)
-            writer.align_stream(16)
-            writer.write_bytes(data_writer.bytes)
+            if close_writer:
+                return writer.bytes
 
-        else:
-            metadata_size += 1  # endian boolean
-            file_size = header_size + metadata_size + data_size
-            writer.write_u_int(metadata_size)
-            writer.write_u_int(file_size)
-            writer.write_u_int(header.version)
-            # reader.Position = header.file_size - header.metadata_size
-            # so data follows right after this header -> after 32
-            writer.write_u_int(32)
-            writer.write_bytes(data_writer.bytes)
-            writer.write_boolean(">" == header.endian)
-            writer.write_bytes(meta_writer.bytes)
-
-        return writer.bytes
+        finally:
+            meta_writer.dispose()
+            data_writer.dispose()
+            data_file.close()
 
 
 def read_string(string_buffer_reader: EndianBinaryReader, value: int) -> str:
