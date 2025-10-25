@@ -1,6 +1,8 @@
 # TODO: implement encryption for saving files
 import re
+import tempfile
 from collections import namedtuple
+from io import IOBase
 from typing import Optional, Union, cast
 
 from .. import config
@@ -185,10 +187,12 @@ class BundleFile(File.File):
 
         return m_DirectoryInfo, blocksReader
 
-    def save(self, packer=None):
+    def save(self, writer: Union[EndianBinaryWriter, IOBase] = None, packer=None):
         """
         Rewrites the BundleFile and returns it as bytes object.
 
+        writer:
+            writer to save the file to
         packer:
             can be either one of the following strings
             or tuple consisting of (block_info_flag, data_flag)
@@ -202,7 +206,13 @@ class BundleFile(File.File):
         #     format            (int)
         #     version_player    (string_to_null)
         #     version_engine    (string_to_null)
-        writer = EndianBinaryWriter()
+        
+        close_writer = False
+        if writer is None:
+            writer = EndianBinaryWriter()
+            close_writer = True
+        elif isinstance(writer, IOBase):
+            writer = EndianBinaryWriter(writer)
 
         writer.write_string_to_null(self.signature)
         writer.write_u_int(self.version)
@@ -230,160 +240,120 @@ class BundleFile(File.File):
                 self.save_fs(writer, *packer)
             else:
                 raise NotImplementedError("UnityFS - Packer:", packer)
-        return writer.bytes
+        
+        if close_writer:
+            return writer.bytes
 
     def save_fs(self, writer: EndianBinaryWriter, data_flag: int, block_info_flag: int):
-        # header
-        # compressed blockinfo (block details & directionary)
-        # compressed assets
-
-        # 0b1000000 / 0b11000000 | 64 / 192 - uncompressed
-        # 0b11000010 | 194 - lz4
-        # block_info_flag
-
-        # 0 / 0b1000000 | 0 / 64 - uncompressed
-        # 0b1   | 1 - lzma
-        # 0b10  | 2 - lz4
-        # 0b11  | 3 - lz4hc [not implemented]
-        # 0b100 | 4 - lzham [not implemented]
-        # data_flag
-
-        # header:
-        #     bundle_size       (long)
-        #     compressed_size   (int)
-        #     uncompressed_size (int)
-        #     flag              (int)
-        #     ?padding?         (bool)
-        #   This will be written at the end,
-        #   because the size can only be calculated after the data compression,
-
-        # block_info:
-        #     *flag & 0x80 ? at the end : right after header
-        #     *decompression via flag & 0x3F
-        #     *read compressed_size -> uncompressed_size
-        #     0x10 offset
-        #     *read blocks infos of the data stream
-        #     count                 (int)
-        #     (
-        #         uncompressed_size (uint)
-        #         compressed_size   (uint)
-        #         flag              (short)
-        #     )
-        #     *decompression via info.flag & 0x3F
-
-        #     *afterwards the file positions
-        #     file_count    (int)
-        #     (
-        #         offset    (long)
-        #         size      (long)
-        #         flag      (int)
-        #         name      (string_to_null)
-        #     )
-
         # file list & file data
-        # prep nodes and build up block data
-        data_writer = EndianBinaryWriter()
-        files = [
-            (
-                name,
-                f.flags,
-                data_writer.write_bytes(
-                    f.bytes if isinstance(f, (EndianBinaryReader, EndianBinaryWriter)) else f.save()
-                ),
-            )
-            for name, f in self.files.items()
-        ]
+        files = []
+        uncompressed_data_size = 0
+        uncompressed_data_file = tempfile.TemporaryFile()
+        try:
+            for name, f in self.files.items():
+                file_data = f.bytes if isinstance(f, (EndianBinaryReader, EndianBinaryWriter)) else f.save()
+                file_len = len(file_data)
+                uncompressed_data_file.write(file_data)
+                files.append((name, f.flags, file_len))
+            uncompressed_data_size = uncompressed_data_file.tell()
+            uncompressed_data_file.seek(0)
 
-        file_data = data_writer.bytes
-        data_writer.dispose()
+            # remove encryption flag, as encryption isn't done
+            if block_info_flag & self.dataflags.UsesAssetBundleEncryption:
+                block_info_flag ^= self.dataflags.UsesAssetBundleEncryption
+            if data_flag & self.dataflags.UsesAssetBundleEncryption:
+                data_flag ^= self.dataflags.UsesAssetBundleEncryption
 
-        # remove encryption flag, as encryption isn't done
-        if block_info_flag & self.dataflags.UsesAssetBundleEncryption:
-            block_info_flag ^= self.dataflags.UsesAssetBundleEncryption
-        if data_flag & self.dataflags.UsesAssetBundleEncryption:
-            data_flag ^= self.dataflags.UsesAssetBundleEncryption
+            # compress the data
+            compressed_data_file = tempfile.TemporaryFile()
+            try:
+                block_info = CompressionHelper.chunk_based_compress_stream(uncompressed_data_file, compressed_data_file, uncompressed_data_size, block_info_flag)
+                compressed_data_size = compressed_data_file.tell()
+                compressed_data_file.seek(0)
 
-        file_data, block_info = CompressionHelper.chunk_based_compress(file_data, block_info_flag)
+                # write the block_info
+                # uncompressedDataHash
+                block_writer = EndianBinaryWriter(b"\x00" * 0x10)
+                # data block info
+                block_writer.write_int(len(block_info))
+                for block_uncompressed_size, block_compressed_size, block_flag in block_info:
+                    # uncompressed size
+                    block_writer.write_u_int(block_uncompressed_size)
+                    # compressed size
+                    block_writer.write_u_int(block_compressed_size)
+                    # flag
+                    block_writer.write_u_short(block_flag)
 
-        # write the block_info
-        # uncompressedDataHash
-        block_writer = EndianBinaryWriter(b"\x00" * 0x10)
-        # data block info
-        block_writer.write_int(len(block_info))
-        for block_uncompressed_size, block_compressed_size, block_flag in block_info:
-            # uncompressed size
-            block_writer.write_u_int(block_uncompressed_size)
-            # compressed size
-            block_writer.write_u_int(block_compressed_size)
-            # flag
-            block_writer.write_u_short(block_flag)
+                # file block info
+                if not data_flag & 0x40:
+                    raise NotImplementedError("UnityPy always writes DirectoryInfo, so data_flag must include 0x40")
+                # file count
+                block_writer.write_int(len(files))
+                offset = 0
+                for f_name, f_flag, f_len in files:
+                    # offset
+                    block_writer.write_long(offset)
+                    # size
+                    block_writer.write_long(f_len)
+                    offset += f_len
+                    # flag
+                    block_writer.write_u_int(f_flag)
+                    # name
+                    block_writer.write_string_to_null(f_name)
 
-        # file block info
-        if not data_flag & 0x40:
-            raise NotImplementedError("UnityPy always writes DirectoryInfo, so data_flag must include 0x40")
-        # file count
-        block_writer.write_int(len(files))
-        offset = 0
-        for f_name, f_flag, f_len in files:
-            # offset
-            block_writer.write_long(offset)
-            # size
-            block_writer.write_long(f_len)
-            offset += f_len
-            # flag
-            block_writer.write_u_int(f_flag)
-            # name
-            block_writer.write_string_to_null(f_name)
+                # compress the block data
+                block_data = block_writer.bytes
+                block_writer.dispose()
+                uncompressed_block_data_size = len(block_data)
 
-        # compress the block data
-        block_data = block_writer.bytes
-        block_writer.dispose()
+                switch = data_flag & 0x3F
+                if switch in CompressionHelper.COMPRESSION_MAP:
+                    block_data = CompressionHelper.COMPRESSION_MAP[switch](block_data)
+                else:
+                    raise NotImplementedError(f"No compression function in the CompressionHelper.COMPRESSION_MAP for {switch}")
 
-        uncompressed_block_data_size = len(block_data)
+                compressed_block_data_size = len(block_data)
 
-        switch = data_flag & 0x3F
-        if switch in CompressionHelper.COMPRESSION_MAP:
-            block_data = CompressionHelper.COMPRESSION_MAP[switch](block_data)
-        else:
-            raise NotImplementedError(f"No compression function in the CompressionHelper.COMPRESSION_MAP for {switch}")
+                # write the header info
+                writer_header_pos = writer.Position
+                writer.write_long(0)  # file size - 0 for now, will be set at the end
+                writer.write_u_int(compressed_block_data_size)
+                writer.write_u_int(uncompressed_block_data_size)
+                writer.write_u_int(data_flag)
 
-        compressed_block_data_size = len(block_data)
+                if self._uses_block_alignment:
+                    writer.align_stream(16)
 
-        # write the header info
-        ## file size - 0 for now, will be set at the end
-        writer_header_pos = writer.Position
-        writer.write_long(0)
-        # compressed blockInfoBytes size
-        writer.write_u_int(compressed_block_data_size)
-        # uncompressed size
-        writer.write_u_int(uncompressed_block_data_size)
-        # compression and file layout flag
-        writer.write_u_int(data_flag)
+                header_size = writer.Position - writer_header_pos
 
-        if self._uses_block_alignment:
-            # UnityFS\x00 - 8
-            # size 8
-            # comp sizes 4+4
-            # flag 4
-            # sum : 28 -> +8 alignment
-            writer.align_stream(16)
+                # write the data
+                if data_flag & 0x80:  # at end of file
+                    if data_flag & 0x200:
+                        writer.align_stream(16)
+                    # write compressed assets
+                    writer.write_stream(compressed_data_file, compressed_data_size)
+                    # write compressed blockinfo
+                    writer.write(block_data)
+                else:
+                    # write compressed blockinfo
+                    writer.write(block_data)
+                    if data_flag & 0x200:
+                        writer.align_stream(16)
+                    # write compressed assets
+                    writer.write_stream(compressed_data_file, compressed_data_size)
+                
+                #writer_end_pos = writer.Position
+                # set correct file size
+                writer_end_pos = writer_header_pos + header_size + compressed_block_data_size + compressed_data_size
+                writer.Position = writer_header_pos
+                writer.write_long(writer_end_pos)
+                writer.Position = writer_end_pos
 
-        if data_flag & 0x80:  # at end of file
-            if data_flag & 0x200:
-                writer.align_stream(16)
-            writer.write(file_data)
-            writer.write(block_data)
-        else:
-            writer.write(block_data)
-            if data_flag & 0x200:
-                writer.align_stream(16)
-            writer.write(file_data)
+            finally:
+                compressed_data_file.close()
 
-        writer_end_pos = writer.Position
-        writer.Position = writer_header_pos
-        # correct file size
-        writer.write_long(writer_end_pos)
-        writer.Position = writer_end_pos
+        finally:
+            uncompressed_data_file.close()
 
     def save_web_raw(self, writer: EndianBinaryWriter):
         # (version >= 4) hash
