@@ -115,53 +115,44 @@ class ObjectReader(Generic[T]):
         if header.version == 15 or header.version == 16:
             self.stripped = reader.read_byte()
 
-    def write(self, header, writer: EndianBinaryWriter, data_writer: EndianBinaryWriter):
+    def write(self, header, meta_writer: EndianBinaryWriter, data_writer: EndianBinaryWriter):
         if self.assets_file.big_id_enabled:
-            writer.write_long(self.path_id)
+            meta_writer.write_long(self.path_id)
         elif header.version < 14:
-            writer.write_int(self.path_id)
+            meta_writer.write_int(self.path_id)
         else:
-            writer.align_stream()
-            writer.write_long(self.path_id)
+            meta_writer.align_stream()
+            meta_writer.write_long(self.path_id)
+
+        if header.version >= 22:
+            meta_writer.write_long(data_writer.Position)
+        else:
+            meta_writer.write_u_int(data_writer.Position)
 
         if self.data:
             data = self.data
-            # in some cases the parser doesn't read all of the object data
-            # games might still require the missing data
-            # so following code appends the missing data back to edited objects
-            # -> following solution has let to some problems, so it will be removed for now
-            # if self.type != ClassIDType.MonoBehaviour:
-            #     end_pos = self.byte_start + self.byte_size
-            #     if self._read_until and self._read_until != end_pos:
-            #         self.reader.Position = self._read_until
-            #         data += self.reader.read_bytes(end_pos - self._read_until)
+            meta_writer.write_u_int(len(data))
+            data_writer.write(data)
         else:
+            meta_writer.write_u_int(self.byte_size)
             self.reset()
-            data = self.reader.read(self.byte_size)
+            data_writer.write_stream(self.reader, self.byte_size)
 
-        if header.version >= 22:
-            writer.write_long(data_writer.Position)
-        else:
-            writer.write_u_int(data_writer.Position)
-
-        writer.write_u_int(len(data))
-        data_writer.write(data)
-
-        writer.write_int(self.type_id)
+        meta_writer.write_int(self.type_id)
 
         if header.version < 16:
-            writer.write_u_short(self.class_id)
+            meta_writer.write_u_short(self.class_id)
 
         if header.version < 11:
             assert self.is_destroyed is not None
-            writer.write_u_short(self.is_destroyed)
+            meta_writer.write_u_short(self.is_destroyed)
 
         if 11 <= header.version < 17:
             assert self.serialized_type is not None
-            writer.write_short(self.serialized_type.script_type_index)
+            meta_writer.write_short(self.serialized_type.script_type_index)
 
         if header.version == 15 or header.version == 16:
-            writer.write_byte(self.stripped)
+            meta_writer.write_byte(self.stripped)
 
     def set_raw_data(self, data):
         self.data = data
