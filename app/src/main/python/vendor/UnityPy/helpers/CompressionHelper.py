@@ -231,6 +231,72 @@ def chunk_based_compress(data: ByteString, block_info_flag: int) -> Tuple[ByteSt
     return bytes(compressed_file_data), block_info
 
 
+def chunk_based_compress_stream(reader, writer, uncompressed_data_size: int, block_info_flag: int) -> list:
+    switch = block_info_flag & 0x3F
+    chunk_size = None
+    compress_func = None
+    if switch == 0:  # NONE
+        writer.write(reader.read())
+        return [(uncompressed_data_size, uncompressed_data_size, block_info_flag)]
+
+    if switch in COMPRESSION_MAP:
+        compress_func = COMPRESSION_MAP[switch]
+    else:
+        raise NotImplementedError(f"No compression function in the CompressionHelper.COMPRESSION_MAP for {switch}")
+
+    if switch in COMPRESSION_CHUNK_SIZE_MAP:
+        chunk_size = COMPRESSION_CHUNK_SIZE_MAP[switch]
+    else:
+        raise NotImplementedError(f"No chunk size in the CompressionHelper.COMPRESSION_CHUNK_SIZE_MAP for {switch}")
+
+    block_info = []
+    while uncompressed_data_size > chunk_size:
+        uncompressed_chunk = reader.read(chunk_size)
+        compressed_data = compress_func(uncompressed_chunk)
+        if len(compressed_data) > chunk_size:
+            writer.write(uncompressed_chunk)
+            block_info.append(
+                (
+                    chunk_size,
+                    chunk_size,
+                    block_info_flag ^ switch,
+                )
+            )
+        else:
+            writer.write(compressed_data)
+            block_info.append(
+                (
+                    chunk_size,
+                    len(compressed_data),
+                    block_info_flag,
+                )
+            )
+        uncompressed_data_size -= chunk_size
+    if uncompressed_data_size > 0:
+        uncompressed_chunk = reader.read(uncompressed_data_size)
+        compressed_data = compress_func(uncompressed_chunk)
+        if len(compressed_data) > uncompressed_data_size:
+            writer.write(uncompressed_chunk)
+            block_info.append(
+                (
+                    uncompressed_data_size,
+                    uncompressed_data_size,
+                    block_info_flag ^ switch,
+                )
+            )
+        else:
+            writer.write(compressed_data)
+            block_info.append(
+                (
+                    uncompressed_data_size,
+                    len(compressed_data),
+                    block_info_flag,
+                )
+            )
+    return block_info
+
+
+
 def decompress_lzham(data: ByteString, uncompressed_size: int) -> bytes:
     raise NotImplementedError("Custom compression or unimplemented LZHAM (removed by Unity) encountered!")
 
