@@ -266,8 +266,7 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             try:
                 with open(output_path, "wb") as f:
-                    bundle_data = env.file.save(packer="lz4")
-                    f.write(bundle_data)
+                    env.file.save(f, packer="lz4")
                 report_progress("Saved successfully!")
                 return True
             except Exception as e:
