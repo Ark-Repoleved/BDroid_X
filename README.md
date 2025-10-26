@@ -48,7 +48,8 @@ For the app to recognize your mods, they must follow a specific structure. Each 
 │   └── 🖼️ char000104.png         (the texture image)
 │
 └── 📁 Another_Mod/
-    └── ... (other mod files)```
+    └── ... (other mod files)
+```
 
 ### 2. Install Mods
 
