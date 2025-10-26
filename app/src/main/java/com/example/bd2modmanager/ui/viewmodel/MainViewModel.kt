@@ -392,7 +392,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         val command = if (successfulJobs.isNotEmpty()) {
             successfulJobs.joinToString(" && ") {
                 val hash = it.job.hashedName
-                "mv -f */Download/__${hash} */Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hash/*/__data"
+                "mv -f /storage/emulated/0/Download/__${hash} /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hash/*/__data"
             }
         } else null
 
@@ -445,7 +445,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 downloadedFile.delete()
 
                 if (publicUri != null) {
-                    val command = "mv -f */Download/__${hashedName} */Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hashedName/*/__data"
+                    val command = "mv -f /storage/emulated/0/Download/__${hashedName} /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hashedName/*/__data"
                     _uninstallState.value = UninstallState.Finished(command)
                 } else {
                     _uninstallState.value = UninstallState.Failed("Failed to save original file to Downloads folder.")
