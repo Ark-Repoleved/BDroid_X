@@ -42,7 +42,7 @@ For the app to recognize your mods, they must follow a specific structure. Each 
 **Example Folder Structure:**
 ```
 📁 .BD2_Mods/
-├── 📁 Lathel_DarkKnight_Costume/
+├── 📁 Lathel_DarkKnight_IDLE/
 │   ├── 📄 char000104.skel      (or .json for the skeleton)
 │   ├── 📄 char000104.atlas     (the atlas mapping file)
 │   └── 🖼️ char000104.png         (the texture image)
