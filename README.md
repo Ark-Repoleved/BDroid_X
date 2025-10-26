@@ -81,7 +81,7 @@ Not sure what a mod looks like in action?
 
 Crashes are often caused by mods that use too many texture files (e.g., `_5.png`, `_6.png`). This tool merges them into a less, more stable file.
 1.  On the main screen, find the mod that is causing the crash. Select **only that mod**.
-2.  Tap the floating action button, then tap the **"Merge Spine"** button.
+2.  Tap the **"Merge Spine"** button.
 3.  The app will process the files. The originals will be backed up into a new `.old` subfolder.
 4.  Re-install the newly merged mod. The crash should be resolved.
 
