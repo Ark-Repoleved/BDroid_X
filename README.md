@@ -8,11 +8,11 @@
 
 ## ✨ Key Features
 
-*   **PC-Free Operation**: Unpacks, converts textures (ASTC), and repacks mods entirely on your Android device.
-*   **Smart Mod Grouping**: Automatically scans your mod folder and groups mods by the game files they modify, preventing conflicts.
-*   **Batch Processing**: Select and install multiple mods from different groups in a single operation.
-*   **Live Animation Preview**: Long-press any mod to preview its Spine animation before you install it.
-*   **Built-in Utilities**: Includes tools to merge texture atlases and unpack game bundles.
+*   **📱 PC-Free Operation**: Unpacks, converts textures (ASTC), and repacks mods entirely on your Android device.
+*   **🧠 Smart Mod Grouping**: Automatically scans your mod folder and groups mods by the game files they modify, preventing conflicts.
+*   **⚡ Batch Processing**: Select and install multiple mods from different groups in a single operation.
+*   **👀 Live Animation Preview**: Long-press any mod to preview its Spine animation before you install it.
+*   **🔧 Built-in Utilities**: Includes tools to merge texture atlases and unpack game bundles.
 
 ---
 
@@ -29,7 +29,7 @@
 3.  **Select Mod Folder**:
     *   Tap the **"Select Mod Source Folder"** button.
     *   Navigate to the folder where you store your mods and tap **"Use this folder"**.
-    > **Recommendation:** For best results, create a dedicated folder (e.g., `.BD2_Mods`) in your phone's internal storage and place all your mod files there.
+    > **💡 Pro Tip:** For best results, create a dedicated folder (e.g., `.BD2_Mods`) in your phone's internal storage and place all your mod files there.
 
 ---
 
