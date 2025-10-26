@@ -76,12 +76,12 @@ Not sure what a mod looks like in action?
 2.  **Long-press** on it.
 3.  A preview screen will open, playing the animation.
 
-### Spine Atlas Merger
-If a mod uses multiple texture images (e.g., `_2.png`, `_3.png`), it can cause the game to crash. This tool merges them into a single file to improve stability.
-1.  On the main screen, select **only one** mod that has multiple `.png` files.
+### Spine Atlas Merger (Troubleshooting Tool)
+**Use this tool ONLY if a mod causes the game to crash after installation.** Crashes are often caused by mods that use too many texture files (e.g., `_5.png`, `_6.png`). This tool merges them into a less, more stable file.
+1.  On the main screen, find the mod that is causing the crash. Select **only that mod**.
 2.  Tap the floating action button, then tap the **"Merge Spine"** button.
-3.  The app will process the files. The original `.png` and `.atlas` files will be moved to a new `.old` subfolder as a backup.
-4.  You can now install the merged mod as usual.
+3.  The app will process the files. The originals will be backed up into a new `.old` subfolder.
+4.  Re-install the newly merged mod. The crash should be resolved.
 
 ### Standalone Bundle Unpacker
 For users who want to extract original game files:
