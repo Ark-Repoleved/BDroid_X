@@ -2,8 +2,6 @@
 
 # BrownDust 2 Android Mod Manager
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/issekisaji)
-
 **Manage and install your BrownDust 2 mods directly on your phone. No PC required.**
 
 ---
@@ -124,3 +122,5 @@ This tool was made possible by these incredible open-source projects:
 *   **[ReDustX](https://github.com/Jelosus2/ReDustX)**: For the `.json`-to-`.skel` conversion logic and CDN download methods.
 *   **[UnityPy](https://github.com/K0lb3/UnityPy)**: For reading and modifying Unity game assets.
 *   **[astc-encoder](https://github.com/ARM-software/astc-encoder)**: For the official ASTC texture encoder.
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/issekisaji)
