@@ -1,8 +1,8 @@
 [English](./README.md) | [繁體中文](./README.zh-TW.md) | [➡️ Usability Survey](https://github.com/Ark-Repoleved/bd2-android-mod-manager/discussions/5)
 
-# Brown Dust 2 Android Mod Manager
+# BrownDust 2 Android Mod Manager
 
-**Manage and install your Brown Dust 2 mods directly on your phone. No PC required.**
+**Manage and install your BrownDust 2 mods directly on your phone. No PC required.**
 
 ---
 
