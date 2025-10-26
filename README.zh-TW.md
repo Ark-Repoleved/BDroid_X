@@ -1,5 +1,5 @@
 [English](./README.md) | [繁體中文](./README.zh-TW.md) | [實用度調查](https://github.com/Ark-Repoleved/bd2-android-mod-manager/discussions/5) | <a href="https://ko-fi.com/issekisaji">
-    <img alt="Static Badge" align="top" src="https://img.itch.zone/aW1nLzIwMzI3NTcyLnBuZw==/original/0RXgeW.png" height="24">
+    <img alt="Static Badge" align="top" src="https://houstonwolves.wordpress.com/wp-content/uploads/2025/08/sparkle-mug.gif" height="24">
 </a>
 
 # BrownDust 2 Android 模組管理器
