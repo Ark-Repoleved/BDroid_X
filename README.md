@@ -18,7 +18,7 @@ No need for a PC to unpack and repack.
 
 ## System Requirements
 
-*   Android 11 or higher.
+*   Android 11 or higher (Android 16+ may have permission problem).
 *   The latest official version of BrownDust 2 installed.
 
 ## Installation
