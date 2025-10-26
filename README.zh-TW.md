@@ -5,7 +5,7 @@
 # BrownDust 2 Android 模組管理器
 
 解包封包不用跑電腦上了。
-
+**[➡️ 前往實用度調查投票](https://github.com/Ark-Repoleved/bd2-android-mod-manager/discussions/5)**
 ---
 
 ## 功能介紹
