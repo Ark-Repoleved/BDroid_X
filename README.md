@@ -4,8 +4,6 @@
 
 **Manage and install your Brown Dust 2 mods directly on your phone. No PC required.**
 
-This tool simplifies the process of modding the Android version of Brown Dust 2. It handles unpacking, resource conversion, and repacking on your device, allowing you to focus on playing the game.
-
 ---
 
 ## ✨ Key Features
