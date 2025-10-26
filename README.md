@@ -29,7 +29,7 @@
 3.  **Select Mod Folder**:
     *   Tap the **"Select Mod Source Folder"** button.
     *   Navigate to the folder where you store your mods and tap **"Use this folder"**.
-    > **💡 Pro Tip:** For best results, create a dedicated folder (e.g., `.BD2_Mods`) in your phone's internal storage and place all your mod files there.
+    > **💡 Recommendation:** For best results, create a dedicated folder (e.g., `.BD2_Mods`) in your phone's internal storage and place all your mod files there.
 
 ---
 
