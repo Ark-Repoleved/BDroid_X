@@ -63,7 +63,7 @@ For the app to recognize your mods, they must follow a specific structure. Each 
 4.  **Manually Replace File**:
     *   Once complete, the modified game file (e.g., `__0216fs6...`) will be saved to your phone's **`Download`** folder.
     *   You must **manually move** this new `__data` file into the game's data directory, overwriting the original.
-    *   The path is typically: `Android/data/com.neowiz.game.browndust2.google/files/assets/asset_prod/world/`.
+    *   The path is typically: `/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/[Hash]/*/__data`.
     > **Note:** You will need a third-party file manager that can access `Android/data` folders. For easier access, the app provides a one-click ADB command that can be used with tools like [ShizuTools](https://github.com/legendsayantan/ShizuTools).
 
 ---
