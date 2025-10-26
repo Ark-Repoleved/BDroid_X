@@ -1,4 +1,4 @@
-[English](./README.md) | [繁體中文](./README.zh-TW.md) | [➡️ Usability Poll](https://github.com/Ark-Repoleved/bd2-android-mod-manager/discussions/5) | [![ko-fi](https://img.shields.io/badge/ko--fi-000000?style=for-the-badge&logo=ko-fi&logoColor=white&labelColor=000000)](https://ko-fi.com/issekisaji)
+[English](./README.md) | [繁體中文](./README.zh-TW.md) | [➡️ Usability Poll](https://github.com/Ark-Repoleved/bd2-android-mod-manager/discussions/5) | <a href="https://ko-fi.com/issekisaji" title="Support me on Ko-fi"><img src="https://www.iconpacks.net/icons/2/free-ko-fi-logotype-circle-black-icon-11536091004csy2brolgh.png" height="24" alt="Ko-fi"></a>
 
 # BrownDust 2 Android Mod Manager
 
