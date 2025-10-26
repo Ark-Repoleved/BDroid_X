@@ -19,7 +19,7 @@
 ## 🚀 Getting Started
 
 ### Requirements
-*   Android 11 or higher (Android 16+ may have permission problem)..
+*   Android 11 or higher (Android 16+ may have permission problem).
 *   The latest official version of Brown Dust 2 installed.
 
 ### Installation & Setup
