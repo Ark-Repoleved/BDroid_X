@@ -12,7 +12,7 @@
 *   **Smart Mod Grouping**: Automatically scans your mod folder and groups mods by the game files they modify, preventing conflicts.
 *   **Batch Processing**: Select and install multiple mods from different groups in a single operation.
 *   **Live Animation Preview**: Long-press any mod to preview its Spine animation before you install it.
-*   **Built-in Unpacker**: Includes a standalone tool for advanced users to unpack any game asset bundle (`__data` file).
+*   **Built-in Utilities**: Includes tools to merge texture atlases and unpack game bundles.
 
 ---
 
@@ -48,8 +48,7 @@ For the app to recognize your mods, they must follow a specific structure. Each 
 │   └── 🖼️ char000104.png         (the texture image)
 │
 └── 📁 Another_Mod/
-    └── ... (other mod files)
-```
+    └── ... (other mod files)```
 
 ### 2. Install Mods
 
@@ -57,7 +56,7 @@ For the app to recognize your mods, they must follow a specific structure. Each 
   <img src="https://raw.githubusercontent.com/Ark-Repoleved/bd2-android-mod-manager/main/guide_video.gif" width="250">
 </p>
 
-1.  **Select Mods**: In the app, check the boxes for the mods you want to install. You can select mods from different target groups.
+1.  **Select Mods**: In the app, check the boxes for the mods you want to install.
 2.  **Start Repacking**: Tap the floating **check mark (✓)** button at the bottom right.
 3.  **Wait for Processing**: The app will automatically download the necessary original game files and repack your selected mods. A dialog will show the live progress.
 4.  **Manually Replace File**:
@@ -76,6 +75,13 @@ Not sure what a mod looks like in action?
 2.  **Long-press** on it.
 3.  A preview screen will open, playing the animation.
 
+### Spine Atlas Merger
+If a mod uses multiple texture images (e.g., `_2.png`, `_3.png`), it can cause the game to crash. This tool merges them into a single file to improve stability.
+1.  On the main screen, select **only one** mod that has multiple `.png` files.
+2.  Tap the floating action button, then tap the **"Merge Spine"** button.
+3.  The app will process the files. The original `.png` and `.atlas` files will be moved to a new `.old` subfolder as a backup.
+4.  You can now install the merged mod as usual.
+
 ### Standalone Bundle Unpacker
 For users who want to extract original game files:
 1.  Make sure no mods are selected on the main screen.
@@ -89,6 +95,9 @@ For users who want to extract original game files:
 
 *   **Q: My mods aren't showing up!**
     *   **A:** Double-check that you've selected the correct "Mod Source Folder" in the setup. Also, ensure your mods are in unzipped folders and follow the correct [folder structure](#1-prepare-your-mods-important).
+
+*   **Q: The game crashes after installing a mod.**
+    *   **A:** This often happens when a mod uses too many separate texture (`.png`) files. Please use the built-in **[Spine Atlas Merger](#spine-atlas-merger)** tool to combine the textures into a single file before installing the mod.
 
 *   **Q: The installation failed. What should I do?**
     *   **A:** Failures are usually caused by:
