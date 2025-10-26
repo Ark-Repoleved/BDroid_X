@@ -58,7 +58,7 @@ For the app to recognize your mods, they must follow a specific structure. Each 
 </p>
 
 1.  **Select Mods**: In the app, check the boxes for the mods you want to install.
-2.  **Start Repacking**: Tap the floating **check mark (✓)** button at the bottom right.
+2.  **Start Repacking**: Tap the floating **Repack (✓)** button at the bottom right.
 3.  **Wait for Processing**: The app will automatically download the necessary original game files and repack your selected mods. A dialog will show the live progress.
 4.  **Manually Replace File**:
     *   Once complete, the modified game file (e.g., `__0216fs6...`) will be saved to your phone's **`Download`** folder.
