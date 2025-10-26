@@ -1,110 +1,113 @@
-[English](./README.md) | [繁體中文](./README.zh-TW.md) | [➡️Usability Survey](https://github.com/Ark-Repoleved/bd2-android-mod-manager/discussions/5)
+[English](./README.md) | [繁體中文](./README.zh-TW.md) | [➡️ Usability Survey](https://github.com/Ark-Repoleved/bd2-android-mod-manager/discussions/5)
+
+# Brown Dust 2 Android Mod Manager
+
+**Manage and install your Brown Dust 2 mods directly on your phone. No PC required.**
+
+This tool simplifies the process of modding the Android version of Brown Dust 2. It handles unpacking, resource conversion, and repacking on your device, allowing you to focus on playing the game.
 
 ---
 
-# BrownDust 2 Android Mod Manager
+## ✨ Key Features
 
-No need for a PC to unpack and repack.
+*   **PC-Free Operation**: Unpacks, converts textures (ASTC), and repacks mods entirely on your Android device.
+*   **Smart Mod Grouping**: Automatically scans your mod folder and groups mods by the game files they modify, preventing conflicts.
+*   **Batch Processing**: Select and install multiple mods from different groups in a single operation.
+*   **Live Animation Preview**: Long-press any mod to preview its Spine animation before you install it.
+*   **Built-in Unpacker**: Includes a standalone tool for advanced users to unpack any game asset bundle (`__data` file).
 
 ---
 
-## Features
+## 🚀 Getting Started
 
-*   **Automatic Scan & Grouping**: Automatically scans your specified mod folder and intelligently groups mods based on the game files they modify.
-*   **Parallel Processing**: Select mods from different groups and process them all in a single batch. The app handles everything concurrently.
-*   **On-Device Repacking**: Unpack, convert resources (ASTC), and repack mods directly on your phone without needing a computer.
-*   **Spine Animation Preview**: Long-press any mod in the list to open a live preview of the Spine animation before installation.
-*   **Standalone Bundle Unpacker**: A utility for advanced users to unpack any game asset bundle (`__data` file) directly on your device.
+### Requirements
+*   Android 11 or higher.
+*   The latest official version of Brown Dust 2 installed.
 
-## System Requirements
+### Installation & Setup
 
-*   Android 11 or higher (Android 16+ may have permission problem).
-*   The latest official version of BrownDust 2 installed.
+1.  **Download the App**: Grab the latest `.apk` from the [Releases page](https://github.com/Ark-Repoleved/bd2-android-mod-manager/releases) and install it.
+2.  **Grant Permissions**: Open the app. You'll be prompted to grant file access permissions.
+3.  **Select Mod Folder**:
+    *   Tap the **"Select Mod Source Folder"** button.
+    *   Navigate to the folder where you store your mods and tap **"Use this folder"**.
+    > **Recommendation:** For best results, create a dedicated folder (e.g., `.BD2_Mods`) in your phone's internal storage and place all your mod files there.
 
-## Installation
+---
 
-1.  [Download](https://github.com/Ark-Repoleved/bd2-android-mod-manager/releases) the `.apk` file for this application.
-2.  Tap the downloaded `.apk` file to install.
+## 🛠️ How to Use
 
-## First-Time Setup
+### 1. Prepare Your Mods (Important!)
 
-Before you can start installing mods, you need to complete a one-time authorization step:
+For the app to recognize your mods, they must follow a specific structure. Each mod needs its own folder, and the filenames inside must **exactly match** the game's original asset names.
 
-1.  Open the app, and you will see a welcome screen.
-2.  Tap the **"Select Mod Source Folder"** button.
-3.  In the file picker that appears, navigate to where you store your mod folders, and then tap **"Use this folder"**.
-    *   *Recommendation:* Create a folder named `.BD2_Mods` in your phone's storage and place all your downloaded mods there.
-
-## Folder Structure
-
-For mods to be installed successfully, each mod must be placed within its own dedicated folder inside the `.BD2_Mods/` directory. The filenames within your mod folder **must** exactly match the original asset names used in the game's Unity bundles.
-
-Here is a typical layout, using assets for "Lathel: Dark Knight" as an example:
-
-```
+**Example Folder Structure:**```
 📁 .BD2_Mods/
-├── 📁 Lathel_IDLE/
-│   ├── 📄 char000104.skel (or.json)  # The Spine skeleton data
-│   ├── 📄 char000104.atlas           # The atlas mapping file
-│   └── 🖼️ char000104.png             # The texture atlas image(s)
+├── 📁 Lathel_DarkKnight_Costume/
+│   ├── 📄 char000104.skel      (or .json for the skeleton)
+│   ├── 📄 char000104.atlas     (the atlas mapping file)
+│   └── 🖼️ char000104.png         (the texture image)
 │
-└── 📁 another_mod/
+└── 📁 Another_Mod/
     └── ... (other mod files)
 ```
 
-## How to Install Mods
-
-1.  **Select Mods**: On the main screen list, check one or more mods you want to install. You can now select mods from different groups (Targets) at the same time.
-2.  **Start Repacking**: Tap the floating action button with the **check mark (✓)** at the bottom right.
-3.  **Automatic Download & Repack**: A new dialog will appear, showing the live progress for each mod group. The app automatically downloads the latest original game files for each group from the official servers and repacks your selected mods in parallel.
-4.  **Manually Replace the File**:
-    *   After a successful installation, a new, modified `__data` file will be saved to your phone's **`Download`** folder with the filename `__[hashed_name]`.
-    *   **You need to manually copy or move this file to the corresponding game folder, overwriting the original `__data` file.**
-    *   You can use a third-party file manager (with special permissions) to do this. The dialog will provide a one-click ADB command that can be executed via [ShizuTools](https://github.com/legendsayantan/ShizuTools) to automate the replacement.
-
-## Guide Video
+### 2. Install Mods
 
 <p align="center">
-  <img src="./guide_video.gif" width="240">
+  <img src="https://raw.githubusercontent.com/Ark-Repoleved/bd2-android-mod-manager/main/guide_video.gif" width="250">
 </p>
 
-## Other Features
-
-### Spine Animation Preview
-
-To ensure a mod looks right before you install it, you can preview its animation directly.
-
-1.  Find the mod you want to check in the main list.
-2.  **Long-press** on the mod's card.
-3.  A new screen will open, playing the `.skel` or `.json` animation.
-
-### Standalone Bundle Unpacker
-
-This tool allows you to extract bundles file from the game.
-
-1.  On the main screen, ensure no mods are selected.
-2.  Tap the floating action button with the **unarchive (📤)** icon at the bottom right.
-3.  Select the `__data` file you wish to unpack.
-4.  The contents will be extracted to your phone's **`Download/outputs`** folder.
-
-## FAQ
-
-*   **Q: Why aren't my mods showing up in the app?**
-    *   A: Please ensure you have correctly selected the "Mod Source Folder". Also, make sure your mods are in `.zip` format or are unzipped folders.
-
-*   **Q: What should I do if the installation fails?**
-    *   A: Installation can fail for a few reasons: 1) A network error occurred while downloading the original game files. 2) The mod file names are incorrect. 3) An unexpected error occurred during the repacking process. Check the error message in the dialog for more details and ensure your internet connection is stable.
-
-*   **Q: What if the graphics are corrupted after installing a mod and entering the game?**
-    *   A: This is likely because the mod itself doesn't support Android BD2, or missing the `.skel` or `.json` file. A complete mod requires `.png`, `.atlas`, and `.skel` or `.json` files to function correctly.
+1.  **Select Mods**: In the app, check the boxes for the mods you want to install. You can select mods from different target groups.
+2.  **Start Repacking**: Tap the floating **check mark (✓)** button at the bottom right.
+3.  **Wait for Processing**: The app will automatically download the necessary original game files and repack your selected mods. A dialog will show the live progress.
+4.  **Manually Replace File**:
+    *   Once complete, the modified game file (e.g., `__0216fs6...`) will be saved to your phone's **`Download`** folder.
+    *   You must **manually move** this new `__data` file into the game's data directory, overwriting the original.
+    *   The path is typically: `Android/data/com.neowiz.game.browndust2.google/files/assets/asset_prod/world/`.
+    > **Note:** You will need a third-party file manager that can access `Android/data` folders. For easier access, the app provides a one-click ADB command that can be used with tools like [ShizuTools](https://github.com/legendsayantan/ShizuTools).
 
 ---
 
-## Credits
+## 🔧 Other Tools
 
-The development of this application would not have been possible without the contributions of the following open-source projects and tools. Special thanks to:
+### Spine Animation Preview
+Not sure what a mod looks like in action?
+1.  Find the mod in the list.
+2.  **Long-press** on it.
+3.  A preview screen will open, playing the animation.
 
-*   **[browndust2-repacker-android](https://codeberg.org/kxdekxde/browndust2-repacker-android)**: Provided the core techniques for repacking `__data` files, including handling ASTC texture compression and LZ4 compression.
-*   **[ReDustX](https://github.com/Jelosus2/ReDustX)**: Provided the core techniques for `.json` to `.skel` mechanism and download Original `__data` file from game's CDN.
-*   **[UnityPy](https://github.com/K0lb3/UnityPy)**: A Python library that is fundamental for reading, modifying, and saving Unity game assets.
-*   **[ARM-software/astc-encoder](https://github.com/ARM-software/astc-encoder)**: The official ASTC texture encoder from ARM, used to convert mod textures into a format compatible with the game system.
+### Standalone Bundle Unpacker
+For users who want to extract original game files:
+1.  Make sure no mods are selected on the main screen.
+2.  Tap the floating **unarchive (📤)** icon.
+3.  Select the `__data` file you want to unpack.
+4.  The extracted contents will be saved to the **`Download/outputs`** folder.
+
+---
+
+## ❓ FAQ
+
+*   **Q: My mods aren't showing up!**
+    *   **A:** Double-check that you've selected the correct "Mod Source Folder" in the setup. Also, ensure your mods are in unzipped folders and follow the correct [folder structure](#1-prepare-your-mods-important).
+
+*   **Q: The installation failed. What should I do?**
+    *   **A:** Failures are usually caused by:
+        1.  Poor network connection (failed to download original files).
+        2.  Incorrect mod filenames.
+        3.  An unexpected repacking error.
+        Check the error message in the dialog for clues.
+
+*   **Q: The in-game graphics are broken after installing a mod.**
+    *   **A:** This usually means the mod is incomplete or not compatible with the Android version. A complete character mod requires three files: `.png`, `.atlas`, and either `.skel` or `.json`.
+
+---
+
+## 🙏 Credits
+
+This tool was made possible by these incredible open-source projects:
+
+*   **[browndust2-repacker-android](https://codeberg.org/kxdekxde/browndust2-repacker-android)**: For the core repacking and texture compression techniques.
+*   **[ReDustX](https://github.com/Jelosus2/ReDustX)**: For the `.json`-to-`.skel` conversion logic and CDN download methods.
+*   **[UnityPy](https://github.com/K0lb3/UnityPy)**: For reading and modifying Unity game assets.
+*   **[astc-encoder](https://github.com/ARM-software/astc-encoder)**: For the official ASTC texture encoder.
