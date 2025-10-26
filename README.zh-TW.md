@@ -1,4 +1,6 @@
-[English](./README.md) | [繁體中文](./README.zh-TW.md) | [➡️ 實用度調查](https://github.com/Ark-Repoleved/bd2-android-mod-manager/discussions/5)
+[English](./README.md) | [繁體中文](./README.zh-TW.md) | [實用度調查](https://github.com/Ark-Repoleved/bd2-android-mod-manager/discussions/5) | <a href="https://ko-fi.com/issekisaji">
+            <img alt="Static Badge" align="top" src="https://img.shields.io/badge/KoFi-%23ff5e5b?logo=ko-fi&logoColor=%23FFFFFF&link=https%3A%2F%2Fko-fi.com%2FV7V7CHHJV">
+        </a>
 
 # BrownDust 2 Android 模組管理器
 
