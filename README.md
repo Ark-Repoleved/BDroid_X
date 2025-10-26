@@ -41,7 +41,8 @@ This tool simplifies the process of modding the Android version of Brown Dust 2.
 
 For the app to recognize your mods, they must follow a specific structure. Each mod needs its own folder, and the filenames inside must **exactly match** the game's original asset names.
 
-**Example Folder Structure:**```
+**Example Folder Structure:**
+```
 📁 .BD2_Mods/
 ├── 📁 Lathel_DarkKnight_Costume/
 │   ├── 📄 char000104.skel      (or .json for the skeleton)
