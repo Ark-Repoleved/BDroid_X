@@ -1,12 +1,10 @@
-[English](./README.md) | [繁體中文](./README.zh-TW.md)
+[English](./README.md) | [繁體中文](./README.zh-TW.md) | [➡️實用度調查](https://github.com/Ark-Repoleved/bd2-android-mod-manager/discussions/5)
 
 ---
 
 # BrownDust 2 Android 模組管理器
 
 解包封包不用跑電腦上了。
-
-*   **[➡️ 前往實用度調查投票](https://github.com/Ark-Repoleved/bd2-android-mod-manager/discussions/5)**
 
 ---
 
