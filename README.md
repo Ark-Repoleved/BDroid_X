@@ -1,4 +1,4 @@
-[English](./README.md) | [繁體中文](./README.zh-TW.md) | [➡️ Usability Survey](https://github.com/Ark-Repoleved/bd2-android-mod-manager/discussions/5) | [![Ko-fi](https://img.shields.io/badge/Ko--fi-29ABE0?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/issekisaji)
+[English](./README.md) | [繁體中文](./README.zh-TW.md) | [➡️ Usability Survey](https://github.com/Ark-Repoleved/bd2-android-mod-manager/discussions/5) | [![Ko-fi](https://img.shields.io/badge/Ko--fi-F16061?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/issekisaji)
 
 # BrownDust 2 Android Mod Manager
 
