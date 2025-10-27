@@ -21,7 +21,7 @@
 ## 🚀 Getting Started
 
 ### Requirements
-*   Android 8 or higher (Android 16+ may have permission problem).
+*   Android 8 or higher (Android 16+ may have permission problem while using shizutools).
 *   The latest official version of BrownDust 2 installed.
 
 ### Installation & Setup
