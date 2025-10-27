@@ -10,6 +10,7 @@ import java.net.URLEncoder
 
 class SpinePreviewActivity : ComponentActivity() {
 
+    private var webView: WebView? = null
     private var tempDir: File? = null
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -30,10 +31,10 @@ class SpinePreviewActivity : ComponentActivity() {
             return
         }
 
-        val webView = WebView(this)
+        webView = WebView(this)
         setContentView(webView)
 
-        webView.settings.apply {
+        webView?.settings?.apply {
             javaScriptEnabled = true
             allowFileAccess = true
             domStorageEnabled = true
@@ -46,7 +47,7 @@ class SpinePreviewActivity : ComponentActivity() {
         val encodedAtlasPath = URLEncoder.encode(atlasPath, "UTF-8")
 
         val url = "file:///android_asset/spine-viewer/preview.html?skel=$encodedSkelPath&atlas=$encodedAtlasPath"
-        webView.loadUrl(url)
+        webView?.loadUrl(url)
     }
 
     override fun onDestroy() {
@@ -57,5 +58,12 @@ class SpinePreviewActivity : ComponentActivity() {
                 it.deleteRecursively()
             }
         }
+        // Destroy the WebView to prevent memory leaks
+        webView?.let {
+            (it.parent as? android.view.ViewGroup)?.removeView(it)
+            it.removeAllViews()
+            it.destroy()
+        }
+        webView = null
     }
 }
