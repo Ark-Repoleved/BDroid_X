@@ -22,7 +22,7 @@
 
 ### Requirements
 *   Android 8 or higher (Android 16+ may have permission problem).
-*   The latest official version of Brown Dust 2 installed.
+*   The latest official version of BrownDust 2 installed.
 
 ### Installation & Setup
 
