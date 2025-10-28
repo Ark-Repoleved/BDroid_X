@@ -104,7 +104,7 @@ For users who want to extract original game files:
     *   **A:** Double-check that you've selected the correct "Mod Source Folder" in the setup. Also, ensure your mods are in unzipped folders and follow the correct [folder structure](#1-prepare-your-mods-important).
 
 *   **Q: The game crashes after installing a mod.**
-    *   **A:** This often happens when a mod uses too many separate texture (`.png`) files. Please use the built-in **[Spine Atlas Merger](#spine-atlas-merger-troubleshooting-tool)** tool to combine the textures into a single file before installing the mod.
+    *   **A:** This often happens when a mod uses too many separate texture (`.png`) files. Please use the built-in **[Spine Atlas Merger](#spine-atlas-merger-troubleshooting-tool)** tool to combine the textures before installing the mod.
 
 *   **Q: The installation failed. What should I do?**
     *   **A:** Failures are usually caused by:
