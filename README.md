@@ -1,6 +1,6 @@
 [English](./README.md) | [繁體中文](./README.zh-TW.md) | [Usability Survey](https://github.com/Ark-Repoleved/bd2-android-mod-manager/discussions/5) | 
 
-# BrownDust 2 Android Mod Manager <a href="https://ko-fi.com/issekisaji">
+# BrownDust 2 Android Mod Manager<a href="https://ko-fi.com/issekisaji">
     <img alt="Static Badge" align="top" src="https://raw.githubusercontent.com/Ark-Repoleved/bd2-android-mod-manager/refs/heads/main/.github/sparkle-mug.gif" height="24">
 </a>
 
