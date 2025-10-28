@@ -128,5 +128,5 @@
 
 ---
 
-## Stargazers over time
+## 🌟 Stargazers over time
 [![Stargazers over time](https://starchart.cc/Ark-Repoleved/BDroid_X.svg?variant=adaptive)](https://starchart.cc/Ark-Repoleved/BDroid_X)
