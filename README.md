@@ -126,3 +126,6 @@ This tool was made possible by these incredible open-source projects:
 *   **[ReDustX](https://github.com/Jelosus2/ReDustX)**: For the `.json`-to-`.skel` conversion logic and CDN download methods.
 *   **[UnityPy](https://github.com/K0lb3/UnityPy)**: For reading and modifying Unity game assets.
 *   **[astc-encoder](https://github.com/ARM-software/astc-encoder)**: For the official ASTC texture encoder.
+
+## Stargazers over time
+[![Stargazers over time](https://starchart.cc/Ark-Repoleved/BDroid_X.svg?variant=adaptive)](https://starchart.cc/Ark-Repoleved/BDroid_X)
