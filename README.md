@@ -1,4 +1,8 @@
-[![GitHub All Releases](https://img.shields.io/github/downloads/Ark-Repoleved/BDroid_X/total)](https://github.com/Ark-Repoleved/BDroid_X/releases)
+<p align="right">
+  <a href="https://github.com/Ark-Repoleved/BDroid_X/releases">
+    <img src="https://img.shields.io/github/downloads/Ark-Repoleved/BDroid_X/total" alt="GitHub All Releases">
+  </a>
+</p>
 
 [English](./README.md) | [繁體中文](./README.zh-TW.md) | [Usability Survey](https://github.com/Ark-Repoleved/bd2-android-mod-manager/discussions/5) | <a href="https://ko-fi.com/issekisaji">
     <img alt="Static Badge" align="top" src="https://raw.githubusercontent.com/Ark-Repoleved/bd2-android-mod-manager/refs/heads/main/.github/sparkle-mug.gif" height="24">
