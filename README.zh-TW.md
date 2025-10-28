@@ -27,9 +27,8 @@
 ### 安裝與設定
 
 1.  **下載應用程式**：從 [Releases 頁面](https://github.com/Ark-Repoleved/bd2-android-mod-manager/releases)下載最新的 `.apk` 檔案並安裝。
-2.  **授予權限**：開啟 App，並依照提示授予必要的檔案存取權限。
-3.  **選擇模組資料夾**：
-    *   點擊 **"Select Mod Source Folder"** 按鈕。
+2.  **選擇模組資料夾**：
+    *   打開 app 並點擊 **"Select Mod Source Folder"** 按鈕。
     *   找到您存放所有模組的資料夾，然後點擊 **"使用這個資料夾"**。
     > **💡 建議：** 在手機根目錄建立一個專用資料夾 (例如：`.BD2_Mods`) 來存放所有模組，方便管理。
 
