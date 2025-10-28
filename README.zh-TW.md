@@ -1,3 +1,5 @@
+[![GitHub All Releases](https://img.shields.io/github/downloads/Ark-Repoleved/BDroid_X/total)](https://github.com/Ark-Repoleved/BDroid_X/releases) [![GitHub release (latest by date)](https://img.shields.io/github/downloads/Ark-Repoleved/BDroid_X/latest/total)](https://github.com/Ark-Repoleved/BDroid_X/releases/latest)
+
 [English](./README.md) | [繁體中文](./README.zh-TW.md) | [實用度調查](https://github.com/Ark-Repoleved/bd2-android-mod-manager/discussions/5) | <a href="https://ko-fi.com/issekisaji">
     <img alt="Static Badge" align="top" src="https://raw.githubusercontent.com/Ark-Repoleved/bd2-android-mod-manager/refs/heads/main/.github/sparkle-mug.gif" height="24">
 </a>
@@ -123,3 +125,8 @@
 *   **[ReDustX](https://github.com/Jelosus2/ReDustX)**: 提供 `.json` 轉 `.skel` 以及從遊戲 CDN 下載原始檔案的機制。
 *   **[UnityPy](https://github.com/K0lb3/UnityPy)**: 用於讀取、修改及儲存 Unity 遊戲資產的基礎 Python 函式庫。
 *   **[astc-encoder](https://github.com/ARM-software/astc-encoder)**: 由 ARM 官方提供的 ASTC 紋理編碼器。
+
+---
+
+## Stargazers over time
+[![Stargazers over time](https://starchart.cc/Ark-Repoleved/BDroid_X.svg?variant=adaptive)](https://starchart.cc/Ark-Repoleved/BDroid_X)
