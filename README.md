@@ -27,7 +27,7 @@
 ### Installation & Setup
 
 1.  **Download the App**: Grab the latest `.apk` from the [Releases page](https://github.com/Ark-Repoleved/bd2-android-mod-manager/releases) and install it.
-2.  **Grant Permissions**: Open the app. You'll be prompted to grant file access permissions.
+2.  **Grant Permissions**: Open the app. You'll be prompted to select Mod folder.
 3.  **Select Mod Folder**:
     *   Tap the **"Select Mod Source Folder"** button.
     *   Navigate to the folder where you store your mods and tap **"Use this folder"**.
