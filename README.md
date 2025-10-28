@@ -4,6 +4,8 @@
 
 # BrownDust 2 Android Mod Manager
 
+[![GitHub All Releases](https://img.shields.io/github/downloads/Ark-Repoleved/BDroid_X/total)](https://github.com/Ark-Repoleved/BDroid_X/releases)
+
 **Manage and install your BrownDust 2 mods directly on your phone. No PC required.**
 
 ---
