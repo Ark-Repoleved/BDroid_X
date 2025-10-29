@@ -49,19 +49,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import com.example.bd2modmanager.ui.theme.BD2ModManagerTheme
 import com.example.bd2modmanager.ui.viewmodel.*
 import com.example.bd2modmanager.utils.SafManager
 import com.valentinilk.shimmer.shimmer
-import android.os.Build
-import android.os.Environment
-import android.provider.Settings
-import android.net.Uri
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.ui.platform.LocalLifecycleOwner
-
 
 class MainActivity : ComponentActivity() {
 
@@ -74,54 +65,6 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             BD2ModManagerTheme {
-                var showPermissionRationale by remember { mutableStateOf(false) }
-                val context = LocalContext.current
-                val lifecycleOwner = LocalLifecycleOwner.current
-
-                val settingsLauncher = rememberLauncherForActivityResult(
-                    contract = ActivityResultContracts.StartActivityForResult()
-                ) {
-                    // After returning from settings, the onResume will trigger the check again.
-                }
-
-                DisposableEffect(lifecycleOwner) {
-                    val observer = LifecycleEventObserver { _, event ->
-                        if (event == Lifecycle.Event.ON_RESUME) {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
-                                showPermissionRationale = true
-                            }
-                        }
-                    }
-                    lifecycleOwner.lifecycle.addObserver(observer)
-                    onDispose {
-                        lifecycleOwner.lifecycle.removeObserver(observer)
-                    }
-                }
-
-                if (showPermissionRationale) {
-                    AlertDialog(
-                        onDismissRequest = { showPermissionRationale = false },
-                        title = { Text("權限需求") },
-                        text = { Text("為了正常掃描與管理 Mod 檔案，本 App 需要「所有檔案存取權限」。請在接下來的系統設定頁面中啟用此權限。") },
-                        confirmButton = {
-                            Button(onClick = {
-                                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                                    data = Uri.fromParts("package", context.packageName, null)
-                                }
-                                settingsLauncher.launch(intent)
-                                showPermissionRationale = false
-                            }) {
-                                Text("前往設定")
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { showPermissionRationale = false }) {
-                                Text("稍後再說")
-                            }
-                        }
-                    )
-                }
-
                 var uninstallConfirmationTarget by remember { mutableStateOf<String?>(null) }
                 var showUnpackDialog by remember { mutableStateOf(false) }
 
