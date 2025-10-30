@@ -64,7 +64,7 @@ sealed class JobStatus {
     object Pending : JobStatus()
     data class Downloading(val progressMessage: String = "Waiting...") : JobStatus()
     data class Installing(val progressMessage: String = "Initializing...") : JobStatus()
-    data class Finished(val publicUri: Uri) : JobStatus()
+    data class Finished(val relativePath: String) : JobStatus()
     data class Failed(val error: String) : JobStatus()
 }
 
@@ -332,6 +332,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 throw Exception("Download failed: $messageOrPath")
             }
             val originalDataCache = File(messageOrPath)
+            val relativePath = originalDataCache.relativeTo(context.cacheDir)
+
 
             updateJobStatus(hashedName, JobStatus.Installing("Extracting mod files..."))
             val modAssetsDir = File(context.cacheDir, "temp_mod_assets_${hashedName}")
@@ -357,7 +359,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             }
 
             updateJobStatus(hashedName, JobStatus.Installing("Repacking bundle..."))
-            val repackedDataCache = File(context.cacheDir, "__${hashedName}")
+            val repackedDataCache = File(context.cacheDir, "repacked/${relativePath.path}")
+            repackedDataCache.parentFile?.mkdirs()
+
             val (repackSuccess, repackMessage) = ModdingService.repackBundle(originalDataCache.absolutePath, modAssetsDir.absolutePath, repackedDataCache.absolutePath, useAstc.value) { progress ->
                 updateJobStatus(hashedName, JobStatus.Installing(progress))
             }
@@ -369,11 +373,11 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 throw Exception("Repack failed: $repackMessage")
             }
 
-            val publicUri = saveFileToDownloads(context, repackedDataCache, "__${hashedName}")
+            val publicUri = saveFileToDownloads(context, repackedDataCache, relativePath.path, "Shared")
             repackedDataCache.delete()
 
             if (publicUri != null) {
-                updateJobStatus(hashedName, JobStatus.Finished(publicUri))
+                updateJobStatus(hashedName, JobStatus.Finished(relativePath.path))
             } else {
                 throw Exception("Failed to save file to Downloads folder.")
             }
@@ -390,10 +394,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         val failedJobs = finishedJobs.filter { it.status is JobStatus.Failed }
 
         val command = if (successfulJobs.isNotEmpty()) {
-            successfulJobs.joinToString(" && ") {
-                val hash = it.job.hashedName
-                "mv -f /storage/emulated/0/Download/__${hash} /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hash/*/__data"
-            }
+            "mv -f /storage/emulated/0/Download/Shared /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/"
         } else null
 
         _finalInstallResult.value = FinalInstallResult(
@@ -441,11 +442,12 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
             if (success) {
                 val downloadedFile = File(messageOrPath)
-                val publicUri = saveFileToDownloads(context, downloadedFile, "__${hashedName}")
+                val relativePath = downloadedFile.relativeTo(context.cacheDir)
+                val publicUri = saveFileToDownloads(context, downloadedFile, relativePath.path, "Shared")
                 downloadedFile.delete()
 
                 if (publicUri != null) {
-                    val command = "mv -f /storage/emulated/0/Download/__${hashedName} /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hashedName/*/__data"
+                    val command = "mv -f /storage/emulated/0/Download/Shared /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/"
                     _uninstallState.value = UninstallState.Finished(command)
                 } else {
                     _uninstallState.value = UninstallState.Failed("Failed to save original file to Downloads folder.")
@@ -532,7 +534,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     tempDir.mkdirs()
 
                     if (modInfo.isDirectory) {
-                        DocumentFile.fromTreeUri(context, modInfo.uri)?.let {
+                        DocumentFile.fromTreeUri(context, modInfo.uri)?.let { 
                             copyDirectoryToCacheNonRecursive(context, it, tempDir)
                         }
                     } else {
@@ -763,17 +765,14 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         return candidates.first()
     }
 
-    private fun saveFileToDownloads(context: Context, file: File, displayName: String, subdirectory: String? = null): Uri? {
+    private fun saveFileToDownloads(context: Context, file: File, relativeDestPath: String, rootDir: String): Uri? {
         val resolver = context.contentResolver
-        val relativePath = if (subdirectory != null) {
-            File(Environment.DIRECTORY_DOWNLOADS, subdirectory).path
-        } else {
-            Environment.DIRECTORY_DOWNLOADS
-        }
+        val finalRelativePath = File(rootDir, relativeDestPath)
+
         val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.DISPLAY_NAME, finalRelativePath.name)
             put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
-            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, File(Environment.DIRECTORY_DOWNLOADS, finalRelativePath.parent).path)
         }
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
         uri?.let {
@@ -787,6 +786,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         }
         return null
     }
+
+
 
     private fun extractModDetailsFromUri(context: Context, zipUri: Uri): ModDetails {
         val fileNames = mutableListOf<String>()
