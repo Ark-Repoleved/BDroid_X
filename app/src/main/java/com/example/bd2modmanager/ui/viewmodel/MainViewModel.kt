@@ -796,7 +796,6 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 }
             }
 
-            // Before publishing, delete any old file with the same name.
             val queryUri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
             val projection = arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.DISPLAY_NAME)
             val selection = "${MediaStore.Downloads.RELATIVE_PATH} = ? AND ${MediaStore.Downloads.DISPLAY_NAME} = ?"
@@ -807,7 +806,6 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
                     val id = cursor.getLong(idColumn)
                     val existingUri = Uri.withAppendedPath(queryUri, id.toString())
-                    // Make sure we don't delete the file we are currently writing
                     if (existingUri != pendingUri) {
                         try {
                             resolver.delete(existingUri, null, null)
@@ -827,12 +825,10 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             return pendingUri
         } catch (e: Exception) {
             e.printStackTrace()
-            // If anything fails, clean up the pending entry
             pendingUri?.let {
                 try {
                     resolver.delete(it, null, null)
                 } catch (cleanupEx: Exception) {
-                    // Ignore cleanup exception
                 }
             }
             return null
