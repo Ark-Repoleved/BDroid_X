@@ -16,20 +16,16 @@ import com.example.bd2modmanager.SpinePreviewActivity
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import java.io.File
-import java.io.FileOutputStream
-import java.net.URL
 import java.util.zip.ZipInputStream
 
 data class ModInfo(
@@ -64,7 +60,7 @@ sealed class JobStatus {
     object Pending : JobStatus()
     data class Downloading(val progressMessage: String = "Waiting...") : JobStatus()
     data class Installing(val progressMessage: String = "Initializing...") : JobStatus()
-    data class Finished(val publicUri: Uri) : JobStatus()
+    object Finished : JobStatus()
     data class Failed(val error: String) : JobStatus()
 }
 
@@ -103,9 +99,9 @@ sealed class MergeState {
 class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel() {
 
     companion object {
-        private const val CHARACTERS_JSON_URL = "https://codeberg.org/kxdekxde/browndust2-mod-manager/raw/branch/main/characters.json"
         private const val CHARACTERS_JSON_FILENAME = "characters.json"
         private const val MOD_CACHE_FILENAME = "mod_cache.json"
+        private const val OUTPUT_ROOT_DIR_NAME = "Shared"
     }
 
     private val gson = Gson()
@@ -138,9 +134,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 mods.filter { modInfo ->
                     keywords.all { keyword ->
                         modInfo.name.contains(keyword, ignoreCase = true) ||
-                        modInfo.character.contains(keyword, ignoreCase = true) ||
-                        modInfo.costume.contains(keyword, ignoreCase = true) ||
-                        modInfo.type.contains(keyword, ignoreCase = true)
+                                modInfo.character.contains(keyword, ignoreCase = true) ||
+                                modInfo.costume.contains(keyword, ignoreCase = true) ||
+                                modInfo.type.contains(keyword, ignoreCase = true)
                     }
                 }
             }
@@ -177,11 +173,12 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             val internalFile = File(context.filesDir, CHARACTERS_JSON_FILENAME)
             if (!internalFile.exists()) {
                 try {
-                    withContext(Dispatchers.IO) {
-                        context.assets.open(CHARACTERS_JSON_FILENAME).use { i -> internalFile.outputStream().use { o -> i.copyTo(o) } }
+                    withContext(Dispatchers.IO) { context.assets.open(CHARACTERS_JSON_FILENAME).use { i -> internalFile.outputStream().use { o -> i.copyTo(o) } } 
                         println("Copied bundled characters.json to internal storage.")
                     }
-                } catch (e: Exception) { e.printStackTrace() }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
 
             updateCharacterData(context)
@@ -191,7 +188,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         viewModelScope.launch {
             installJobs.collect { jobs ->
                 if (jobs.isNotEmpty() && jobs.all { it.status is JobStatus.Finished || it.status is JobStatus.Failed }) {
-                    summarizeResults()
+                    summarizeResults(context)
                 }
             }
         }
@@ -297,13 +294,19 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private fun processInstallJobs(context: Context) {
         viewModelScope.launch {
             if (!Python.isStarted()) {
-                withContext(Dispatchers.IO) {
-                    Python.start(com.chaquo.python.android.AndroidPlatform(context))
-                }
+                withContext(Dispatchers.IO) { Python.start(com.chaquo.python.android.AndroidPlatform(context)) }
             }
 
             val batchCacheKey = System.currentTimeMillis().toString()
             val semaphore = Semaphore(5)
+
+            // Clean up the temp output directory before starting
+            val tempOutputDir = File(context.cacheDir, "output")
+            if (tempOutputDir.exists()) {
+                tempOutputDir.deleteRecursively()
+            }
+            tempOutputDir.mkdirs()
+
 
             _installJobs.value.forEach { installJob ->
                 launch(Dispatchers.IO) {
@@ -324,17 +327,17 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
         try {
             updateJobStatus(hashedName, JobStatus.Downloading("Starting download..."))
-            val (downloadSuccess, messageOrPath) = ModdingService.downloadBundle(hashedName, "HD", context.cacheDir.absolutePath, cacheKey) { progress ->
+            val (downloadSuccess, messageOrPath, intermediateHash) = ModdingService.downloadBundle(hashedName, "HD", context.cacheDir.absolutePath, cacheKey) { progress ->
                 updateJobStatus(hashedName, JobStatus.Downloading(progress))
             }
 
-            if (!downloadSuccess) {
+            if (!downloadSuccess || intermediateHash == null) {
                 throw Exception("Download failed: $messageOrPath")
             }
             val originalDataCache = File(messageOrPath)
 
             updateJobStatus(hashedName, JobStatus.Installing("Extracting mod files..."))
-            val modAssetsDir = File(context.cacheDir, "temp_mod_assets_${hashedName}")
+            val modAssetsDir = File(context.cacheDir, "temp_mod_assets_${'$'}hashedName")
 
             if (modAssetsDir.exists()) modAssetsDir.deleteRecursively()
             modAssetsDir.mkdirs()
@@ -357,7 +360,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             }
 
             updateJobStatus(hashedName, JobStatus.Installing("Repacking bundle..."))
-            val repackedDataCache = File(context.cacheDir, "__${hashedName}")
+            val repackedDataCache = File(context.cacheDir, "output/$OUTPUT_ROOT_DIR_NAME/$hashedName/$intermediateHash/__data")
+
             val (repackSuccess, repackMessage) = ModdingService.repackBundle(originalDataCache.absolutePath, modAssetsDir.absolutePath, repackedDataCache.absolutePath, useAstc.value) { progress ->
                 updateJobStatus(hashedName, JobStatus.Installing(progress))
             }
@@ -369,14 +373,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 throw Exception("Repack failed: $repackMessage")
             }
 
-            val publicUri = saveFileToDownloads(context, repackedDataCache, "__${hashedName}")
-            repackedDataCache.delete()
-
-            if (publicUri != null) {
-                updateJobStatus(hashedName, JobStatus.Finished(publicUri))
-            } else {
-                throw Exception("Failed to save file to Downloads folder.")
-            }
+            updateJobStatus(hashedName, JobStatus.Finished)
 
         } catch (e: Exception) {
             e.printStackTrace()
@@ -384,17 +381,21 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         }
     }
 
-    private fun summarizeResults() {
+    private suspend fun summarizeResults(context: Context) {
         val finishedJobs = _installJobs.value
         val successfulJobs = finishedJobs.filter { it.status is JobStatus.Finished }
         val failedJobs = finishedJobs.filter { it.status is JobStatus.Failed }
 
-        val command = if (successfulJobs.isNotEmpty()) {
-            successfulJobs.joinToString(" && ") {
-                val hash = it.job.hashedName
-                "mv -f /storage/emulated/0/Download/__${hash} /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hash/*/__data"
+        var command: String? = null
+        if (successfulJobs.isNotEmpty()) {
+            val tempOutputDir = File(context.cacheDir, "output")
+            val success = saveDirectoryToDownloads(context, tempOutputDir, "")
+            tempOutputDir.deleteRecursively()
+
+            if (success) {
+                command = "mv -f /storage/emulated/0/Download/$OUTPUT_ROOT_DIR_NAME /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/"
             }
-        } else null
+        }
 
         _finalInstallResult.value = FinalInstallResult(
             successfulJobs = successfulJobs.size,
@@ -427,11 +428,11 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
         viewModelScope.launch {
             _uninstallState.value = UninstallState.Downloading(hashedName, "Starting download...")
-            val (success, messageOrPath) = withContext(Dispatchers.IO) {
+            val (success, messageOrPath, intermediateHash) = withContext(Dispatchers.IO) {
                 if (!Python.isStarted()) {
                     Python.start(com.chaquo.python.android.AndroidPlatform(context))
                 }
-                val cacheKey = "uninstall_${System.currentTimeMillis()}"
+                val cacheKey = "uninstall_${'$'}System.currentTimeMillis()"
                 ModdingService.downloadBundle(hashedName, "HD", context.cacheDir.absolutePath, cacheKey) { progress ->
                     viewModelScope.launch(Dispatchers.Main) {
                         _uninstallState.value = UninstallState.Downloading(hashedName, progress)
@@ -439,13 +440,14 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 }
             }
 
-            if (success) {
+            if (success && intermediateHash != null) {
                 val downloadedFile = File(messageOrPath)
-                val publicUri = saveFileToDownloads(context, downloadedFile, "__${hashedName}")
+                val finalPathInDownloads = "$OUTPUT_ROOT_DIR_NAME/$hashedName/$intermediateHash/__data"
+                val publicUri = saveFileToDownloads(context, downloadedFile, "__data", finalPathInDownloads.substringBeforeLast('/'))
                 downloadedFile.delete()
 
                 if (publicUri != null) {
-                    val command = "mv -f /storage/emulated/0/Download/__${hashedName} /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/$hashedName/*/__data"
+                    val command = "mv -f /storage/emulated/0/Download/$OUTPUT_ROOT_DIR_NAME /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/"
                     _uninstallState.value = UninstallState.Finished(command)
                 } else {
                     _uninstallState.value = UninstallState.Failed("Failed to save original file to Downloads folder.")
@@ -475,9 +477,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 }
                 val tempInputFile = File(context.cacheDir, "temp_unpack_input.bundle")
                 context.contentResolver.openInputStream(inputFile)?.use { input ->
-                    tempInputFile.outputStream().use { output ->
-                        input.copyTo(output)
-                    }
+                    tempInputFile.outputStream().use { output -> input.copyTo(output) }
                 }
 
                 val tempOutputDir = File(context.cacheDir, "temp_unpack_output")
@@ -491,9 +491,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 }
 
                 if (unpackResult.first) {
-                    tempOutputDir.listFiles()?.forEach { file ->
-                        saveFileToDownloads(context, file, file.name, "outputs")
-                    }
+                    saveDirectoryToDownloads(context, tempOutputDir, "outputs")
                 }
 
                 tempInputFile.delete()
@@ -525,16 +523,14 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         _mergeState.value = MergeState.Merging("Preparing files...")
 
         viewModelScope.launch {
-            val tempDir = File(context.cacheDir, "temp_merge_${System.currentTimeMillis()}")
+            val tempDir = File(context.cacheDir, "temp_merge_${'$'}System.currentTimeMillis()")
             try {
                 withContext(Dispatchers.IO) {
                     if (tempDir.exists()) tempDir.deleteRecursively()
                     tempDir.mkdirs()
 
                     if (modInfo.isDirectory) {
-                        DocumentFile.fromTreeUri(context, modInfo.uri)?.let {
-                            copyDirectoryToCacheNonRecursive(context, it, tempDir)
-                        }
+                        DocumentFile.fromTreeUri(context, modInfo.uri)?.let { copyDirectoryToCacheNonRecursive(context, it, tempDir) }
                     } else {
                         context.contentResolver.openInputStream(modInfo.uri)?.use { fis ->
                             ZipInputStream(fis).use { zis ->
@@ -613,7 +609,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 val destFile = File(destinationDir, file.name!!)
                 try {
                     context.contentResolver.openInputStream(file.uri)?.use { input -> destFile.outputStream().use { output -> input.copyTo(output) } }
-                } catch (e: Exception) { e.printStackTrace() }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         }
     }
@@ -788,6 +786,24 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         return null
     }
 
+    private suspend fun saveDirectoryToDownloads(context: Context, sourceDir: File, destinationDirName: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                sourceDir.walkTopDown().forEach { file ->
+                    if (file.isFile) {
+                        val relativePath = File(destinationDirName, file.relativeTo(sourceDir).path).path
+                        saveFileToDownloads(context, file, file.name, relativePath.substringBeforeLast('/'))
+                    }
+                }
+                true
+            } catch (e: Exception) {
+                e.printStackTrace()
+                false
+            }
+        }
+    }
+
+
     private fun extractModDetailsFromUri(context: Context, zipUri: Uri): ModDetails {
         val fileNames = mutableListOf<String>()
         var fileId: String? = null
@@ -800,7 +816,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     entry = zis.nextEntry
                 }
             }}
-        } catch (e: Exception) { e.printStackTrace() }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
         return ModDetails(fileId, fileNames)
     }
 
@@ -815,7 +833,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     if (fileId == null) fileId = extractFileId(entryName)
                 }
             }
-        } catch (e: Exception) { e.printStackTrace() }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
         return ModDetails(fileId, fileNames)
     }
 
@@ -826,7 +846,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 val destFile = File(destinationDir, file.name!!)
                 try {
                     context.contentResolver.openInputStream(file.uri)?.use { input -> destFile.outputStream().use { output -> input.copyTo(output) } }
-                } catch (e: Exception) { e.printStackTrace() }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         }
     }
@@ -859,7 +881,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     fun prepareAndShowPreview(context: Context, modInfo: ModInfo) {
         viewModelScope.launch(Dispatchers.IO) {
-            val tempDir = File(context.cacheDir, "spine_preview_${System.currentTimeMillis()}")
+            val tempDir = File(context.cacheDir, "spine_preview_${'$'}System.currentTimeMillis()")
             if (!tempDir.mkdirs()) {
                 return@launch
             }
