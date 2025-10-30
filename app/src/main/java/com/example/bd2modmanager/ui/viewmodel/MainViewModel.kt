@@ -768,26 +768,55 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private fun saveFileToDownloads(context: Context, file: File, relativeDestPath: String, rootDir: String): Uri? {
         val resolver = context.contentResolver
         val finalRelativePath = File(rootDir, relativeDestPath)
+        val downloadsPath = File(Environment.DIRECTORY_DOWNLOADS, finalRelativePath.parent).path
+        val displayName = finalRelativePath.name
 
-        val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, finalRelativePath.name)
-            put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
-            put(MediaStore.MediaColumns.RELATIVE_PATH, File(Environment.DIRECTORY_DOWNLOADS, finalRelativePath.parent).path)
-        }
-        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-        uri?.let {
-            try {
-                resolver.openOutputStream(it)?.use { outputStream -> file.inputStream().use { inputStream -> inputStream.copyTo(outputStream) } }
-                return it
-            } catch (e: Exception) {
-                e.printStackTrace()
-                resolver.delete(it, null, null)
+        val queryUri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        val projection = arrayOf(MediaStore.Downloads._ID)
+        val selection = "${MediaStore.Downloads.RELATIVE_PATH} = ? AND ${MediaStore.Downloads.DISPLAY_NAME} = ?"
+        val selectionArgs = arrayOf(downloadsPath, displayName)
+
+        var existingUri: Uri? = null
+
+        try {
+            resolver.query(queryUri, projection, selection, selectionArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
+                    val id = cursor.getLong(idColumn)
+                    existingUri = Uri.withAppendedPath(queryUri, id.toString())
+                }
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        return null
+
+        try {
+            val targetUri: Uri?
+            val outputStream = if (existingUri != null) {
+                targetUri = existingUri
+                resolver.openOutputStream(targetUri!!, "wt")
+            } else {
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, downloadsPath)
+                }
+                targetUri = resolver.insert(queryUri, contentValues)
+                targetUri?.let { resolver.openOutputStream(it) }
+            }
+
+            outputStream?.use { output ->
+                file.inputStream().use { input ->
+                    input.copyTo(output)
+                }
+            }
+            return targetUri
+        } catch (e: Exception) {
+            e.printStackTrace()
+            existingUri?.let { resolver.delete(it, null, null) }
+            return null
+        }
     }
-
-
 
     private fun extractModDetailsFromUri(context: Context, zipUri: Uri): ModDetails {
         val fileNames = mutableListOf<String>()
