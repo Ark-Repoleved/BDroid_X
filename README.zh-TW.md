@@ -64,9 +64,9 @@
 2.  **開始打包**：點擊右下角的 **Repack (✓)** 浮動按鈕。
 3.  **等待處理**：App 將自動下載最新的遊戲原始檔案並重新打包您選擇的模組。進度會即時顯示在彈出視窗中。
 4.  **手動替換檔案**：
-    *   打包完成後，修改過的遊戲檔案 (例如 `__0216fs6...`) 會儲存到您手機的 **`Download`** 資料夾。
-    *   您必須**手動**將這個新的 `__data` 檔案移動到遊戲的資料目錄中，並覆蓋原始檔案。
-    *   遊戲路徑通常位於：`/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/[Hash]/*/__data`。
+    *   打包完成後，一個包含所有模組檔案的新資料夾 **`Shared`** 將會儲存到您手機的 **`Download`** 資料夾中。
+    *   您必須**手動**將這個新的 `Shared` 資料夾移動到遊戲的快取目錄中，並覆蓋任何現有檔案。
+    *   目標路徑為：`/Android/data/com.neowizgames.game.browndust2/files/UnityCache/`。
     > **注意：** 您需要使用第三方檔案管理器才能存取 `Android/data` 資料夾。為了方便操作，App 會提供一鍵複製的 ADB 指令，可搭配 [ShizuTools](https://github.com/legendsayantan/ShizuTools) 等工具自動執行替換。
 
 ---
