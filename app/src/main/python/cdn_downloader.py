@@ -126,7 +126,7 @@ def read_object_from_byte_array(key_data, data_index):
 
 def find_and_download_bundle(catalog_content, version, quality, hashed_name, output_dir, progress_callback=None):
     if not catalog_content:
-        return None, None, "Catalog content is missing or empty."
+        return None, "Catalog content is missing or empty."
 
     bucket_array = base64.b64decode(catalog_content['m_BucketDataString'])
     key_array = base64.b64decode(catalog_content['m_KeyDataString'])
@@ -172,7 +172,6 @@ def find_and_download_bundle(catalog_content, version, quality, hashed_name, out
                     continue
 
                 bundle_size = bundle_info.get('m_BundleSize')
-                intermediate_hash = bundle_info.get('m_Hash')
                 
                 url = f"https://cdn.bd2.pmang.cloud/ServerData/Android/{quality}/{version}/{download_name}"
                 if progress_callback: progress_callback(f"Found bundle. Downloading from {url}...")
@@ -192,10 +191,10 @@ def find_and_download_bundle(catalog_content, version, quality, hashed_name, out
                                     progress_callback(f"Downloading... {total_downloaded / 1024:.2f} KB / {bundle_size / 1024:.2f} KB")
                     
                     if progress_callback: progress_callback("Download complete.")
-                    return str(output_file_path), intermediate_hash, None
+                    return str(output_file_path), None
                 except requests.exceptions.RequestException as e:
                     error_message = f"Failed to download bundle: {e}"
                     if progress_callback: progress_callback(error_message)
-                    return None, None, error_message
+                    return None, error_message
 
-    return None, None, f"Bundle with hash {hashed_name} not found in catalog."
+    return None, f"Bundle with hash {hashed_name} not found in catalog."
