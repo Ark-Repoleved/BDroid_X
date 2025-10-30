@@ -5,7 +5,7 @@ import com.chaquo.python.Python
 
 object ModdingService {
 
-    fun downloadBundle(hashedName: String, quality: String, outputDir: String, cacheKey: String, onProgress: (String) -> Unit): Pair<Boolean, String> {
+    fun downloadBundle(hashedName: String, quality: String, outputDir: String, cacheKey: String, onProgress: (String) -> Unit): Triple<Boolean, String, String?> {
         return try {
             val py = Python.getInstance()
             val mainScript = py.getModule("main_script")
@@ -21,10 +21,11 @@ object ModdingService {
 
             val success = result[0].toBoolean()
             val messageOrPath = result[1].toString()
-            Pair(success, messageOrPath)
+            val intermediateHash = result.getOrNull(2)?.toString()
+            Triple(success, messageOrPath, intermediateHash)
         } catch (e: Exception) {
             e.printStackTrace()
-            Pair(false, e.message ?: "An unknown error occurred in Kotlin during download.")
+            Triple(false, e.message ?: "An unknown error occurred in Kotlin during download.", null)
         }
     }
 
