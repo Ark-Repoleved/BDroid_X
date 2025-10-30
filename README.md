@@ -130,4 +130,4 @@ This tool was made possible by these incredible open-source projects:
 ---
 
 ## ⭐ Stargazers over time
-![Stargazers over time](https://starchart.cc/Ark-Repoleved/BDroid_X.svg?variant=adaptive)
+[![Stargazers over time](https://starchart.cc/Ark-Repoleved/BDroid_X.svg?variant=adaptive)](https://starchart.cc/Ark-Repoleved/BDroid_X)
