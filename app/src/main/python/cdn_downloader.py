@@ -176,7 +176,10 @@ def find_and_download_bundle(catalog_content, version, quality, hashed_name, out
                 url = f"https://cdn.bd2.pmang.cloud/ServerData/Android/{quality}/{version}/{download_name}"
                 if progress_callback: progress_callback(f"Found bundle. Downloading from {url}...")
 
-                output_file_path = Path(output_dir).joinpath(f"__data_{hashed_name}")
+                bundle_name = bundle_info.get('m_BundleName')
+                bundle_hash = bundle_info.get('m_Hash')
+                output_file_path = Path(output_dir).joinpath(bundle_name, bundle_hash, "__data")
+                output_file_path.parent.mkdir(parents=True, exist_ok=True)
 
                 try:
                     response = requests.get(url, stream=True)
