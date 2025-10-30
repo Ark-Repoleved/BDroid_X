@@ -49,7 +49,7 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
     """
     Entry point for Kotlin to download a bundle from the CDN.
     Manages a shared in-memory cache for the catalog file to avoid redundant downloads.
-    Returns a tuple: (success: Boolean, message_or_path: String)
+    Returns a tuple: (success: Boolean, message_or_path: String, intermediate_hash: String)
     """
     global current_cache_key
     def report_progress(message):
@@ -59,8 +59,6 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
 
     try:
         # --- Cache Management ---
-        # If the cache key from the client has changed, it signifies a new batch operation.
-        # We should clear the cache to ensure we fetch the latest catalog for the new batch.
         with catalog_cache_lock:
             if current_cache_key != cache_key:
                 report_progress("New batch installation detected, clearing catalog cache.")
@@ -70,19 +68,17 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
         report_progress(f"Fetching CDN version for {quality} quality...")
         version = cdn_downloader.get_cdn_version(quality)
         if not version:
-            return False, "Failed to get CDN version."
+            return False, "Failed to get CDN version.", None
         
         report_progress(f"Latest version is {version}. Checking catalog...")
-        # The download_catalog function will now use the shared cache
         catalog_content, error = cdn_downloader.download_catalog(
             output_dir, quality, version, catalog_cache, catalog_cache_lock, progress_callback
         )
         if error:
-            return False, error
+            return False, error, None
 
         report_progress(f"Searching for bundle {hashed_name} in catalog...")
-        # find_and_download_bundle now takes the catalog content directly
-        output_file_path, error = cdn_downloader.find_and_download_bundle(
+        output_file_path, intermediate_hash, error = cdn_downloader.find_and_download_bundle(
             catalog_content=catalog_content,
             version=version,
             quality=quality,
@@ -92,15 +88,15 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
         )
 
         if error:
-            return False, error
+            return False, error, None
         
-        return True, output_file_path
+        return True, output_file_path, intermediate_hash
 
     except Exception as e:
         import traceback
         error_message = traceback.format_exc()
         report_progress(f"A critical error occurred: {error_message}")
-        return False, error_message
+        return False, error_message, None
 
 def update_character_data(output_dir: str):
     """
