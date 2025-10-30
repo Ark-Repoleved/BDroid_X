@@ -4,7 +4,6 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
@@ -577,7 +576,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                                     context.contentResolver.openOutputStream(it.uri)?.use { output ->
                                         file.inputStream().use { input -> input.copyTo(output) }
                                     }
-                                 }
+                                }
                             } else if (file.isDirectory && file.name == ".old") {
                                 val oldDirDoc = originalModDoc.createDirectory(".old")
                                 oldDirDoc?.let {
@@ -765,75 +764,30 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
         return candidates.first()
     }
-    
+
     private fun saveFileToDownloads(context: Context, file: File, relativeDestPath: String, rootDir: String): Uri? {
         val resolver = context.contentResolver
         val finalRelativePath = File(rootDir, relativeDestPath)
-        val downloadsPath = File(Environment.DIRECTORY_DOWNLOADS, finalRelativePath.parent).path
-        val displayName = finalRelativePath.name
-        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
 
-        val newFileValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, finalRelativePath.name)
             put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
-            put(MediaStore.MediaColumns.RELATIVE_PATH, downloadsPath)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, File(Environment.DIRECTORY_DOWNLOADS, finalRelativePath.parent).path)
+        }
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+        uri?.let {
+            try {
+                resolver.openOutputStream(it)?.use { outputStream -> file.inputStream().use { inputStream -> inputStream.copyTo(outputStream) } }
+                return it
+            } catch (e: Exception) {
+                e.printStackTrace()
+                resolver.delete(it, null, null)
             }
         }
-
-        var pendingUri: Uri? = null
-        try {
-            pendingUri = resolver.insert(collection, newFileValues)
-            if (pendingUri == null) {
-                println("Failed to create pending media store entry.")
-                return null
-            }
-
-            resolver.openOutputStream(pendingUri)?.use { outputStream ->
-                file.inputStream().use { inputStream ->
-                    inputStream.copyTo(outputStream)
-                }
-            }
-
-            val queryUri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            val projection = arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.DISPLAY_NAME)
-            val selection = "${MediaStore.Downloads.RELATIVE_PATH} = ? AND ${MediaStore.Downloads.DISPLAY_NAME} = ?"
-            val selectionArgs = arrayOf(downloadsPath, displayName)
-
-            resolver.query(queryUri, projection, selection, selectionArgs, null)?.use { cursor ->
-                while (cursor.moveToNext()) {
-                    val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
-                    val id = cursor.getLong(idColumn)
-                    val existingUri = Uri.withAppendedPath(queryUri, id.toString())
-                    if (existingUri != pendingUri) {
-                        try {
-                            resolver.delete(existingUri, null, null)
-                        } catch (e: Exception) {
-                           println("Failed to delete old file: $existingUri, error: ${e.message}")
-                        }
-                    }
-                }
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                newFileValues.clear()
-                newFileValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                resolver.update(pendingUri, newFileValues, null, null)
-            }
-            
-            return pendingUri
-        } catch (e: Exception) {
-            e.printStackTrace()
-            pendingUri?.let {
-                try {
-                    resolver.delete(it, null, null)
-                } catch (cleanupEx: Exception) {
-                }
-            }
-            return null
-        }
+        return null
     }
+
+
 
     private fun extractModDetailsFromUri(context: Context, zipUri: Uri): ModDetails {
         val fileNames = mutableListOf<String>()
