@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.documentfile.provider.DocumentFile
@@ -576,7 +577,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                                     context.contentResolver.openOutputStream(it.uri)?.use { output ->
                                         file.inputStream().use { input -> input.copyTo(output) }
                                     }
-                                }
+                                 }
                             } else if (file.isDirectory && file.name == ".old") {
                                 val oldDirDoc = originalModDoc.createDirectory(".old")
                                 oldDirDoc?.let {
@@ -764,56 +765,76 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
         return candidates.first()
     }
-
+    
     private fun saveFileToDownloads(context: Context, file: File, relativeDestPath: String, rootDir: String): Uri? {
         val resolver = context.contentResolver
         val finalRelativePath = File(rootDir, relativeDestPath)
         val downloadsPath = File(Environment.DIRECTORY_DOWNLOADS, finalRelativePath.parent).path
         val displayName = finalRelativePath.name
+        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
 
-        val queryUri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        val projection = arrayOf(MediaStore.Downloads._ID)
-        val selection = "${MediaStore.Downloads.RELATIVE_PATH} = ? AND ${MediaStore.Downloads.DISPLAY_NAME} = ?"
-        val selectionArgs = arrayOf(downloadsPath, displayName)
-
-        var existingUri: Uri? = null
-
-        try {
-            resolver.query(queryUri, projection, selection, selectionArgs, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
-                    val id = cursor.getLong(idColumn)
-                    existingUri = Uri.withAppendedPath(queryUri, id.toString())
-                }
+        val newFileValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, downloadsPath)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
 
+        var pendingUri: Uri? = null
         try {
-            val targetUri: Uri?
-            val outputStream = if (existingUri != null) {
-                targetUri = existingUri
-                resolver.openOutputStream(targetUri!!, "wt")
-            } else {
-                val contentValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, downloadsPath)
-                }
-                targetUri = resolver.insert(queryUri, contentValues)
-                targetUri?.let { resolver.openOutputStream(it) }
+            pendingUri = resolver.insert(collection, newFileValues)
+            if (pendingUri == null) {
+                println("Failed to create pending media store entry.")
+                return null
             }
 
-            outputStream?.use { output ->
-                file.inputStream().use { input ->
-                    input.copyTo(output)
+            resolver.openOutputStream(pendingUri)?.use { outputStream ->
+                file.inputStream().use { inputStream ->
+                    inputStream.copyTo(outputStream)
                 }
             }
-            return targetUri
+
+            // Before publishing, delete any old file with the same name.
+            val queryUri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val projection = arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.DISPLAY_NAME)
+            val selection = "${MediaStore.Downloads.RELATIVE_PATH} = ? AND ${MediaStore.Downloads.DISPLAY_NAME} = ?"
+            val selectionArgs = arrayOf(downloadsPath, displayName)
+
+            resolver.query(queryUri, projection, selection, selectionArgs, null)?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
+                    val id = cursor.getLong(idColumn)
+                    val existingUri = Uri.withAppendedPath(queryUri, id.toString())
+                    // Make sure we don't delete the file we are currently writing
+                    if (existingUri != pendingUri) {
+                        try {
+                            resolver.delete(existingUri, null, null)
+                        } catch (e: Exception) {
+                           println("Failed to delete old file: $existingUri, error: ${e.message}")
+                        }
+                    }
+                }
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                newFileValues.clear()
+                newFileValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                resolver.update(pendingUri, newFileValues, null, null)
+            }
+            
+            return pendingUri
         } catch (e: Exception) {
             e.printStackTrace()
-            existingUri?.let { resolver.delete(it, null, null) }
+            // If anything fails, clean up the pending entry
+            pendingUri?.let {
+                try {
+                    resolver.delete(it, null, null)
+                } catch (cleanupEx: Exception) {
+                    // Ignore cleanup exception
+                }
+            }
             return null
         }
     }
