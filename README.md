@@ -64,10 +64,10 @@ For the app to recognize your mods, they must follow a specific structure. Each 
 1.  **Select Mods**: In the app, check the boxes for the mods you want to install.
 2.  **Start Repacking**: Tap the floating **Repack (✓)** button at the bottom right.
 3.  **Wait for Processing**: The app will automatically download the necessary original game files and repack your selected mods. A dialog will show the live progress.
-4.  **Manually Replace File**:
-    *   Once complete, the modified game file (e.g., `__0216fs6...`) will be saved to your phone's **`Download`** folder.
-    *   You must **manually move** this new `__data` file into the game's data directory, overwriting the original.
-    *   The path is typically: `/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared/[Hash]/*/__data`.
+4.  **Manually Replace Files**:
+    *   Once complete, a new **`Shared`** folder containing all your modded game files will be saved to your phone's **`Download`** folder.
+    *   You must **manually move** this new `Shared` folder into the game's cache directory, overwriting any existing files.
+    *   The destination path is: `/Android/data/com.neowizgames.game.browndust2/files/UnityCache/`.
     > **Note:** You will need a third-party file manager that can access `Android/data` folders. For easier access, the app provides a one-click ADB command that can be used with tools like [ShizuTools](https://github.com/legendsayantan/ShizuTools).
 
 ---
