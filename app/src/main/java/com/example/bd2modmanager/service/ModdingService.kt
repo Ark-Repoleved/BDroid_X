@@ -1,3 +1,4 @@
+
 package com.example.bd2modmanager.service
 
 import com.chaquo.python.PyObject
@@ -5,7 +6,7 @@ import com.chaquo.python.Python
 
 object ModdingService {
 
-    fun downloadBundle(hashedName: String, quality: String, outputDir: String, cacheKey: String, onProgress: (String) -> Unit): Triple<Boolean, String, String?> {
+    fun downloadBundle(hashedName: String, quality: String, outputDir: String, cacheKey: String, onProgress: (String) -> Unit): Pair<Boolean, String> {
         return try {
             val py = Python.getInstance()
             val mainScript = py.getModule("main_script")
@@ -21,11 +22,10 @@ object ModdingService {
 
             val success = result[0].toBoolean()
             val messageOrPath = result[1].toString()
-            val intermediateHash = result.getOrNull(2)?.toString()
-            Triple(success, messageOrPath, intermediateHash)
+            Pair(success, messageOrPath)
         } catch (e: Exception) {
             e.printStackTrace()
-            Triple(false, e.message ?: "An unknown error occurred in Kotlin during download.", null)
+            Pair(false, e.message ?: "An unknown error occurred in Kotlin during download.")
         }
     }
 
