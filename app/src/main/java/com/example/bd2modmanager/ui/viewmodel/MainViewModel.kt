@@ -1,5 +1,6 @@
 package com.example.bd2modmanager.ui.viewmodel
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -769,11 +770,36 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         val resolver = context.contentResolver
         val finalRelativePath = File(rootDir, relativeDestPath)
 
+        val relativePathWithSlash = File(Environment.DIRECTORY_DOWNLOADS, finalRelativePath.parent).path + File.separator
+
+        // Check if file exists and delete it first to ensure overwrite
+        val queryUri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        val projection = arrayOf(MediaStore.MediaColumns._ID)
+        val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
+        val selectionArgs = arrayOf(relativePathWithSlash, finalRelativePath.name)
+
+        resolver.query(queryUri, projection, selection, selectionArgs, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val idColumn = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
+                if (idColumn != -1) {
+                    val id = cursor.getLong(idColumn)
+                    val existingUri = ContentUris.withAppendedId(queryUri, id)
+                    try {
+                        resolver.delete(existingUri, null, null)
+                    } catch (e: Exception) {
+                        // Ignore deletion errors, e.g., file is locked
+                        e.printStackTrace()
+                    }
+                }
+            }
+        }
+
         val contentValues = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, finalRelativePath.name)
             put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
-            put(MediaStore.MediaColumns.RELATIVE_PATH, File(Environment.DIRECTORY_DOWNLOADS, finalRelativePath.parent).path)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePathWithSlash)
         }
+
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
         uri?.let {
             try {
@@ -781,6 +807,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 return it
             } catch (e: Exception) {
                 e.printStackTrace()
+                // Clean up the new entry if writing fails
                 resolver.delete(it, null, null)
             }
         }
