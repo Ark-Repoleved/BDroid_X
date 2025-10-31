@@ -1,0 +1,11 @@
+# Local properties
+local.properties
+
+# Build tools archive
+build-tools.zip
+
+# Gradle cache
+.gradle/
+
+# Build outputs
+/app/build/

@@ -83,6 +83,7 @@ android {
 
 chaquopy {
     defaultConfig {
+        buildPython(file("../build-tools/python/bin/python3.8").absolutePath)
         pip {
             install("Pillow")
             install("lz4")
