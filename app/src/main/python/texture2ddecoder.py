@@ -117,3 +117,6 @@ def decode_bc6(data, width, height):
 def decode_bc7(data, width, height):
     return _decode_image("decode_bc7", data, width, height)
 
+def decode_astc(data, width, height, block_width, block_height):
+    return _decode_image("decode_astc", data, width, height, block_width, block_height)
+
