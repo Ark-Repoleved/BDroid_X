@@ -118,5 +118,25 @@ def decode_bc7(data, width, height):
     return _decode_image("decode_bc7", data, width, height)
 
 def decode_astc(data, width, height, block_width, block_height):
-    return _decode_image("decode_astc", data, width, height, block_width, block_height)
+    image_buffer = (ctypes.c_uint * (width * height))()
+    
+    c_func = getattr(lib, "decode_astc")
+    c_func.argtypes = [
+        ctypes.c_void_p, 
+        ctypes.c_long, 
+        ctypes.c_long, 
+        ctypes.c_int, 
+        ctypes.c_int, 
+        ctypes.c_void_p
+    ]
+    c_func.restype = ctypes.c_int
+
+    data_ptr = ctypes.cast(data, ctypes.c_void_p)
+    image_ptr = ctypes.cast(image_buffer, ctypes.c_void_p)
+
+    ret = c_func(data_ptr, width, height, block_width, block_height, image_ptr)
+    if ret != 0:
+        raise Exception(f"decode_astc failed with return code {ret}")
+
+    return bytes(image_buffer)
 
