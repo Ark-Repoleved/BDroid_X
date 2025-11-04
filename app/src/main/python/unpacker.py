@@ -189,7 +189,10 @@ def unpack_bundle(bundle_path, output_dir, progress_callback=print):
                                 data.image_data, data.m_Width, data.m_Height, block_x, block_y
                             )
                             if err:
-                                progress_callback(f"ASTC decompression failed for {dest_name}: {err}. Falling back to UnityPy.")
+                                progress_callback(f"ASTC failed for {dest_name}: {err}. Attempting to free memory before falling back to UnityPy.")
+                                # Attempt to free memory before the fallback.
+                                del decompressed_data
+                                gc.collect()
                                 img = data.image
                             else:
                                 img = Image.frombytes("RGBA", (data.m_Width, data.m_Height), decompressed_data)
