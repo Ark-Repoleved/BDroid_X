@@ -180,29 +180,8 @@ def unpack_bundle(bundle_path, output_dir, progress_callback=print):
                     
                     img = None
                     try:
-                        texture_format = getattr(data, 'm_TextureFormat', 0)
-                        
-                        # Prioritize controlled ASTC decompression
-                        if astcenc and texture_format in ASTC_FORMATS:
-                            block_x, block_y = ASTC_FORMATS[texture_format]
-                            decompressed_data, err = decompress_astc_ctypes(
-                                data.image_data, data.m_Width, data.m_Height, block_x, block_y
-                            )
-                            if err:
-                                progress_callback(f"ASTC failed for {dest_name}: {err}. Attempting to free memory before falling back to UnityPy.")
-                                # Attempt to free memory before the fallback.
-                                del decompressed_data
-                                gc.collect()
-                                img = data.image
-                            else:
-                                img = Image.frombytes("RGBA", (data.m_Width, data.m_Height), decompressed_data)
-                                del decompressed_data # free the large bytes object immediately
-                        else:
-                            # For non-ASTC formats, still use UnityPy but manage memory aggressively
-                            img = data.image
-                        
+                        img = data.image
                         img.save(dest_path)
-
                     finally:
                         if img:
                             del img
