@@ -95,6 +95,15 @@ For users who want to extract original game files:
 2.  Tap the floating **unarchive (📤)** icon.
 3.  Select the `__data` file you want to unpack.
 4.  The extracted contents will be saved to the **`Download/outputs`** folder.
+---
+
+## ❤️ Support Me
+
+If you find this tool useful, please consider supporting my work. It helps me dedicate more time to improving this and creating other projects. Thank you!
+
+<a href="https://ko-fi.com/issekisaji">
+    <img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Buy Me a Coffee at ko-fi.com">
+</a>
 
 ---
 
