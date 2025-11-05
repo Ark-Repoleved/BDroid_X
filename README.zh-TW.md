@@ -97,6 +97,18 @@
 
 ---
 
+## ❤️ 支持這個專案
+
+如果您覺得這個工具對您有幫助，並希望支持它的後續開發，歡迎請我喝杯咖啡。非常感謝您的支持！
+
+<p align="center">
+  <a href="https://ko-fi.com/issekisaji">
+    <img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="在 ko-fi.com 上請我喝杯咖啡">
+  </a>
+</p>
+
+---
+
 ## ❓ 常見問題
 
 *   **Q: 為什麼我的模組沒有顯示在 App 裡？**
