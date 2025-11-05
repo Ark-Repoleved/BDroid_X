@@ -97,7 +97,9 @@ For users who want to extract original game files:
 4.  The extracted contents will be saved to the **`Download/outputs`** folder.
 ---
 
-## ❤️ Support Me
+## <a href="https://ko-fi.com/issekisaji">
+    <img alt="Static Badge" align="top" src="https://raw.githubusercontent.com/Ark-Repoleved/bd2-android-mod-manager/refs/heads/main/.github/sparkle-mug.gif" height="24">
+</a> Support Me
 
 If you find this tool useful, please consider supporting my work. It helps me dedicate more time to improving this and creating other projects. Thank you!
 
