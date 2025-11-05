@@ -97,15 +97,13 @@ For users who want to extract original game files:
 4.  The extracted contents will be saved to the **`Download/outputs`** folder.
 ---
 
-## <a href="https://ko-fi.com/issekisaji">
-    <img alt="Static Badge" align="top" src="https://raw.githubusercontent.com/Ark-Repoleved/bd2-android-mod-manager/refs/heads/main/.github/sparkle-mug.gif" height="24">
-</a> Support Me
+## ❤️ Support Me
 
 If you find this tool useful, please consider supporting my work. It helps me dedicate more time to improving this and creating other projects. Thank you!
 
 <a href="https://ko-fi.com/issekisaji">
-    <img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Buy Me a Coffee at ko-fi.com">
-</a>
+    <img alt="Static Badge" align="top" src="https://raw.githubusercontent.com/Ark-Repoleved/bd2-android-mod-manager/refs/heads/main/.github/sparkle-mug.gif" height="24">
+</a> My Ko-fi page
 
 ---
 
