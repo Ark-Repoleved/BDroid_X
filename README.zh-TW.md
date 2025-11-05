@@ -99,7 +99,7 @@
 
 ## ❤️ 支持這個專案
 
-如果您覺得這個工具對你有幫助，歡迎<a href="https://ko-fi.com/issekisaji" style="text-decoration: none;">贊助我一杯咖啡 <img alt="在 Ko-fi 上支持我" align="top" src="https://raw.githubusercontent.com/Ark-Repoleved/bd2-android-mod-manager/refs/heads/main/.github/sparkle-mug.gif" height="24"></a>，您的任何支持都會是我持續更新的動力！
+如果您覺得這個工具對你有幫助，歡迎 <a href="https://ko-fi.com/issekisaji" style="text-decoration: none;">請我喝杯咖啡 <img alt="在 Ko-fi 上支持我" align="top" src="https://raw.githubusercontent.com/Ark-Repoleved/bd2-android-mod-manager/refs/heads/main/.github/sparkle-mug.gif" height="24"></a>，任何支持都會是我持續開發的動力！
 
 ---
 
