@@ -201,4 +201,4 @@ def merge_spine_assets(mod_dir_path: str, progress_callback=None):
         import traceback
         error_message = traceback.format_exc()
         report_progress(f"An error occurred during spine merge: {error_message}")
-        return False, error_message
+        return False, error_messag
