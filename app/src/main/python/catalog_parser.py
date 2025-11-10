@@ -235,5 +235,3 @@ def parse_catalog_for_bundle_names(catalog_content):
             asset_map[file_id][asset_type] = bundle_name
 
     return asset_map
-
-
