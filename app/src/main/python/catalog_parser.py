@@ -223,6 +223,11 @@ def parse_catalog_for_bundle_names(catalog_content):
             # If it doesn't have the cutscene_ prefix, it's for the 'idle' slot.
             asset_type = "idle"
             file_id = matched_string
+
+        # For 'idle' animations, only accept the .skel.bytes file to ensure
+        # we get the correct bundle hash, not the hash for the atlas or png.
+        if asset_type == "idle" and not asset_key.lower().endswith('.skel.bytes'):
+            continue
         
         bundle_info = resolve_bundle_info(i)
         if bundle_info and 'bundle_name' in bundle_info:
