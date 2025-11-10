@@ -1,4 +1,4 @@
-package com.example.bd2modmanager.ui.viewmodel
+package com.example.bd2modmanager.ui.viewmode
 
 import android.content.ContentUris
 import android.content.ContentValues
