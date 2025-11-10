@@ -198,3 +198,4 @@ def find_and_download_bundle(catalog_content, version, quality, hashed_name, out
                     return None, error_message
 
     return None, f"Bundle with hash {hashed_name} not found in catalog."
+    
