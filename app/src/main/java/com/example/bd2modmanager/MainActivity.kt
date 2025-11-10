@@ -544,6 +544,7 @@ fun ModScreen(
     val groupedMods = modsList.groupBy { it.targetHashedName ?: "Unknown" }
     val selectedMods by viewModel.selectedMods.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val showShimmer by viewModel.showShimmer.collectAsState()
     val context = LocalContext.current
     val isSearchActive by viewModel.isSearchActive.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
@@ -741,7 +742,7 @@ fun ModScreen(
                             }
                         }
 
-                        if (isLoading && modsList.isEmpty()) {
+                        if (showShimmer) {
                             ShimmerLoadingScreen()
                         } else if (modsList.isEmpty()) {
                             if (searchQuery.isNotEmpty()) {

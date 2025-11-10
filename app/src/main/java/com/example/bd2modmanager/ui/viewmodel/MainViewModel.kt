@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -119,6 +120,14 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _isUpdatingCharacters = MutableStateFlow(false)
+    val isUpdatingCharacters: StateFlow<Boolean> = _isUpdatingCharacters.asStateFlow()
+
+    val showShimmer: StateFlow<Boolean> =
+        combine(_modsList, _isLoading, _isUpdatingCharacters) { mods, isScanning, isUpdating ->
+            (isScanning || isUpdating) && mods.isEmpty()
+        }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), false)
+
     private val _selectedMods = MutableStateFlow<Set<Uri>>(emptySet())
     val selectedMods: StateFlow<Set<Uri>> = _selectedMods.asStateFlow()
 
@@ -175,17 +184,25 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     fun initialize(context: Context) {
         viewModelScope.launch {
-            val internalFile = File(context.filesDir, CHARACTERS_JSON_FILENAME)
-            if (!internalFile.exists()) {
-                try {
-                    withContext(Dispatchers.IO) {
-                        context.assets.open(CHARACTERS_JSON_FILENAME).use { i -> internalFile.outputStream().use { o -> i.copyTo(o) } }
-                        println("Copied bundled characters.json to internal storage.")
+            try {
+                _isUpdatingCharacters.value = true
+                val internalFile = File(context.filesDir, CHARACTERS_JSON_FILENAME)
+                if (!internalFile.exists()) {
+                    try {
+                        withContext(Dispatchers.IO) {
+                            context.assets.open(CHARACTERS_JSON_FILENAME)
+                                .use { i -> internalFile.outputStream().use { o -> i.copyTo(o) } }
+                            println("Copied bundled characters.json to internal storage.")
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     }
-                } catch (e: Exception) { e.printStackTrace() }
+                }
+                updateCharacterData(context)
+            } finally {
+                _isUpdatingCharacters.value = false
             }
 
-            updateCharacterData(context)
             modSourceDirectoryUri.value?.let { scanModSourceDirectory(context, it) }
         }
 
@@ -207,18 +224,25 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 val py = Python.getInstance()
                 val mainScript = py.getModule("main_script")
                 val result = mainScript.callAttr("update_character_data", context.filesDir.absolutePath).asList()
-                val success = result[0].toBoolean()
+                val status = result[0].toString() // SUCCESS, SKIPPED, FAILED
                 val message = result[1].toString()
 
-                if (success) {
-                    println("Successfully ran scraper and saved characters.json")
-                    val cacheFile = File(context.cacheDir, MOD_CACHE_FILENAME)
-                    if (cacheFile.exists()) {
-                        cacheFile.delete()
-                        println("Deleted mod cache to force re-scan.")
+                when (status) {
+                    "SUCCESS" -> {
+                        println("Successfully ran scraper and saved characters.json: $message")
+                        // When a new characters.json is generated, the mod cache becomes invalid.
+                        val cacheFile = File(context.cacheDir, MOD_CACHE_FILENAME)
+                        if (cacheFile.exists()) {
+                            cacheFile.delete()
+                            println("Deleted mod cache to force re-scan.")
+                        }
                     }
-                } else {
-                    println("Scraper script failed: $message. Will use local version if available.")
+                    "SKIPPED" -> {
+                        println("Scraper skipped: $message")
+                    }
+                    "FAILED" -> {
+                        println("Scraper script failed: $message. Will use local version if available.")
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -644,6 +668,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     fun scanModSourceDirectory(context: Context, dirUri: Uri) {
         _isLoading.value = true
         viewModelScope.launch(Dispatchers.IO) {
+            isUpdatingCharacters.first { !it } // Wait for character data to be ready
             try {
                 val existingCache = loadModCache(context)
                 val newCache = mutableMapOf<String, ModCacheInfo>()
@@ -867,14 +892,31 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             val jsonString = try { internalFile.readText() } catch (e: Exception) { e.printStackTrace(); "" }
             if (jsonString.isNotEmpty()) {
                 try {
-                    val jsonArray = JSONArray(jsonString)
+                    // Try parsing new format first
+                    val rootObject = org.json.JSONObject(jsonString)
+                    val jsonArray = rootObject.getJSONArray("characters")
                     for (i in 0 until jsonArray.length()) {
                         val obj = jsonArray.getJSONObject(i)
                         val fileId = obj.getString("file_id").lowercase()
                         val charInfo = CharacterInfo(obj.getString("character"), obj.getString("costume"), obj.getString("type"), obj.getString("hashed_name"))
                         lut.getOrPut(fileId) { mutableListOf() }.add(charInfo)
                     }
-                } catch (e: Exception) { e.printStackTrace() }
+                } catch (e: org.json.JSONException) {
+                    // Fallback to old format
+                    try {
+                        val jsonArray = JSONArray(jsonString)
+                        for (i in 0 until jsonArray.length()) {
+                            val obj = jsonArray.getJSONObject(i)
+                            val fileId = obj.getString("file_id").lowercase()
+                            val charInfo = CharacterInfo(obj.getString("character"), obj.getString("costume"), obj.getString("type"), obj.getString("hashed_name"))
+                            lut.getOrPut(fileId) { mutableListOf() }.add(charInfo)
+                        }
+                    } catch (e2: Exception) {
+                        e2.printStackTrace()
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
 
             lut

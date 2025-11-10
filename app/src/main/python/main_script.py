@@ -102,26 +102,55 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
         report_progress(f"A critical error occurred: {error_message}")
         return False, error_message
 
+import json
+
 def update_character_data(output_dir: str):
     """
     Entry point for Kotlin to run the character data scraper.
-    Returns a tuple: (success: Boolean, message: String)
+    Checks versions to avoid unnecessary work.
+    Returns a tuple: (status: String, message: String)
+    Status can be "SUCCESS", "SKIPPED", "FAILED"
     """
     try:
-        success = character_scraper.scrape_and_save(output_dir)
+        # 1. Get latest CDN version
+        print("[Python] Getting latest CDN version...")
+        latest_version = cdn_downloader.get_cdn_version("HD")
+        if not latest_version:
+            return "FAILED", "Could not retrieve latest CDN version."
+        print(f"[Python] Latest CDN version is: {latest_version}")
+
+        # 2. Check local characters.json
+        characters_json_path = os.path.join(output_dir, "characters.json")
+        stored_version = None
+        if os.path.exists(characters_json_path):
+            try:
+                with open(characters_json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    stored_version = data.get("version")
+                print(f"[Python] Found local characters.json with version: {stored_version}")
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
+                print(f"[Python] Could not read version from local characters.json: {e}. Will regenerate.")
+                stored_version = None
+        
+        # 3. Compare versions
+        if stored_version and stored_version == latest_version:
+            print("[Python] Local characters.json is up to date. Skipping generation.")
+            return "SKIPPED", "characters.json is already up to date."
+
+        # 4. Run scraper if needed
+        print("[Python] Local data is outdated or missing. Running scraper...")
+        success, message = character_scraper.scrape_and_save(output_dir, latest_version)
+        
         if success:
-            message = "Scraper completed successfully."
-            print(message)
-            return True, message
+            return "SUCCESS", message
         else:
-            message = "Scraper failed without an exception."
-            print(message)
-            return False, message
+            return "FAILED", message
+
     except Exception as e:
         import traceback
         error_message = traceback.format_exc()
-        print(f"An error occurred during scraping: {error_message}")
-        return False, error_message
+        print(f"An error occurred during scraping process: {error_message}")
+        return "FAILED", error_message
 
 
 def main(original_bundle_path: str, modded_assets_folder: str, output_path: str, use_astc: bool, progress_callback=None):

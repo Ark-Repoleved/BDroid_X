@@ -124,77 +124,116 @@ def read_object_from_byte_array(key_data, data_index):
         print(f"Exception during object parsing: {ex}")
         return None
 
-def find_and_download_bundle(catalog_content, version, quality, hashed_name, output_dir, progress_callback=None):
+def parse_catalog_for_bundle_names(catalog_content):
+    """
+    Parses the catalog to create a map from file_id (e.g., 'char000104') to bundle_name.
+    This logic is adapted from ReDustX.
+    """
     if not catalog_content:
-        return None, "Catalog content is missing or empty."
+        return {}
 
+    asset_map = {}
+
+    # Decode base64 data
     bucket_array = base64.b64decode(catalog_content['m_BucketDataString'])
     key_array = base64.b64decode(catalog_content['m_KeyDataString'])
     extra_data = base64.b64decode(catalog_content['m_ExtraDataString'])
     entry_data = base64.b64decode(catalog_content['m_EntryDataString'])
 
+    # --- Bucket and Key Parsing ---
     num_buckets = struct.unpack_from('<i', bucket_array, 0)[0]
+    dependency_map = [None] * num_buckets
     data_offsets = []
     index = 4
-    for _ in range(num_buckets):
+    for i in range(num_buckets):
         data_offsets.append(read_int32_from_byte_array(bucket_array, index))
-        index += 4 # offset
+        index += 4
         num_entries = read_int32_from_byte_array(bucket_array, index)
-        index += 4 # num_entries
-        index += 4 * num_entries # skip entries
+        index += 4
+        entries = []
+        for _ in range(num_entries):
+            entries.append(read_int32_from_byte_array(bucket_array, index))
+            index += 4
+        dependency_map[i] = entries
 
     keys = [read_object_from_byte_array(key_array, offset) for offset in data_offsets]
 
+    # --- Entry and Bundle Parsing ---
     number_of_entries = read_int32_from_byte_array(entry_data, 0)
     index = 4
-    for _ in range(number_of_entries):
-        index += 4 # internal_id
+    bundles = {}
+    entries = []
+    for m in range(number_of_entries):
+        internal_id = read_int32_from_byte_array(entry_data, index)
+        index += 4
         provider_index = read_int32_from_byte_array(entry_data, index)
-        index += 4 # provider_index
-        index += 4 # dependency_key
+        index += 4
+        dependency_key_index = read_int32_from_byte_array(entry_data, index)
+        index += 4
         index += 4 # dependency_hash
         data_index = read_int32_from_byte_array(entry_data, index)
-        index += 4 # data_index
+        index += 4
         primary_key_index = read_int32_from_byte_array(entry_data, index)
-        index += 4 # primary_key
+        index += 4
         index += 4 # resource_type
+
+        entries.append({'dependency_index': dependency_key_index, 'primary_key_index': primary_key_index})
 
         if provider_index == 1 and data_index >= 0:
             bundle_info = read_object_from_byte_array(extra_data, data_index)
-            if bundle_info and bundle_info.get('m_BundleName') == hashed_name:
-                raw_key = keys[primary_key_index] if primary_key_index < len(keys) else ''
-                download_name = str(raw_key)
+            bundles[m] = {
+                'bundle_name': bundle_info.get('m_BundleName'),
+                'path': bundle_info.get('m_BundleName'), # Simplified for this context
+            }
 
-                if not download_name:
-                    continue
+    def resolve_bundle_info(entry_index):
+        if entry_index in bundles:
+            return bundles[entry_index]
+        if entry_index < 0 or entry_index >= len(entries):
+            return None
+        dep_idx = entries[entry_index]['dependency_index']
+        if dep_idx < 0 or dep_idx >= len(dependency_map):
+            return None
+        deps = dependency_map[dep_idx] or []
+        for dep_entry in deps:
+            info = bundles.get(dep_entry)
+            if info:
+                return info
+        return None
 
-                bundle_size = bundle_info.get('m_BundleSize')
-                
-                url = f"https://cdn.bd2.pmang.cloud/ServerData/Android/{quality}/{version}/{download_name}"
-                if progress_callback: progress_callback(f"Found bundle. Downloading from {url}...")
+    # --- Map asset keys to bundle names ---
+    for i in range(len(entries)):
+        primary_key_index = entries[i]['primary_key_index']
+        asset_key = keys[primary_key_index]
+        if not isinstance(asset_key, str):
+            continue
 
-                bundle_name = bundle_info.get('m_BundleName')
-                bundle_hash = bundle_info.get('m_Hash')
-                output_file_path = Path(output_dir).joinpath(bundle_name, bundle_hash, "__data")
-                output_file_path.parent.mkdir(parents=True, exist_ok=True)
+        # Extract file_id like 'char000104' from asset_key like 'assets/asset/character/char000104/char000104.skel.bytes'
+        match = re.search(r'(cutscene_char\d{6}|char\d{6}|illust_dating\d+|illust_special\d+|illust_talk\d+|npc\d+|specialillust\w+|storypack\w+|\bRhythmHitAnim\b)', asset_key, re.IGNORECASE)
+        if not match:
+            continue
+        
+        matched_string = match.group(1).lower()
+        
+        # Determine asset type from the matched key itself
+        if matched_string.startswith('cutscene_'):
+            asset_type = "cutscene"
+            file_id = matched_string.replace('cutscene_', '')
+        else:
+            # If it doesn't have the cutscene_ prefix, it's for the 'idle' slot.
+            asset_type = "idle"
+            file_id = matched_string
+        
+        bundle_info = resolve_bundle_info(i)
+        if bundle_info and 'bundle_name' in bundle_info:
+            bundle_name = bundle_info['bundle_name']
+            
+            if file_id not in asset_map:
+                asset_map[file_id] = {}
+            
+            # Store the bundle name based on the asset_type derived from the asset key
+            asset_map[file_id][asset_type] = bundle_name
 
-                try:
-                    response = requests.get(url, stream=True)
-                    response.raise_for_status()
-                    with open(output_file_path, 'wb') as file:
-                        total_downloaded = 0
-                        for chunk in response.iter_content(chunk_size=8192):
-                            if chunk:
-                                file.write(chunk)
-                                total_downloaded += len(chunk)
-                                if progress_callback:
-                                    progress_callback(f"Downloading... {total_downloaded / 1024:.2f} KB / {bundle_size / 1024:.2f} KB")
-                    
-                    if progress_callback: progress_callback("Download complete.")
-                    return str(output_file_path), None
-                except requests.exceptions.RequestException as e:
-                    error_message = f"Failed to download bundle: {e}"
-                    if progress_callback: progress_callback(error_message)
-                    return None, error_message
+    return asset_map
 
-    return None, f"Bundle with hash {hashed_name} not found in catalog."
+
