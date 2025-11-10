@@ -1,0 +1,1009 @@
+package com.example.bd2modmanager
+
+import android.content.Intent
+import android.os.Bundle
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDp
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Help
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.example.bd2modmanager.ui.theme.BD2ModManagerTheme
+import com.example.bd2modmanager.ui.viewmodel.*
+import com.example.bd2modmanager.utils.SafManager
+import com.valentinilk.shimmer.shimmer
+
+class MainActivity : ComponentActivity() {
+
+    private val viewModel: MainViewModel by viewModels()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        viewModel.initialize(this)
+
+        setContent {
+            BD2ModManagerTheme {
+                var uninstallConfirmationTarget by remember { mutableStateOf<String?>(null) }
+                var showUnpackDialog by remember { mutableStateOf(false) }
+
+                val modSourceDirLauncher = rememberLauncherForActivityResult(
+                    contract = SafManager.PickDirectoryWithSpecialAccess(),
+                    onResult = { uri ->
+                        if (uri != null) {
+                            contentResolver.takePersistableUriPermission(
+                                uri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                            )
+                            viewModel.setModSourceDirectoryUri(this, uri)
+                        }
+                    }
+                )
+
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    ModScreen(
+                        viewModel = viewModel,
+                        onSelectModSource = { modSourceDirLauncher.launch(Unit) },
+                        onUninstallRequest = { hash -> uninstallConfirmationTarget = hash },
+                        onUnpackRequest = { showUnpackDialog = true },
+                        onMergeRequest = { viewModel.initiateMerge(this) }
+                    )
+                }
+
+                val showInstallDialog by viewModel.showInstallDialog.collectAsState()
+                if (showInstallDialog) {
+                    ParallelInstallDialog(
+                        viewModel = viewModel,
+                        onDismiss = { viewModel.closeInstallDialog() }
+                    )
+                }
+
+                val showMergeDialog by viewModel.showMergeDialog.collectAsState()
+                if (showMergeDialog) {
+                    MergeConfirmationDialog(
+                        viewModel = viewModel,
+                        onDismiss = { viewModel.resetMergeState() }
+                    )
+                }
+
+                val uninstallState by viewModel.uninstallState.collectAsState()
+                UninstallDialog(
+                    state = uninstallState,
+                    onDismiss = { viewModel.resetUninstallState() }
+                )
+
+                UninstallConfirmationDialog(
+                    targetHash = uninstallConfirmationTarget,
+                    onConfirm = { hash ->
+                        viewModel.initiateUninstall(this, hash)
+                        uninstallConfirmationTarget = null
+                    },
+                    onDismiss = {
+                        uninstallConfirmationTarget = null
+                    }
+                )
+
+                if (showUnpackDialog) {
+                    UnpackDialog(
+                        viewModel = viewModel,
+                        onDismiss = { showUnpackDialog = false }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MergeConfirmationDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
+    val mergeState by viewModel.mergeState.collectAsState()
+
+    AlertDialog(
+        onDismissRequest = {
+            if (mergeState !is MergeState.Merging) {
+                onDismiss()
+            }
+        },
+        icon = {
+            when (mergeState) {
+                is MergeState.Merging -> Icon(Icons.Default.Merge, contentDescription = "Merging")
+                is MergeState.Finished -> Icon(Icons.Default.CheckCircle, contentDescription = "Success")
+                is MergeState.Failed -> Icon(Icons.Default.Error, contentDescription = "Failed")
+                else -> {}
+            }
+        },
+        title = {
+            val text = when (mergeState) {
+                is MergeState.Merging -> "Merging Spine Assets..."
+                is MergeState.Finished -> "Merge Successful!"
+                is MergeState.Failed -> "Merge Failed"
+                else -> ""
+            }
+            Text(text)
+        },
+        text = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                when (val state = mergeState) {
+                    is MergeState.Merging -> {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(16.dp))
+                        Text(state.progressMessage, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                    }
+                    is MergeState.Finished -> {
+                        Text(state.message, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    is MergeState.Failed -> {
+                        Text(state.error, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                    }
+                    else -> {}
+                }
+            }
+        },
+        confirmButton = {
+            if (mergeState !is MergeState.Merging) {
+                Button(onClick = onDismiss) {
+                    Text("OK")
+                }
+            }
+        }
+    )
+}
+
+@Composable
+fun SelectionRow(label: String, value: String, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp, horizontal = 4.dp)
+    ) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.width(8.dp))
+            Icon(Icons.Default.FolderOpen, contentDescription = "Select", tint = MaterialTheme.colorScheme.secondary)
+        }
+    }
+}
+
+@Composable
+fun UnpackDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val unpackState by viewModel.unpackState.collectAsState()
+    val inputFile by viewModel.unpackInputFile.collectAsState()
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+        onResult = { uri ->
+            uri?.let { viewModel.setUnpackInputFile(it) }
+        }
+    )
+
+    AlertDialog(
+        onDismissRequest = {
+            if (unpackState !is UnpackState.Unpacking) {
+                viewModel.resetUnpackState()
+                onDismiss()
+            }
+        },
+        icon = { Icon(Icons.Default.Unarchive, contentDescription = "Unpack Bundle") },
+        title = { Text("Unpack Bundle") },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                when (val state = unpackState) {
+                    is UnpackState.Idle -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            SelectionRow(
+                                label = "Input File:",
+                                value = inputFile?.lastPathSegment ?: "Not selected",
+                                onClick = { filePickerLauncher.launch(arrayOf("*/*")) }
+                            )
+                            Text("Output will be saved to Download/outputs/", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    is UnpackState.Unpacking -> {
+                        Text("Unpacking in progress...", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(16.dp))
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(16.dp))
+                        Text(state.progressMessage, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                    }
+                    is UnpackState.Finished -> {
+                        Icon(Icons.Default.CheckCircle, contentDescription = "Success", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp))
+                        Spacer(Modifier.height(16.dp))
+                        Text("Success!", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text(state.message, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    is UnpackState.Failed -> {
+                        Icon(Icons.Default.Error, contentDescription = "Failed", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(48.dp))
+                        Spacer(Modifier.height(16.dp))
+                        Text("Operation Failed", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text(state.error, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (unpackState is UnpackState.Idle) {
+                Button(
+                    onClick = { viewModel.initiateUnpack(context) },
+                    enabled = inputFile != null
+                ) {
+                    Text("Unpack")
+                }
+            }
+        },
+        dismissButton = {
+            if (unpackState !is UnpackState.Unpacking) {
+                TextButton(onClick = {
+                    viewModel.resetUnpackState()
+                    onDismiss()
+                }) {
+                    Text("Close")
+                }
+            }
+        }
+    )
+}
+
+@Composable
+fun ParallelInstallDialog(viewModel: MainViewModel, onDismiss: () -> Unit) {
+    val jobs by viewModel.installJobs.collectAsState()
+    val finalResult by viewModel.finalInstallResult.collectAsState()
+    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
+
+    AlertDialog(
+        onDismissRequest = { if (finalResult != null) onDismiss() },
+        modifier = Modifier
+            .fillMaxHeight(0.8f)
+            .fillMaxWidth(0.95f),
+        title = {
+            Text(if (finalResult == null) "Processing Mods" else "Batch Repack Complete")
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Box(modifier = Modifier.weight(1f)) {
+                    if (finalResult == null) {
+                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            items(jobs, key = { it.job.hashedName }) { installJob ->
+                                InstallJobRow(installJob)
+                            }
+                        }
+                    } else {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.verticalScroll(rememberScrollState())
+                        ) {
+                            Text("Summary: ${finalResult!!.successfulJobs} succeeded, ${finalResult!!.failedJobs} failed.", style = MaterialTheme.typography.titleMedium)
+                            finalResult!!.command?.let {
+                                Spacer(Modifier.height(16.dp))
+                                Text("Run this command in a root shell to move all files:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                                Spacer(Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(it))
+                                        Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                                    }
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Copy Command")
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                SelectionContainer {
+                                    Text(
+                                        text = it,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                        modifier = Modifier
+                                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                            .padding(12.dp)
+                                            .fillMaxWidth()
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (finalResult != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Button(onClick = onDismiss) { Text("OK") }
+                    }
+                }
+            }
+        },
+        confirmButton = {}
+    )
+}
+
+@Composable
+fun InstallJobRow(installJob: InstallJob) {
+    Column(modifier = Modifier.padding(vertical = 8.dp)) {
+        Text("Target: ${installJob.job.hashedName.take(12)}...", style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val statusIcon = when (installJob.status) {
+                is JobStatus.Pending -> Icons.Default.Schedule
+                is JobStatus.Downloading -> Icons.Default.Download
+                is JobStatus.Installing -> Icons.Default.Build
+                is JobStatus.Finished -> Icons.Default.CheckCircle
+                is JobStatus.Failed -> Icons.Default.Error
+            }
+            Icon(statusIcon, contentDescription = "Status", modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                val progressMessage = when (val status = installJob.status) {
+                    is JobStatus.Downloading -> status.progressMessage
+                    is JobStatus.Installing -> status.progressMessage
+                    is JobStatus.Failed -> status.error
+                    is JobStatus.Finished -> "Finished successfully!"
+                    is JobStatus.Pending -> "Waiting in queue..."
+                }
+                Text(progressMessage, style = MaterialTheme.typography.bodySmall)
+                if (installJob.status is JobStatus.Downloading || installJob.status is JobStatus.Installing) {
+                    Spacer(Modifier.height(4.dp))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun UninstallConfirmationDialog(
+    targetHash: String?,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    if (targetHash == null) return
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Warning, contentDescription = "Warning") },
+        title = { Text("Confirm Restore") },
+        text = {
+            Text(
+                "Are you sure you want to restore the original file for this group?\n\nTarget: ${targetHash.take(12)}...",
+                textAlign = TextAlign.Center
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(targetHash) },
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Text("Confirm")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
+    if (state is UninstallState.Idle) return
+
+    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
+
+    AlertDialog(
+        onDismissRequest = {
+            if (state !is UninstallState.Downloading) {
+                onDismiss()
+            }
+        },
+        icon = {
+            when (state) {
+                is UninstallState.Downloading -> Icon(Icons.Default.Download, contentDescription = "Downloading")
+                is UninstallState.Finished -> Icon(Icons.Default.CheckCircle, contentDescription = "Success")
+                is UninstallState.Failed -> Icon(Icons.Default.Error, contentDescription = "Failed")
+                else -> {}
+            }
+        },
+        title = {
+            val text = when (state) {
+                is UninstallState.Downloading -> "Restoring Original File..."
+                is UninstallState.Finished -> "Restore Successful!"
+                is UninstallState.Failed -> "Restore Failed"
+                else -> ""
+            }
+            Text(text)
+        },
+        text = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
+                when (state) {
+                    is UninstallState.Downloading -> {
+                        Text("Downloading original file for: ${state.hashedName}", textAlign = TextAlign.Center)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(state.progressMessage, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                    }
+                    is UninstallState.Finished -> {
+                        Text("Original file saved to your Downloads folder.", textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(16.dp))
+                        Text("For advanced users, run this command in a root shell to move the file:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                clipboardManager.setText(AnnotatedString(state.command))
+                                Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                            }
+                        ) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Copy Command")
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        SelectionContainer {
+                            Text(
+                                text = state.command,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                    .padding(12.dp)
+                                    .fillMaxWidth()
+                            )
+                        }
+                    }
+                    is UninstallState.Failed -> Text(state.error, textAlign = TextAlign.Center)
+                    else -> {}
+                }
+            }
+        },
+        confirmButton = {
+            if (state !is UninstallState.Downloading) {
+                Button(onClick = onDismiss) {
+                    Text("OK")
+                }
+            }
+        },
+        dismissButton = null
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@Composable
+fun ModScreen(
+    viewModel: MainViewModel,
+    onSelectModSource: () -> Unit,
+    onUninstallRequest: (String) -> Unit,
+    onUnpackRequest: () -> Unit,
+    onMergeRequest: () -> Unit
+) {
+    val modSourceDirectoryUri by viewModel.modSourceDirectoryUri.collectAsState()
+    val modsList by viewModel.filteredModsList.collectAsState()
+    val allModsList by viewModel.modsList.collectAsState()
+    val groupedMods = modsList.groupBy { it.targetHashedName ?: "Unknown" }
+    val selectedMods by viewModel.selectedMods.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val showShimmer by viewModel.showShimmer.collectAsState()
+    val context = LocalContext.current
+    val isSearchActive by viewModel.isSearchActive.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
+
+
+    val pullToRefreshState = rememberPullToRefreshState()
+    if (pullToRefreshState.isRefreshing) {
+        LaunchedEffect(true) {
+            modSourceDirectoryUri?.let { viewModel.scanModSourceDirectory(context, it) }
+        }
+    }
+
+    LaunchedEffect(isLoading) {
+        if (!isLoading) {
+            pullToRefreshState.endRefresh()
+        }
+    }
+
+    Scaffold(
+        floatingActionButton = {
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                AnimatedVisibility(visible = selectedMods.size == 1) {
+                    ExtendedFloatingActionButton(
+                        onClick = onMergeRequest,
+                        icon = { Icon(Icons.Default.Merge, contentDescription = "Merge") },
+                        text = { Text("Merge Spine") }
+                    )
+                }
+                AnimatedVisibility(visible = modSourceDirectoryUri != null && selectedMods.isEmpty()) {
+                    FloatingActionButton(
+                        onClick = onUnpackRequest,
+                    ) {
+                        Icon(Icons.Default.Unarchive, contentDescription = "Unpack Bundle")
+                    }
+                }
+                AnimatedVisibility(visible = selectedMods.isNotEmpty()) {
+                    ExtendedFloatingActionButton(
+                        onClick = { viewModel.initiateBatchRepack(context) },
+                        icon = { Icon(Icons.Default.Done, contentDescription = "Repack") },
+                        text = { Text("Repack Selected") }
+                    )
+                }
+            }
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (modSourceDirectoryUri == null) {
+                WelcomeScreen(onSelectModSource)
+            } else {
+                Box(modifier = Modifier.nestedScroll(pullToRefreshState.nestedScrollConnection)) {
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background)
+                            ) {
+                                Box(
+                                    modifier = Modifier.size(width = 48.dp, height = 40.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    val allModsCount = allModsList.size
+                                    val selectedModsCount = selectedMods.size
+                                    val checkboxState = when {
+                                        selectedModsCount == 0 -> ToggleableState.Off
+                                        selectedModsCount == allModsCount && allModsCount > 0 -> ToggleableState.On
+                                        selectedModsCount > 0 -> ToggleableState.Indeterminate
+                                        else -> ToggleableState.Off
+                                    }
+                                    TriStateCheckbox(
+                                        state = checkboxState,
+                                        onClick = { viewModel.toggleSelectAll() }
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            BoxWithConstraints(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(40.dp),
+                                contentAlignment = Alignment.CenterEnd
+                            ) {
+                                val transition = updateTransition(isSearchActive, label = "search_transition")
+                                val collapsedSearchWidth = 40.dp
+                                val collapsedAstcWidth = 60.dp
+                                val spacerWidth = 8.dp
+
+                                val astcCardWidth by transition.animateDp(
+                                    label = "astc_card_width",
+                                    transitionSpec = { tween(350) }
+                                ) { active ->
+                                    if (active) collapsedAstcWidth else maxWidth - collapsedSearchWidth - spacerWidth
+                                }
+
+                                val searchCardWidth by transition.animateDp(
+                                    label = "search_card_width",
+                                    transitionSpec = { tween(350) }
+                                ) { active ->
+                                    if (active) maxWidth - collapsedAstcWidth - spacerWidth else collapsedSearchWidth
+                                }
+
+                                val searchCornerRadius by transition.animateDp(
+                                    label = "search_card_corner_radius",
+                                    transitionSpec = { tween(350) }
+                                ) { active ->
+                                    if (active) 16.dp else 20.dp
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    ElevatedCard(
+                                        modifier = Modifier.size(width = astcCardWidth, height = 40.dp),
+                                        shape = RoundedCornerShape(16.dp),
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxSize(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            AnimatedVisibility(
+                                                visible = !isSearchActive,
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text(
+                                                    "Use ASTC Compression",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    maxLines = 1,
+                                                    textAlign = TextAlign.Center
+                                                )
+                                            }
+                                            val useAstc by viewModel.useAstc.collectAsState()
+                                            Switch(
+                                                checked = useAstc,
+                                                onCheckedChange = { viewModel.setUseAstc(it) },
+                                                modifier = Modifier.scale(0.8f).padding(horizontal = 4.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(spacerWidth))
+
+                                    ElevatedCard(
+                                        modifier = Modifier.size(width = searchCardWidth, height = 40.dp),
+                                        shape = RoundedCornerShape(searchCornerRadius),
+                                        onClick = { if (!isSearchActive) viewModel.setSearchActive(true) },
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxSize(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.End
+                                        ) {
+                                            AnimatedVisibility(visible = isSearchActive, modifier = Modifier.weight(1f)) {
+                                                BasicTextField(
+                                                    value = searchQuery,
+                                                    onValueChange = viewModel::onSearchQueryChanged,
+                                                    modifier = Modifier.padding(start = 16.dp, end = 8.dp),
+                                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    ),
+                                                    singleLine = true,
+                                                    decorationBox = { innerTextField ->
+                                                        if (searchQuery.isEmpty()) {
+                                                            Text(
+                                                                "Search by name...",
+                                                                style = MaterialTheme.typography.bodyMedium,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                            )
+                                                        }
+                                                        innerTextField()
+                                                    }
+                                                )
+                                            }
+                                            IconButton(onClick = { viewModel.setSearchActive(!isSearchActive) }) {
+                                                Icon(
+                                                    imageVector = if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
+                                                    contentDescription = "Toggle Search"
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (showShimmer) {
+                            ShimmerLoadingScreen()
+                        } else if (modsList.isEmpty()) {
+                            if (searchQuery.isNotEmpty()) {
+                                NoSearchResultsScreen(searchQuery)
+                            } else {
+                                EmptyModsScreen()
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) {
+                                groupedMods.toSortedMap().forEach { (hash, modsInGroup) ->
+                                    stickyHeader {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .background(MaterialTheme.colorScheme.surface)
+                                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Text(
+                                                    text = "Target: ${hash.take(12)}...",
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+
+                                                IconButton(onClick = { onUninstallRequest(hash) }) {
+                                                    Icon(
+                                                        Icons.Default.Delete,
+                                                        contentDescription = "Uninstall",
+                                                        tint = MaterialTheme.colorScheme.primary
+                                                    )
+                                                }
+
+                                                val modsInGroupUris = modsInGroup.map { it.uri }.toSet()
+                                                val selectedInGroup = selectedMods.intersect(modsInGroupUris)
+
+                                                val checkboxState = when {
+                                                    selectedInGroup.isEmpty() -> ToggleableState.Off
+                                                    selectedInGroup.size == modsInGroupUris.size -> ToggleableState.On
+                                                    else -> ToggleableState.Indeterminate
+                                                }
+
+                                                TriStateCheckbox(
+                                                    state = checkboxState,
+                                                    onClick = { viewModel.toggleSelectAllForGroup(hash) }
+                                                )
+                                            }
+                                            HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
+                                        }
+                                    }
+                                    items(
+                                        items = modsInGroup,
+                                        key = { mod -> mod.uri.toString() }
+                                    ) { modInfo ->
+                                        ModCard(
+                                            modInfo = modInfo,
+                                            isSelected = modInfo.uri in selectedMods,
+                                            onToggleSelection = { viewModel.toggleModSelection(modInfo.uri) },
+                                            onLongPress = { viewModel.prepareAndShowPreview(context, modInfo) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    PullToRefreshContainer(
+                        modifier = Modifier.align(Alignment.TopCenter),
+                        state = pullToRefreshState,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun NoSearchResultsScreen(query: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(Icons.Default.SearchOff, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.secondary)
+        Spacer(modifier = Modifier.height(24.dp))
+        Text("No Results", style = MaterialTheme.typography.headlineSmall)
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            "No mods found starting with \"$query\".",
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+fun WelcomeScreen(onSelectFolder: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+        Spacer(modifier = Modifier.height(24.dp))
+        Text("Welcome!", style = MaterialTheme.typography.headlineMedium)
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            "To get started, please select the folder where you store your Brown Dust 2 mods.",
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(modifier = Modifier.height(32.dp))
+        Button(onClick = onSelectFolder) {
+            Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Select Mod Source Folder")
+        }
+    }
+}
+
+@Composable
+fun EmptyModsScreen() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.secondary)
+        Spacer(modifier = Modifier.height(24.dp))
+        Text("No Mods Found", style = MaterialTheme.typography.headlineSmall)
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            "We couldn't find any valid mods in the selected folder. Make sure your mods are in .zip format or unzipped folders.",
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit, onLongPress: () -> Unit) {
+    val elevation by androidx.compose.animation.core.animateDpAsState(if (isSelected) 4.dp else 1.dp, label = "elevation")
+    ElevatedCard(
+        elevation = CardDefaults.cardElevation(defaultElevation = elevation),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 2.dp)
+            .clip(CardDefaults.shape)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onToggleSelection() },
+                    onLongPress = { onLongPress() }
+                )
+            }
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(checked = isSelected, onCheckedChange = { onToggleSelection() })
+            Spacer(Modifier.width(4.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = modInfo.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+                Text(
+                    text = "${modInfo.character} - ${modInfo.costume}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            AssistChip(
+                onClick = { /* No action */ },
+                label = { Text(modInfo.type.uppercase(), style = MaterialTheme.typography.labelSmall) },
+                leadingIcon = {
+                    val icon = when(modInfo.type.lowercase()) {
+                        "idle" -> Icons.Default.Person
+                        "cutscene" -> Icons.Default.Movie
+                        else -> Icons.Default.Category
+                    }
+                    Icon(icon, contentDescription = modInfo.type, Modifier.size(14.dp))
+                },
+                modifier = Modifier.heightIn(max = 24.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun ShimmerLoadingScreen() {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(vertical = 8.dp)
+    ) {
+        items(10) {
+            ShimmerModCard()
+        }
+    }
+}
+
+@Composable
+fun ShimmerModCard() {
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .shimmer()
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.7f)
+                        .height(20.dp)
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.9f)
+                        .height(16.dp)
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(
+                    modifier = Modifier
+                        .width(100.dp)
+                        .height(32.dp)
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
+                )
+            }
+        }
+    }
+}

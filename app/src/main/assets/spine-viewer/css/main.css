@@ -1,0 +1,286 @@
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
+:root {
+    --font-family: 'Inter', sans-serif;
+    --bg-color: #1a1a1a;
+    --surface-color: #2a2a2a;
+    --surface-color-hover: #3a3a3a;
+    --primary-color: #4a90e2;
+    --primary-color-hover: #5aa1f2;
+    --text-color: #e0e0e0;
+    --text-color-secondary: #a0a0a0;
+    --border-color: #404040;
+    --control-bg: #333;
+    --control-bg-hover: #444;
+    --success-color: #73c990;
+    --border-radius: 8px;
+    --transition-speed: 0.2s;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--surface-color);
+}
+
+::-webkit-scrollbar-thumb {
+    background: #555;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #666;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    font-family: var(--font-family);
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    font-size: 14px;
+}
+
+/* --- Layout --- */
+#main {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+#scene {
+    height: 100%;
+    margin-right: 320px; /* Default: Open state */
+    transition: margin-right var(--transition-speed) ease-in-out;
+}
+
+#main.side-collapsed #scene {
+    margin-right: 0; /* Collapsed state */
+}
+
+#side {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 320px;
+    height: 100%;
+    background-color: var(--surface-color);
+    padding: 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    border-left: 1px solid var(--border-color);
+    transform: translateX(0); /* Default: Open state */
+    transition: transform var(--transition-speed) ease-in-out;
+}
+
+#main.side-collapsed #side {
+    transform: translateX(100%); /* Collapsed state */
+}
+
+#toggle-button {
+    position: absolute;
+    top: 50%;
+    right: 320px; /* Default: Open state */
+    transform: translateY(-50%);
+    width: 24px;
+    height: 80px;
+    background-color: var(--surface-color);
+    border: 1px solid var(--border-color);
+    border-right: none;
+    color: var(--text-color);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--border-radius) 0 0 var(--border-radius);
+    font-size: 18px;
+    z-index: 20;
+    transition: right var(--transition-speed) ease-in-out;
+}
+
+#main.side-collapsed #toggle-button {
+    right: 0; /* Collapsed state */
+}
+
+
+/* --- Controls --- */
+.control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.control-group-title {
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--text-color);
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+
+.row label {
+    flex-shrink: 0;
+    color: var(--text-color-secondary);
+}
+
+.row .option-value {
+    font-weight: 500;
+    width: 50px;
+    text-align: right;
+}
+
+/* --- Sliders --- */
+input[type='range'] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    background: var(--control-bg);
+    border-radius: 3px;
+    outline: none;
+    transition: opacity var(--transition-speed);
+}
+
+input[type='range']::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    cursor: pointer;
+    border: 3px solid var(--surface-color);
+    transition: background-color var(--transition-speed);
+}
+
+input[type='range']::-webkit-slider-thumb:hover {
+    background-color: var(--primary-color-hover);
+}
+
+/* --- Buttons --- */
+button {
+    background-color: var(--control-bg);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 6px 10px;
+    font-family: var(--font-family);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background-color var(--transition-speed);
+}
+
+button:hover {
+    background-color: var(--control-bg-hover);
+}
+
+button:active {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+/* --- Color Input --- */
+#colorInput {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    width: 36px;
+    height: 36px;
+    background-color: transparent;
+    border: none;
+    cursor: pointer;
+}
+#colorInput::-webkit-color-swatch {
+    border-radius: 50%;
+    border: 2px solid var(--border-color);
+}
+#colorInput::-moz-color-swatch {
+    border-radius: 50%;
+    border: 2px solid var(--border-color);
+}
+
+/* --- Lists (Skins & Animations) --- */
+.list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 250px;
+    overflow-y: auto;
+    padding-right: 6px; /* For scrollbar */
+}
+
+.list li {
+    display: block;
+}
+
+.list input[type='radio'] {
+    display: none;
+}
+
+.list label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    padding: 8px 12px;
+    background-color: var(--control-bg);
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    transition: background-color var(--transition-speed);
+    color: var(--text-color);
+}
+
+.list label:hover {
+    background-color: var(--control-bg-hover);
+}
+
+.list input[type='radio']:checked + label {
+    background-color: var(--primary-color);
+    color: white;
+    font-weight: 500;
+}
+
+.list label span {
+    font-size: 12px;
+    color: var(--text-color-secondary);
+}
+
+.list input[type='radio']:checked + label span {
+    color: #e0e0e0;
+}
+
+#resolution {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    background: rgba(0,0,0,0.5);
+    padding: 5px 10px;
+    border-radius: var(--border-radius);
+    font-size: 12px;
+    color: var(--text-color-secondary);
+    z-index: 5;
+    display: none; /* Hidden by default as in original */
+}
