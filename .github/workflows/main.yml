@@ -39,8 +39,8 @@ jobs:
         with:
           python-version: '3.8'
 
-      - name: Build Signed Release APK
-        run: ./gradlew assembleRelease
+      - name: Clean and Build Signed Release APK
+        run: ./gradlew clean assembleRelease
         env:
           KEYSTORE_PATH: ${{ github.workspace }}/release-key.jks
           KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
