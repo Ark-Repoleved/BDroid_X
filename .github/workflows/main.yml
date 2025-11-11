@@ -26,20 +26,13 @@ jobs:
 
       - name: Decode Release Keystore
         run: |
-          echo "Decoding keystore from secrets..."
           echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 --decode > release-key.jks
-          echo "Keystore decoded successfully."
-      
+
       - name: Make Gradle executable
         run: chmod +x ./gradlew
 
-      - name: Set up Python 3.8
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.8'
-
-      - name: Build Signed Release APK
-        run: ./gradlew assembleRelease
+      - name: Build Signed Release AAB
+        run: ./gradlew bundleRelease
         env:
           KEYSTORE_PATH: ${{ github.workspace }}/release-key.jks
           KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
@@ -47,10 +40,31 @@ jobs:
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
           APP_VERSION_NAME: ${{ github.event.inputs.tag }}
 
-      - name: Create Release and Upload APK
+      - name: Download bundletool
+        run: |
+          BUNDLETOOL_VERSION="1.16.0"
+          curl -Lo bundletool.jar "https://github.com/google/bundletool/releases/download/${BUNDLETOOL_VERSION}/bundletool-all-${BUNDLETOOL_VERSION}.jar"
+
+      - name: Generate Universal APK from AAB
+        run: |
+          java -jar bundletool.jar build-apks \
+            --bundle=app/build/outputs/bundle/release/app-release.aab \
+            --output=app-universal.apks \
+            --mode=universal \
+            --ks=release-key.jks \
+            --ks-pass=pass:${{ secrets.RELEASE_KEYSTORE_PASSWORD }} \
+            --ks-key-alias=${{ secrets.RELEASE_KEY_ALIAS }} \
+            --key-pass=pass:${{ secrets.RELEASE_KEY_PASSWORD }}
+
+      - name: Extract Universal APK
+        run: |
+          unzip app-universal.apks -d .
+          mv universal.apk release-v${{ github.event.inputs.tag }}.apk
+
+      - name: Create Release and Upload Universal APK
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag }}
-          files: app/build/outputs/apk/release/*.apk
+          files: release-v${{ github.event.inputs.tag }}.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
