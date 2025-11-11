@@ -57,15 +57,16 @@ def scrape_and_save(output_dir, version):
         return False, f"Error processing game catalog: {e}"
     # --- End of new logic ---
 
-    all_characters_data = []
+    # --- New Refactored Logic ---
+    # First, scrape the website to get human-readable metadata.
+    # This data is treated as secondary and is used to "enrich" the primary data from the catalog.
+    print("[Python] Scraping website for character metadata...")
+    metadata_map = {}
     rows = table_body.find_all('tr')
-    
-    print(f"[Python] Found {len(rows)} potential entries. Processing and matching with catalog data...")
-
     last_character = ""
     for row in rows:
         cells = row.find_all('td')
-        
+        character, file_id, costume = "", "", ""
         if len(cells) == 5:
             character = cells[0].get_text(strip=True)
             last_character = character
@@ -75,37 +76,47 @@ def scrape_and_save(output_dir, version):
             character = last_character
             file_id = cells[0].get_text(strip=True).lower()
             costume = cells[1].get_text(strip=True)
-        else:
-            continue
+        
+        if file_id and character and costume:
+            metadata_map[file_id] = {"character": character, "costume": costume}
 
-        if not all([character, costume, file_id]):
-            continue
+    print(f"[Python] Found metadata for {len(metadata_map)} file_ids from the website.")
+
+    # Now, iterate through the asset_map (from the official catalog) as the source of truth.
+    all_characters_data = []
+    print(f"[Python] Generating character list based on {len(asset_map)} file_ids from the game catalog...")
+
+    for file_id, bundles in asset_map.items():
+        # Get metadata from the scraped data, with a fallback for missing entries.
+        metadata = metadata_map.get(file_id, {
+            "character": "Unknown Character",
+            "costume": f"Unknown ({file_id})"
+        })
 
         base_entry = {
-            "character": character,
+            "character": metadata["character"],
             "file_id": file_id,
-            "costume": costume,
+            "costume": metadata["costume"],
         }
 
-        # Look up bundle names from our new asset_map
-        bundle_names = asset_map.get(file_id, {})
-        idle_bundle_name = bundle_names.get("idle", "")
-        cutscene_bundle_name = bundle_names.get("cutscene", "")
+        # Create idle entry if it exists in the catalog.
+        if "idle" in bundles and bundles["idle"]:
+            idle_entry = base_entry.copy()
+            idle_entry["type"] = "idle"
+            idle_entry["hashed_name"] = bundles["idle"]
+            all_characters_data.append(idle_entry)
 
-        idle_entry = base_entry.copy()
-        idle_entry["type"] = "idle"
-        idle_entry["hashed_name"] = idle_bundle_name
-        all_characters_data.append(idle_entry)
-
-        cutscene_entry = base_entry.copy()
-        cutscene_entry["type"] = "cutscene"
-        cutscene_entry["hashed_name"] = cutscene_bundle_name
-        all_characters_data.append(cutscene_entry)
+        # Create cutscene entry if it exists in the catalog.
+        if "cutscene" in bundles and bundles["cutscene"]:
+            cutscene_entry = base_entry.copy()
+            cutscene_entry["type"] = "cutscene"
+            cutscene_entry["hashed_name"] = bundles["cutscene"]
+            all_characters_data.append(cutscene_entry)
 
     if not all_characters_data:
-        print("[Python] Warning: No data was successfully extracted or matched.", file=sys.stderr)
+        print("[Python] Warning: No character data could be generated from the catalog.", file=sys.stderr)
     
-    print(f"[Python] Saving {len(all_characters_data)} entries to {output_path}...")
+    print(f"[Python] Saving {len(all_characters_data)} total entries to {output_path}...")
 
     final_data = {
         "version": version,
