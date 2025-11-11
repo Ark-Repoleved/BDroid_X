@@ -31,7 +31,7 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
-        
+
         ndk {
             abiFilters.addAll(listOf("x86_64", "arm64-v8a"))
         }
@@ -77,6 +77,7 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "**/characters.json"
         }
     }
 }
