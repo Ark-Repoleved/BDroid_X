@@ -99,7 +99,7 @@ For users who want to extract original game files:
 
 ## ❤️ Support This Project
 
-If you find this tool useful and want to support its development, please consider <a href="https://ko-fi.com/issekisaji" style="text-decoration: none;">buying me a coffee <img alt="Static Badge" align="top" src="https://raw.githubusercontent.com/Ark-Repoleved/bd2-android-mod-manager/refs/heads/main/.github/sparkle-mug.gif" height="24"></a>. Every contribution is greatly appreciated!
+If you find this tool useful and want to support its development, please consider <a href="https://ko-fi.com/issekisaji" style="text-decoration: none;">buying me a coffee <img alt="Static Badge" align="right" src="https://raw.githubusercontent.com/Ark-Repoleved/bd2-android-mod-manager/refs/heads/main/.github/sparkle-mug.gif" height="24"></a>. Every contribution is greatly appreciated!
 
 ---
 
