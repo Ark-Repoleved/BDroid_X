@@ -31,7 +31,7 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
-        
+
         ndk {
             abiFilters.addAll(listOf("x86_64", "arm64-v8a"))
         }
@@ -46,7 +46,7 @@ android {
         release {
             isMinifyEnabled = true
             ndk {
-                abiFilters.add("arm64-v8a")
+                abiFilters.addAll(listOf("x86_64", "arm64-v8a"))
             }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -126,4 +126,10 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("com.valentinilk.shimmer:compose-shimmer:1.2.0")
+}
+
+afterEvaluate {
+    tasks.named("minifyReleaseWithR8") {
+        dependsOn(tasks.named("generateReleaseChaquopyProGuard"))
+    }
 }
