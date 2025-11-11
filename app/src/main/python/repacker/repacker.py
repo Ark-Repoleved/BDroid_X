@@ -121,53 +121,35 @@ def _parse_atlas(atlas_path):
     return atlas_database, None
 
 def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
-    report_progress(f"Starting in-place Spine asset merge for '{base_name}'")
-    
-    old_dir = os.path.join(mod_dir_path, ".old")
-    os.makedirs(old_dir, exist_ok=True)
+    report_progress(f"Starting Spine asset merge for '{base_name}' in temporary directory.")
 
-    # Move original files to .old, if they are not already there
-    all_png_files = sorted(glob.glob(os.path.join(mod_dir_path, f'{base_name}*.png')))
+    original_png_files = sorted(glob.glob(os.path.join(mod_dir_path, f'{base_name}*.png')))
     original_atlas_path = os.path.join(mod_dir_path, f"{base_name}.atlas")
 
-    if not all_png_files or not os.path.exists(original_atlas_path):
-        return f"SKIPPING: Missing png or atlas files for {base_name} in the main directory."
+    if not original_png_files or not os.path.exists(original_atlas_path):
+        return f"SKIPPING: Missing png or atlas files for {base_name} in the working directory."
 
-    report_progress(f"Moving {len(all_png_files)} png files and atlas to .old directory for backup.")
-    for png_file in all_png_files:
-        shutil.move(png_file, os.path.join(old_dir, os.path.basename(png_file)))
-    shutil.move(original_atlas_path, os.path.join(old_dir, os.path.basename(original_atlas_path)))
-
-    # Now, all paths should point to the .old directory for reading
-    old_atlas_path = os.path.join(old_dir, f"{base_name}.atlas")
-    atlas_db, err = _parse_atlas(old_atlas_path)
+    atlas_db, err = _parse_atlas(original_atlas_path)
     if err:
-        return f"FAILED: Could not parse backed up atlas file: {err}"
+        return f"FAILED: Could not parse atlas file: {err}"
 
-    all_png_files_old = sorted(glob.glob(os.path.join(old_dir, f'{base_name}*.png')))
-    
     # Sort pngs correctly (_2 before _10)
     def sort_key(filename):
         if filename.endswith(f"{base_name}.png"): return 1
         match = re.search(r'_(\d+)\.png$', filename)
         return int(match.group(1)) if match else float('inf')
-    all_png_files_old.sort(key=lambda x: sort_key(os.path.basename(x)))
+    original_png_files.sort(key=lambda x: sort_key(os.path.basename(x)))
 
-    # This check is now redundant because the calling function handles it,
-    # but we keep it as a safeguard.
-    if len(all_png_files_old) <= target_count:
-        report_progress("Error: Merge function called but not needed. Restoring files.")
-        for f in all_png_files_old: shutil.move(f, mod_dir_path)
-        shutil.move(old_atlas_path, mod_dir_path)
-        return "Merge not needed."
+    if len(original_png_files) <= target_count:
+        # This case should be handled by the calling function, but as a safeguard:
+        return "Merge not needed, texture count is already at or below target."
 
-    report_progress(f"Merging {len(all_png_files_old)} textures down to {target_count}.")
+    report_progress(f"Merging {len(original_png_files)} textures down to {target_count}.")
 
-    images = {os.path.basename(p): Image.open(p) for p in all_png_files_old}
+    images = {os.path.basename(p): Image.open(p) for p in original_png_files}
     
-    # Create a merging plan
     merging_plan = {i: [] for i in range(target_count)}
-    for i, png_path in enumerate(all_png_files_old):
+    for i, png_path in enumerate(original_png_files):
         merging_plan[i % target_count].append(os.path.basename(png_path))
     
     final_atlas_blocks = []
@@ -179,10 +161,8 @@ def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
         base_image_name = target_pngs[0]
         base_image = images[base_image_name].copy()
         
-        # Maps original png name to its new offset in the merged image
         merged_offsets = {base_image_name: (0, 0)}
         
-        # Chain-merge subsequent images horizontally
         current_width = base_image.width
         max_height = base_image.height
         
@@ -199,15 +179,12 @@ def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
             base_image = new_base_image
             current_width = new_width
 
-        # Save the final merged image to the main mod directory
         output_image_name = f"{base_name}.png" if i == 0 else f"{base_name}_{i+1}.png"
         output_path = os.path.join(mod_dir_path, output_image_name)
         base_image.save(output_path)
         report_progress(f"Saved merged image: {output_path}")
 
-        # --- Update Atlas for this merged block ---
         all_sprites_for_block = []
-        
         for original_png_name in target_pngs:
             atlas_data = atlas_db.get(original_png_name)
             if not atlas_data: continue
@@ -216,7 +193,7 @@ def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
             
             if offset_x == 0 and offset_y == 0:
                 all_sprites_for_block.append(atlas_data['sprites'])
-            else: # We need to modify sprite coordinates
+            else:
                 modified_sprites = []
                 for line in atlas_data['sprites'].split('\n'):
                     if line.strip().startswith('bounds:'):
@@ -231,7 +208,6 @@ def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
                     else: modified_sprites.append(line)
                 all_sprites_for_block.append('\n'.join(modified_sprites))
 
-        # Reconstruct the atlas block for the new merged image
         filter_line = atlas_db[target_pngs[0]]['filter_line']
         new_block = [
             output_image_name,
@@ -241,16 +217,21 @@ def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
         ]
         final_atlas_blocks.append('\n'.join(new_block))
     
-    # Write the new .atlas file to the main mod directory
     final_atlas_path = os.path.join(mod_dir_path, f"{base_name}.atlas")
     with open(final_atlas_path, 'w', encoding='utf-8') as f:
         f.write('\n\n'.join(final_atlas_blocks))
     report_progress(f"Wrote final atlas file to: {final_atlas_path}")
     
-    # Also copy over non-png/atlas files (like .skel) from the .old directory
-    for f in glob.glob(os.path.join(old_dir, f'{base_name}*')):
-        if not f.endswith(('.png', '.atlas')):
-            shutil.copy(f, mod_dir_path)
+    # Clean up old, unmerged png files
+    report_progress("Cleaning up original, unmerged texture files...")
+    for png_path in original_png_files:
+        try:
+            # Check if the file is one of the NEWLY created merged files.
+            # If so, don't delete it.
+            if os.path.basename(png_path) not in [f"{base_name}.png" if i == 0 else f"{base_name}_{i+1}.png" for i in range(target_count)]:
+                os.remove(png_path)
+        except OSError as e:
+            report_progress(f"Could not delete old file {png_path}: {e}")
             
     return None
 
@@ -324,60 +305,66 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
         print(message)
         
     env = None
+    temp_dir_obj = None
     try:
+        temp_dir_obj = tempfile.TemporaryDirectory()
+        working_dir = os.path.join(temp_dir_obj.name, "mod")
+        report_progress(f"Using temporary directory: {working_dir}")
+        shutil.copytree(modded_assets_folder, working_dir)
+
         report_progress("Loading original game file...")
         env = UnityPy.load(original_bundle_path)
         edited = False
 
-        spine_base_name = None
-        for root, _, files in os.walk(modded_assets_folder):
+        # --- Pre-processing Step: Scan for all unique spine mods and their paths ---
+        spine_mods_to_process = {}  # base_name -> directory_path
+        for root, _, files in os.walk(working_dir):
+            if '.old' in root:
+                continue
             for f in files:
                 if f.lower().endswith(('.skel', '.json')):
-                    spine_base_name = os.path.splitext(f)[0]
-                    break
-            if spine_base_name:
-                break
-        
-        if spine_base_name:
-            # This is where the old temp folder logic was. We are removing it.
-            report_progress(f"Detected Spine mod, base name: {spine_base_name}")
-            pattern = re.compile(f"^{re.escape(spine_base_name)}(_\\d+)?$", re.IGNORECASE)
-            
-            original_texture_count = 0
-            for obj in env.objects:
-                if obj.type.name == "Texture2D":
-                    try:
-                        asset_name = obj.read().m_Name
-                        if pattern.match(asset_name):
-                            original_texture_count += 1
-                    except Exception as e:
-                        report_progress(f"Couldn't read asset name, skipping. Error: {e}")
-            
-            report_progress(f"Found {original_texture_count} matching textures in the original game file.")
+                    base_name = os.path.splitext(f)[0]
+                    if base_name not in spine_mods_to_process:
+                        spine_mods_to_process[base_name] = root
 
-            # Compare with mod's texture count and merge if necessary
-            mod_texture_count = len(glob.glob(os.path.join(modded_assets_folder, f'{spine_base_name}*.png')))
-            report_progress(f"Mod has {mod_texture_count} textures.")
+        if spine_mods_to_process:
+            report_progress(f"Detected {len(spine_mods_to_process)} unique Spine mods for pre-processing: {list(spine_mods_to_process.keys())}")
+            for spine_base_name, mod_dir_path in spine_mods_to_process.items():
+                report_progress(f"--- Processing: {spine_base_name} ---")
+                pattern = re.compile(f"^{re.escape(spine_base_name)}(_\\d+)?$", re.IGNORECASE)
 
-            if mod_texture_count > original_texture_count and original_texture_count > 0:
-                report_progress("Mod texture count exceeds original, starting in-place merge process...")
-                
-                merge_error = _merge_spine_assets(modded_assets_folder, spine_base_name, original_texture_count, report_progress)
-                
-                if merge_error:
-                    report_progress(f"ERROR during merge: {merge_error}. Repacking will proceed with original files in .old folder.")
+                original_texture_count = 0
+                for obj in env.objects:
+                    if obj.type.name == "Texture2D":
+                        try:
+                            asset_name = obj.read().m_Name
+                            if pattern.match(asset_name):
+                                original_texture_count += 1
+                        except Exception as e:
+                            report_progress(f"Couldn't read asset name, skipping. Error: {e}")
+
+                report_progress(f"Found {original_texture_count} matching textures in the original game file for {spine_base_name}.")
+
+                mod_texture_count = len(glob.glob(os.path.join(mod_dir_path, f'{spine_base_name}*.png')))
+                report_progress(f"Mod has {mod_texture_count} textures for {spine_base_name}.")
+
+                if mod_texture_count > original_texture_count and original_texture_count > 0:
+                    report_progress("Mod texture count exceeds original, starting merge process into temp directory...")
+                    merge_error = _merge_spine_assets(mod_dir_path, spine_base_name, original_texture_count, report_progress)
+
+                    if merge_error:
+                        report_progress(f"ERROR during merge for {spine_base_name}: {merge_error}.")
+                    else:
+                        report_progress(f"Merge successful for {spine_base_name}.")
                 else:
-                    report_progress("In-place merge successful. Repacking will use the newly created assets.")
-            else:
-                report_progress("Texture count matches or is lower, no merge needed.")
+                    report_progress("Texture count matches or is lower, no merge needed.")
 
         report_progress("Scanning for moddable assets...")
         
         asset_map = {obj.read().m_Name.lower(): obj for obj in env.objects if hasattr(obj.read(), 'm_Name')}
 
         mod_files = []
-        # We now always use the original modded_assets_folder, as it contains the merged files after the process.
-        for root, _, files in os.walk(modded_assets_folder):
+        for root, _, files in os.walk(working_dir):
             if '.old' in root:
                 continue
             for f in files:
@@ -500,4 +487,6 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
     finally:
         if env is not None:
             del env
+        if temp_dir_obj:
+            temp_dir_obj.cleanup()
         gc.collect()
