@@ -186,18 +186,6 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         viewModelScope.launch {
             try {
                 _isUpdatingCharacters.value = true
-                val internalFile = File(context.filesDir, CHARACTERS_JSON_FILENAME)
-                if (!internalFile.exists()) {
-                    try {
-                        withContext(Dispatchers.IO) {
-                            context.assets.open(CHARACTERS_JSON_FILENAME)
-                                .use { i -> internalFile.outputStream().use { o -> i.copyTo(o) } }
-                            println("Copied bundled characters.json to internal storage.")
-                        }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }
                 updateCharacterData(context)
             } finally {
                 _isUpdatingCharacters.value = false
