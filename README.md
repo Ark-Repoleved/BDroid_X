@@ -81,13 +81,9 @@ Not sure what a mod looks like in action?
 3.  A preview screen will open, playing the animation.
 
 ### Spine Atlas Merger (Troubleshooting Tool)
-**Use this tool ONLY if a mod causes the game to crash after installation.** 
+**This feature is now automated.**
 
-Crashes are often caused by mods that use too many texture files (e.g., `_5.png`, `_6.png`). This tool merges them into a less, more stable file.
-1.  On the main screen, find the mod that is causing the crash. Select **only that mod**.
-2.  Tap the **"Merge Spine"** button.
-3.  The app will process the files. The originals will be backed up into a new `.old` subfolder.
-4.  Re-install the newly merged mod. The crash should be resolved.
+If a mod has a texture count that mismatches the original game files (which often causes crashes), the app will now **automatically detect** and **merge** the textures during the repacking process. You no longer need to do this manually.
 
 ### Standalone Bundle Unpacker
 For users who want to extract original game files:
@@ -99,7 +95,7 @@ For users who want to extract original game files:
 
 ## ❤️ Support This Project
 
-If you find this tool useful and want to support its development, please consider <a href="https://ko-fi.com/issekisaji" style="text-decoration: none;">buying me a coffee <img alt="Static Badge" align="top" src="https://raw.githubusercontent.com/Ark-Repoleved/bd2-android-mod-manager/refs/heads/main/.github/sparkle-mug.gif" height="24"></a>. Every contribution is greatly appreciated!
+If you find this tool useful and want to support its development, please consider <a href="https://ko-fi.com/issekisaji" style="text-decoration: none;">buying me a coffee <img alt="Support me on Ko-fi" align="top" src="https://raw.githubusercontent.com/Ark-Repoleved/bd2-android-mod-manager/refs/heads/main/.github/sparkle-mug.gif" height="24"></a>. Every contribution is greatly appreciated!
 
 ---
 
@@ -109,9 +105,9 @@ If you find this tool useful and want to support its development, please conside
     *   **A:** Double-check that you've selected the correct "Mod Source Folder" in the setup. Also, ensure your mods are in unzipped folders and follow the correct [folder structure](#1-prepare-your-mods-important).
 
 *   **Q: The game crashes after installing a mod.**
-    *   **A:** This often happens when a mod uses too many separate texture (`.png`) files. Please use the built-in **[Spine Atlas Merger](#spine-atlas-merger-troubleshooting-tool)** tool to combine the textures before installing the mod.
+    *   **A:** This is often because the mod's texture (`.png`) file count doesn't match the game's original assets. The latest version of the app **handles this automatically**. If you still experience a crash, the issue is likely with the mod itself (e.g., corrupted files or incompatibility).
 
-*   **Q: The installation failed. What should I do?**
+*   **Q: The installation failed. What should I do?_
     *   **A:** Failures are usually caused by:
         1.  Poor network connection (failed to download original files).
         2.  Incorrect mod filenames.
