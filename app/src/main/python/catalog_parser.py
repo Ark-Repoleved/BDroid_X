@@ -224,6 +224,8 @@ def parse_catalog_for_bundle_names(catalog_content):
             asset_type = "idle"
             file_id = matched_string
 
+        # For 'idle' and 'cutscene' animations, only accept the .skel.bytes file to ensure
+        # we get the correct bundle hash, not the hash for the atlas or png.
         if (asset_type == "idle" or asset_type == "cutscene") and not asset_key.lower().endswith('.skel.bytes'):
             continue
         
