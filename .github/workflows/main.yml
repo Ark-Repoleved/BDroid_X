@@ -38,6 +38,9 @@ jobs:
         with:
           python-version: '3.8'
 
+      - name: Clean project
+        run: ./gradlew clean
+
       - name: Build Signed Release APK
         run: ./gradlew assembleRelease
         env:
