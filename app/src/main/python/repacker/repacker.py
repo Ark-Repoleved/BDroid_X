@@ -4,7 +4,6 @@ import ctypes
 from ctypes import *
 from .json_to_skel import json_to_skel
 import tempfile
-import time
 import gc
 import re
 import shutil
@@ -366,42 +365,21 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                         obj = asset_map[target_asset_name]
                         data = obj.read()
 
-                        # Use PID + timestamp for unique temp file to avoid conflicts in concurrent execution
-                        pid = os.getpid()
-                        timestamp = int(time.time() * 1000000)  # Microsecond precision
-                        temp_skel_filename = f"skel_{pid}_{timestamp}_{base_name}.tmp"
-                        temp_skel_path = os.path.join(tempfile.gettempdir(), temp_skel_filename)
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".skel") as tmp_skel_file:
+                            temp_skel_path = tmp_skel_file.name
                         
                         try:
                             json_to_skel(mod_filepath, temp_skel_path)
-                            
-                            # Verify the file was created successfully
-                            if not os.path.exists(temp_skel_path):
-                                report_progress(f"{current_progress}ERROR: json_to_skel did not create output file for {mod_filename}")
-                                continue
-                            
                             with open(temp_skel_path, 'rb') as f:
                                 skel_binary_data = f.read()
-                            
-                            if not skel_binary_data:
-                                report_progress(f"{current_progress}ERROR: json_to_skel created empty file for {mod_filename}")
-                                continue
                             
                             data.m_Script = skel_binary_data.decode("utf-8", "surrogateescape")
                             data.save()
                             edited = True
                             report_progress(f"{current_progress}Successfully replaced animation for {mod_filename}")
-                        except Exception as e:
-                            report_progress(f"{current_progress}ERROR converting {mod_filename}: {e}")
-                            import traceback
-                            report_progress(traceback.format_exc())
                         finally:
-                            # Clean up temp file
                             if os.path.exists(temp_skel_path):
-                                try:
-                                    os.remove(temp_skel_path)
-                                except Exception as e:
-                                    report_progress(f"{current_progress}Warning: Could not remove temp file {temp_skel_path}: {e}")
+                                os.remove(temp_skel_path)
                     continue
 
                 if mod_filename.lower().endswith('.png'):
