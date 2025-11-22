@@ -1,4 +1,3 @@
-// 工具函数
 const getById = (id) => {
     return document.getElementById(id)
 }
