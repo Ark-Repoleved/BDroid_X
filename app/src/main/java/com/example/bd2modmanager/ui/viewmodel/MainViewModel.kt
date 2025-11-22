@@ -12,105 +12,29 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.chaquo.python.Python
-import com.example.bd2modmanager.service.ModdingService
 import com.example.bd2modmanager.SpinePreviewActivity
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
+import com.example.bd2modmanager.data.model.*
+import com.example.bd2modmanager.data.repository.CharacterRepository
+import com.example.bd2modmanager.data.repository.ModRepository
+import com.example.bd2modmanager.service.ModdingService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import java.io.File
-import java.io.FileOutputStream
-import java.net.URL
 import java.util.zip.ZipInputStream
-
-data class ModInfo(
-    val name: String,
-    val character: String,
-    val costume: String,
-    val type: String,
-    val isEnabled: Boolean,
-    val uri: Uri,
-    val targetHashedName: String?,
-    val isDirectory: Boolean
-)
-
-data class ModCacheInfo(
-    val uriString: String,
-    val lastModified: Long,
-    val name: String,
-    val character: String,
-    val costume: String,
-    val type: String,
-    val targetHashedName: String?,
-    val isDirectory: Boolean
-)
-
-data class CharacterInfo(val character: String, val costume: String, val type: String, val hashedName: String)
-
-data class ModDetails(val fileId: String?, val fileNames: List<String>)
-
-data class RepackJob(val hashedName: String, val modsToInstall: List<ModInfo>)
-
-sealed class JobStatus {
-    object Pending : JobStatus()
-    data class Downloading(val progressMessage: String = "Waiting...") : JobStatus()
-    data class Installing(val progressMessage: String = "Initializing...") : JobStatus()
-    data class Finished(val relativePath: String) : JobStatus()
-    data class Failed(val error: String) : JobStatus()
-}
-
-data class InstallJob(
-    val job: RepackJob,
-    val status: JobStatus = JobStatus.Pending
-)
-
-data class FinalInstallResult(
-    val successfulJobs: Int,
-    val failedJobs: Int,
-    val command: String?
-)
-
-sealed class UninstallState {
-    object Idle : UninstallState()
-    data class Downloading(val hashedName: String, val progressMessage: String = "Initializing...") : UninstallState()
-    data class Finished(val command: String) : UninstallState()
-    data class Failed(val error: String) : UninstallState()
-}
-
-sealed class UnpackState {
-    object Idle : UnpackState()
-    data class Unpacking(val progressMessage: String = "Initializing...") : UnpackState()
-    data class Finished(val message: String) : UnpackState()
-    data class Failed(val error: String) : UnpackState()
-}
-
-sealed class MergeState {
-    object Idle : MergeState()
-    data class Merging(val progressMessage: String = "Initializing...") : MergeState()
-    data class Finished(val message: String) : MergeState()
-    data class Failed(val error: String) : MergeState()
-}
 
 class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel() {
 
-    companion object {
-        private const val CHARACTERS_JSON_URL = "https://codeberg.org/kxdekxde/browndust2-mod-manager/raw/branch/main/characters.json"
-        private const val CHARACTERS_JSON_FILENAME = "characters.json"
-        private const val MOD_CACHE_FILENAME = "mod_cache.json"
-    }
-
-    private val gson = Gson()
+    private lateinit var characterRepository: CharacterRepository
+    private lateinit var modRepository: ModRepository
 
     val modSourceDirectoryUri: StateFlow<Uri?> = savedStateHandle.getStateFlow("mod_source_dir_uri", null)
 
@@ -164,6 +88,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     private val _finalInstallResult = MutableStateFlow<FinalInstallResult?>(null)
     val finalInstallResult: StateFlow<FinalInstallResult?> = _finalInstallResult.asStateFlow()
+    
+    // 批次處理開始時間（用於計算總耗時）
+    private var batchStartTimeMs: Long = 0L
 
     private val _uninstallState = MutableStateFlow<UninstallState>(UninstallState.Idle)
     val uninstallState: StateFlow<UninstallState> = _uninstallState.asStateFlow()
@@ -174,24 +101,20 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _unpackInputFile = MutableStateFlow<Uri?>(null)
     val unpackInputFile: StateFlow<Uri?> = _unpackInputFile.asStateFlow()
 
-    private val _mergeState = MutableStateFlow<MergeState>(MergeState.Idle)
-    val mergeState: StateFlow<MergeState> = _mergeState.asStateFlow()
-
-    private val _showMergeDialog = MutableStateFlow(false)
-    val showMergeDialog: StateFlow<Boolean> = _showMergeDialog.asStateFlow()
-
-    private var characterLut: Map<String, List<CharacterInfo>> = emptyMap()
 
     fun initialize(context: Context) {
+        characterRepository = CharacterRepository(context)
+        modRepository = ModRepository(context, characterRepository)
+
         viewModelScope.launch {
             try {
                 _isUpdatingCharacters.value = true
-                updateCharacterData(context)
+                characterRepository.updateCharacterData()
             } finally {
                 _isUpdatingCharacters.value = false
             }
 
-            modSourceDirectoryUri.value?.let { scanModSourceDirectory(context, it) }
+            modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
         }
 
         viewModelScope.launch {
@@ -203,48 +126,11 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         }
     }
 
-    private suspend fun updateCharacterData(context: Context) {
-        withContext(Dispatchers.IO) {
-            try {
-                if (!Python.isStarted()) {
-                    Python.start(com.chaquo.python.android.AndroidPlatform(context))
-                }
-                val py = Python.getInstance()
-                val mainScript = py.getModule("main_script")
-                val result = mainScript.callAttr("update_character_data", context.filesDir.absolutePath).asList()
-                val status = result[0].toString() // SUCCESS, SKIPPED, FAILED
-                val message = result[1].toString()
-
-                when (status) {
-                    "SUCCESS" -> {
-                        println("Successfully ran scraper and saved characters.json: $message")
-                        // When a new characters.json is generated, the mod cache becomes invalid.
-                        val cacheFile = File(context.cacheDir, MOD_CACHE_FILENAME)
-                        if (cacheFile.exists()) {
-                            cacheFile.delete()
-                            println("Deleted mod cache to force re-scan.")
-                        }
-                    }
-                    "SKIPPED" -> {
-                        println("Scraper skipped: $message")
-                    }
-                    "FAILED" -> {
-                        println("Scraper script failed: $message. Will use local version if available.")
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                println("Failed to execute scraper python script, will use local version. Error: ${e.message}")
-            }
-            characterLut = parseCharacterJson(context)
-        }
-    }
-
     fun setModSourceDirectoryUri(context: Context, uri: Uri?) {
         savedStateHandle["mod_source_dir_uri"] = uri
         if (uri != null) {
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            scanModSourceDirectory(context, uri)
+            scanModSourceDirectory(uri)
         }
     }
 
@@ -300,6 +186,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             .map { (hash, mods) -> RepackJob(hash, mods) }
 
         if (jobs.isNotEmpty()) {
+            batchStartTimeMs = System.currentTimeMillis()  // 記錄開始時間
             _installJobs.value = jobs.map { InstallJob(it) }
             _finalInstallResult.value = null
             _showInstallDialog.value = true
@@ -405,6 +292,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         val finishedJobs = _installJobs.value
         val successfulJobs = finishedJobs.filter { it.status is JobStatus.Finished }
         val failedJobs = finishedJobs.filter { it.status is JobStatus.Failed }
+        
+        // 計算總耗時
+        val elapsedTimeMs = System.currentTimeMillis() - batchStartTimeMs
 
         val command = if (successfulJobs.isNotEmpty()) {
             "mv -f /storage/emulated/0/Download/Shared /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/"
@@ -413,7 +303,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         _finalInstallResult.value = FinalInstallResult(
             successfulJobs = successfulJobs.size,
             failedJobs = failedJobs.size,
-            command = command
+            command = command,
+            elapsedTimeMs = elapsedTimeMs
         )
     }
 
@@ -653,74 +544,14 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         }
     }
 
-    fun scanModSourceDirectory(context: Context, dirUri: Uri) {
+    fun scanModSourceDirectory(dirUri: Uri) {
         _isLoading.value = true
         viewModelScope.launch(Dispatchers.IO) {
             isUpdatingCharacters.first { !it } // Wait for character data to be ready
             try {
-                val existingCache = loadModCache(context)
-                val newCache = mutableMapOf<String, ModCacheInfo>()
-                val tempModsList = mutableListOf<ModInfo>()
-                val files = DocumentFile.fromTreeUri(context, dirUri)?.listFiles() ?: emptyArray()
-
-                files.filter { it.isDirectory || it.name?.endsWith(".zip", ignoreCase = true) == true }
-                    .forEach { file ->
-                        val uriString = file.uri.toString()
-                        val lastModified = file.lastModified()
-                        val cachedInfo = existingCache[uriString]
-
-                        val modInfo = if (cachedInfo != null && cachedInfo.lastModified == lastModified) {
-                            newCache[uriString] = cachedInfo
-                            ModInfo(
-                                name = cachedInfo.name,
-                                character = cachedInfo.character,
-                                costume = cachedInfo.costume,
-                                type = cachedInfo.type,
-                                isEnabled = false,
-                                uri = file.uri,
-                                targetHashedName = cachedInfo.targetHashedName,
-                                isDirectory = cachedInfo.isDirectory
-                            )
-                        } else {
-                            val modName = file.name?.removeSuffix(".zip") ?: ""
-                            val isDirectory = file.isDirectory
-                            val modDetails = if (isDirectory) {
-                                extractModDetailsFromDirectory(context, file.uri)
-                            } else {
-                                extractModDetailsFromUri(context, file.uri)
-                            }
-                            val bestMatch = findBestMatch(modDetails.fileId, modDetails.fileNames)
-
-                            val newCacheInfo = ModCacheInfo(
-                                uriString = uriString,
-                                lastModified = lastModified,
-                                name = modName,
-                                character = bestMatch?.character ?: "Unknown",
-                                costume = bestMatch?.costume ?: "Unknown",
-                                type = bestMatch?.type ?: "idle",
-                                targetHashedName = bestMatch?.hashedName,
-                                isDirectory = isDirectory
-                            )
-                            newCache[uriString] = newCacheInfo
-
-                            ModInfo(
-                                name = modName,
-                                character = bestMatch?.character ?: "Unknown",
-                                costume = bestMatch?.costume ?: "Unknown",
-                                type = bestMatch?.type ?: "idle",
-                                isEnabled = false,
-                                uri = file.uri,
-                                targetHashedName = bestMatch?.hashedName,
-                                isDirectory = isDirectory
-                            )
-                        }
-                        tempModsList.add(modInfo)
-                    }
-
-                saveModCache(context, newCache)
-
+                val mods = modRepository.scanMods(dirUri)
                 withContext(Dispatchers.Main) {
-                    _modsList.value = tempModsList.sortedBy { it.name }
+                    _modsList.value = mods
                     _selectedMods.value = emptySet()
                 }
             } finally {
@@ -729,54 +560,6 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 }
             }
         }
-    }
-
-    private fun loadModCache(context: Context): Map<String, ModCacheInfo> {
-        val cacheFile = File(context.cacheDir, MOD_CACHE_FILENAME)
-        if (!cacheFile.exists()) return emptyMap()
-
-        return try {
-            val json = cacheFile.readText()
-            val type = object : TypeToken<Map<String, ModCacheInfo>>() {}.type
-            gson.fromJson(json, type) ?: emptyMap()
-        }
-        catch (e: Exception) {
-            e.printStackTrace()
-            emptyMap()
-        }
-    }
-
-    private fun saveModCache(context: Context, cache: Map<String, ModCacheInfo>) {
-        try {
-            val cacheFile = File(context.cacheDir, MOD_CACHE_FILENAME)
-            val json = gson.toJson(cache)
-            cacheFile.writeText(json)
-        }
-        catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    private fun findBestMatch(fileId: String?, fileNames: List<String>): CharacterInfo? {
-        if (fileId == null) return null
-
-        val candidates = characterLut[fileId] ?: return null
-        if (candidates.size == 1) return candidates.first()
-        if (candidates.isEmpty()) return null
-
-        val hasCutsceneKeyword = fileNames.any { it.contains("cutscene", ignoreCase = true) }
-        if (hasCutsceneKeyword) {
-            candidates.find { it.type == "cutscene" }?.let { return it }
-        }
-
-        val validHashCandidates = candidates.filter { !it.hashedName.isNullOrBlank() }
-        if (validHashCandidates.size == 1) {
-            return validHashCandidates.first()
-        }
-
-        candidates.find { it.type == "idle" }?.let { return it }
-
-        return candidates.first()
     }
 
     private fun saveFileToDownloads(context: Context, file: File, relativeDestPath: String, rootDir: String): Uri? {
@@ -827,39 +610,6 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         return null
     }
 
-
-
-    private fun extractModDetailsFromUri(context: Context, zipUri: Uri): ModDetails {
-        val fileNames = mutableListOf<String>()
-        var fileId: String? = null
-        try {
-            context.contentResolver.openInputStream(zipUri)?.use { ZipInputStream(it).use { zis ->
-                var entry = zis.nextEntry
-                while (entry != null) {
-                    fileNames.add(entry.name)
-                    if (fileId == null) fileId = extractFileId(entry.name)
-                    entry = zis.nextEntry
-                }
-            }}
-        } catch (e: Exception) { e.printStackTrace() }
-        return ModDetails(fileId, fileNames)
-    }
-
-    private fun extractModDetailsFromDirectory(context: Context, dirUri: Uri): ModDetails {
-        val fileNames = mutableListOf<String>()
-        var fileId: String? = null
-        try {
-            DocumentFile.fromTreeUri(context, dirUri)?.listFiles()?.forEach { file ->
-                val entryName = file.name ?: ""
-                fileNames.add(entryName)
-                if (file.isFile) {
-                    if (fileId == null) fileId = extractFileId(entryName)
-                }
-            }
-        } catch (e: Exception) { e.printStackTrace() }
-        return ModDetails(fileId, fileNames)
-    }
-
     private fun copyDirectoryToCache(context: Context, sourceDir: DocumentFile, destinationDir: File) {
         if (!destinationDir.exists()) destinationDir.mkdirs()
         sourceDir.listFiles().forEach { file ->
@@ -870,49 +620,6 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 } catch (e: Exception) { e.printStackTrace() }
             }
         }
-    }
-
-    private suspend fun parseCharacterJson(context: Context): Map<String, List<CharacterInfo>> {
-        return withContext(Dispatchers.IO) {
-            val lut = mutableMapOf<String, MutableList<CharacterInfo>>()
-            val internalFile = File(context.filesDir, CHARACTERS_JSON_FILENAME)
-            if (!internalFile.exists()) return@withContext emptyMap()
-            val jsonString = try { internalFile.readText() } catch (e: Exception) { e.printStackTrace(); "" }
-            if (jsonString.isNotEmpty()) {
-                try {
-                    // Try parsing new format first
-                    val rootObject = org.json.JSONObject(jsonString)
-                    val jsonArray = rootObject.getJSONArray("characters")
-                    for (i in 0 until jsonArray.length()) {
-                        val obj = jsonArray.getJSONObject(i)
-                        val fileId = obj.getString("file_id").lowercase()
-                        val charInfo = CharacterInfo(obj.getString("character"), obj.getString("costume"), obj.getString("type"), obj.getString("hashed_name"))
-                        lut.getOrPut(fileId) { mutableListOf() }.add(charInfo)
-                    }
-                } catch (e: org.json.JSONException) {
-                    // Fallback to old format
-                    try {
-                        val jsonArray = JSONArray(jsonString)
-                        for (i in 0 until jsonArray.length()) {
-                            val obj = jsonArray.getJSONObject(i)
-                            val fileId = obj.getString("file_id").lowercase()
-                            val charInfo = CharacterInfo(obj.getString("character"), obj.getString("costume"), obj.getString("type"), obj.getString("hashed_name"))
-                            lut.getOrPut(fileId) { mutableListOf() }.add(charInfo)
-                        }
-                    } catch (e2: Exception) {
-                        e2.printStackTrace()
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-
-            lut
-        }
-    }
-
-    private fun extractFileId(entryName: String): String? {
-        return "(char\\d{6}|illust_dating\\d+|illust_special\\d+|illust_talk\\d+|npc\\d+|specialillust\\w+|storypack\\w+|\\bRhythmHitAnim\\b)".toRegex(RegexOption.IGNORE_CASE).find(entryName)?.value?.lowercase()
     }
 
     fun prepareAndShowPreview(context: Context, modInfo: ModInfo) {

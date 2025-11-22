@@ -79,8 +79,13 @@ def scrape_and_save(output_dir, version):
         
         if file_id and character and costume:
             metadata_map[file_id] = {"character": character, "costume": costume}
-
+    
     print(f"[Python] Found metadata for {len(metadata_map)} file_ids from the website.")
+    
+    # Clean up BeautifulSoup object to free memory
+    del soup
+    import gc
+    gc.collect()
 
     # Now, iterate through the asset_map (from the official catalog) as the source of truth.
     all_characters_data = []

@@ -86,39 +86,7 @@ def _load_astcenc_library():
 def get_error_string(astcenc_lib, status):
     return astcenc_lib.astcenc_get_error_string(status).decode('utf-8')
 
-def _parse_atlas(atlas_path):
-    atlas_database = {}
-    try:
-        with open(atlas_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-    except FileNotFoundError:
-        return None, f"Atlas file not found at {atlas_path}"
-
-    blocks = re.split(r'\n(?=[^\n]+\.png\n)', content.strip())
-    
-    for block_text in blocks:
-        block_text = block_text.strip()
-        if not block_text:
-            continue
-        
-        lines = block_text.split('\n')
-        block_name = lines[0]
-        
-        data = {'sprites': []}
-        sprite_lines = []
-        
-        for line in lines[1:]:
-            if line.strip().startswith('size:'):
-                data['size_line'] = line
-            elif line.strip().startswith('filter:'):
-                data['filter_line'] = line
-            else:
-                sprite_lines.append(line)
-
-        data['sprites'] = '\n'.join(sprite_lines)
-        atlas_database[block_name] = data
-        
-    return atlas_database, None
+from utils.atlas_operations import parse_atlas_file
 
 def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
     report_progress(f"Starting Spine asset merge for '{base_name}' in temporary directory.")
@@ -129,7 +97,7 @@ def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
     if not original_png_files or not os.path.exists(original_atlas_path):
         return f"SKIPPING: Missing png or atlas files for {base_name} in the working directory."
 
-    atlas_db, err = _parse_atlas(original_atlas_path)
+    atlas_db, err = parse_atlas_file(original_atlas_path)
     if err:
         return f"FAILED: Could not parse atlas file: {err}"
 
@@ -176,12 +144,16 @@ def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
             new_base_image = Image.new('RGBA', (new_width, max_height))
             new_base_image.paste(base_image, (0, 0))
             new_base_image.paste(extra_image, (current_width, 0))
+            
+            # Clean up old base_image to free memory
+            base_image.close()
             base_image = new_base_image
             current_width = new_width
 
         output_image_name = f"{base_name}.png" if i == 0 else f"{base_name}_{i+1}.png"
         output_path = os.path.join(mod_dir_path, output_image_name)
         base_image.save(output_path)
+        base_image.close()  # Close after saving
         report_progress(f"Saved merged image: {output_path}")
 
         all_sprites_for_block = []
@@ -222,6 +194,11 @@ def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
         f.write('\n\n'.join(final_atlas_blocks))
     report_progress(f"Wrote final atlas file to: {final_atlas_path}")
     
+    # Clean up images dict to free memory
+    for img in images.values():
+        img.close()
+    del images
+    
     # Clean up old, unmerged png files
     report_progress("Cleaning up original, unmerged texture files...")
     for png_path in original_png_files:
@@ -235,13 +212,7 @@ def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
             
     return None
 
-def find_modded_asset(folder: str, filename: str) -> str:
-    search_filename_lower = filename.lower()
-    for root, dirs, files in os.walk(folder):
-        for f in files:
-            if f.lower() == search_filename_lower:
-                return os.path.join(root, f)
-    return None
+from utils.file_operations import find_file_case_insensitive
 
 def compress_image_astc(image_bytes, width, height, block_x, block_y):
     astcenc = _load_astcenc_library()
@@ -361,7 +332,16 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
 
         report_progress("Scanning for moddable assets...")
         
-        asset_map = {obj.read().m_Name.lower(): obj for obj in env.objects if hasattr(obj.read(), 'm_Name')}
+        # Build asset_map more efficiently
+        total_objects = len(env.objects)
+        asset_map = {}
+        for obj in env.objects:
+            try:
+                data = obj.read()
+                if hasattr(data, 'm_Name'):
+                    asset_map[data.m_Name.lower()] = obj
+            except Exception:
+                pass  # Skip objects that can't be read
 
         mod_files = []
         for root, _, files in os.walk(working_dir):
@@ -409,39 +389,45 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                         if obj.type.name == "Texture2D":
                             report_progress(f"{current_progress}Replacing texture: {mod_filename}")
                             data = obj.read()
-                            pil_img = Image.open(mod_filepath).convert("RGBA")
-
-                            if use_astc:
-                                flipped_img = pil_img.transpose(Image.FLIP_TOP_BOTTOM)
-                                report_progress(f"{current_progress}Compressing texture to ASTC: {mod_filename}")
-                                block_x, block_y = 4, 4
-                                compressed_data, err = compress_image_astc(flipped_img.tobytes(), pil_img.width, pil_img.height, block_x, block_y)
-                                
-                                del flipped_img
-                                gc.collect()
-
-                                if err:
-                                    report_progress(f"ERROR: ASTC compression failed for {mod_filename}: {err}")
-                                    continue
-
-                                data.m_TextureFormat = 48
-                                data.image_data = compressed_data
-                                data.m_CompleteImageSize = len(compressed_data)
-                            else:
-                                report_progress(f"{current_progress}Using uncompressed RGBA32 for texture: {mod_filename}")
-                                data.m_TextureFormat = 4
-                                data.image = pil_img
-
-                            data.m_Width, data.m_Height = pil_img.size
-                            data.m_MipCount = 1
-                            data.m_StreamData.offset = 0
-                            data.m_StreamData.size = 0
-                            data.m_StreamData.path = ""
-                            data.save()
-                            edited = True
                             
-                            del pil_img
-                            gc.collect()
+                            # Use context manager equivalent for PIL Image
+                            pil_img = None
+                            try:
+                                pil_img = Image.open(mod_filepath).convert("RGBA")
+
+                                if use_astc:
+                                    flipped_img = pil_img.transpose(Image.FLIP_TOP_BOTTOM)
+                                    report_progress(f"{current_progress}Compressing texture to ASTC: {mod_filename}")
+                                    block_x, block_y = 4, 4
+                                    compressed_data, err = compress_image_astc(flipped_img.tobytes(), pil_img.width, pil_img.height, block_x, block_y)
+                                    
+                                    flipped_img.close()
+                                    del flipped_img
+                                    gc.collect()
+
+                                    if err:
+                                        report_progress(f"ERROR: ASTC compression failed for {mod_filename}: {err}")
+                                        continue
+
+                                    data.m_TextureFormat = 48
+                                    data.image_data = compressed_data
+                                    data.m_CompleteImageSize = len(compressed_data)
+                                else:
+                                    report_progress(f"{current_progress}Using uncompressed RGBA32 for texture: {mod_filename}")
+                                    data.m_TextureFormat = 4
+                                    data.image = pil_img
+
+                                data.m_Width, data.m_Height = pil_img.size
+                                data.m_MipCount = 1
+                                data.m_StreamData.offset = 0
+                                data.m_StreamData.size = 0
+                                data.m_StreamData.path = ""
+                                data.save()
+                                edited = True
+                            finally:
+                                if pil_img:
+                                    pil_img.close()
+                                    del pil_img
 
                     continue
 

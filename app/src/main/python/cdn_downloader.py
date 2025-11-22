@@ -59,12 +59,14 @@ def download_catalog(output_dir, quality, version, cache, lock, progress_callbac
         # --- If still not in cache, proceed with download ---
         filename = Path(output_dir).joinpath(f"catalog_{version}.json")
 
-        # Clean up old physical catalogs to prevent using stale data in case of script failure
-        for f in Path(output_dir).glob("catalog_*.json"):
+        # Clean up old physical catalogs to prevent using stale data
+        old_catalogs = list(Path(output_dir).glob("catalog_*.json"))
+        for f in old_catalogs:
             try:
                 os.remove(f)
             except OSError as e:
-                if progress_callback: progress_callback(f"Error removing old catalog {f}: {e}")
+                if progress_callback: 
+                    progress_callback(f"Error removing old catalog {f}: {e}")
 
         url = f"https://cdn.bd2.pmang.cloud/ServerData/Android/{quality}/{version}/catalog_alpha.json"
         if progress_callback: progress_callback(f"Downloading new catalog from {url}...")
@@ -183,7 +185,7 @@ def find_and_download_bundle(catalog_content, version, quality, hashed_name, out
                     response.raise_for_status()
                     with open(output_file_path, 'wb') as file:
                         total_downloaded = 0
-                        for chunk in response.iter_content(chunk_size=8192):
+                        for chunk in response.iter_content(chunk_size=65536):  # 64KB chunks for better performance
                             if chunk:
                                 file.write(chunk)
                                 total_downloaded += len(chunk)

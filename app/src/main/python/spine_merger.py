@@ -46,8 +46,8 @@ def _generate_operations(base_dir, file_prefix, progress_callback):
     """Automatically scans a directory and generates merge/copy operations."""
     progress_callback(f"  Scanning '{base_dir}' for files with prefix '{file_prefix}'...")
     
-    all_files_in_dir = os.listdir(base_dir)
-    png_files = [f for f in all_files_in_dir if f.startswith(file_prefix) and f.endswith('.png')]
+    # Use glob for more efficient file matching
+    png_files = [os.path.basename(f) for f in glob.glob(os.path.join(base_dir, f'{file_prefix}*.png'))]
 
     def sort_key(filename):
         if filename == f"{file_prefix}.png":

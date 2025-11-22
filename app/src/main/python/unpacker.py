@@ -208,7 +208,14 @@ def unpack_bundle(bundle_path, output_dir, progress_callback=print):
             finally:
                 if data:
                     del data
-                gc.collect() 
+                
+                # Periodic GC to prevent memory buildup while avoiding excessive overhead
+                # Collect every 10 objects to balance memory usage and performance
+                if (i + 1) % 10 == 0:
+                    gc.collect()
+        
+        # Final garbage collection
+        gc.collect()
         
         progress_callback("Unpacking complete.")
         return (True, "Unpacking complete.")
