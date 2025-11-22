@@ -1,6 +1,7 @@
 import hashlib
 import json
 import struct
+import threading
 
 transform_mode = { 'normal': 0, 'onlytranslation': 1, 'norotationorreflection': 2, 'noscale': 3, 'noscaleorreflection': 4 }
 blend_mode = {'normal': 0, 'additive': 1, 'multiply': 2, 'screen': 3 }
@@ -15,6 +16,7 @@ timeline_attachment_type = { "deform": 0, "sequence": 1 }
 timeline_path_type = { "position": 0, "spacing": 1, "mix": 2 }
 timeline_curve_type = { "linear": 0, "stepped": 1, "bezier": 2 }
 
+# Global variables for index mappings (used during conversion)
 strings_name_to_index = {}
 bones_name_to_index = {}
 slots_name_to_index = {}
@@ -23,20 +25,32 @@ transforms_name_to_index = {}
 paths_name_to_index = {}
 skins_name_to_index = {}
 
+# Thread lock to prevent concurrent modifications to global variables
+_conversion_lock = threading.Lock()
+
+
 
 # Main function to convert JSON file to binary
 def json_to_skel(json_file, output_file):
-    try:
-        with open(json_file, "r", encoding="utf-8") as f:
-            skeleton_data = json.load(f)
-    except UnicodeDecodeError:
-        with open(json_file, "r", encoding="utf-8-sig") as f:
-            skeleton_data = json.load(f)
+    """
+    Convert a JSON Spine file to binary .skel format.
     
-    if not skeleton_data.get('skeleton').get('spine').startswith("4.1"):
-        raise Exception("Cannot convert this file, unsupported Spine version.")
-    
-    write_skeleton_data_to_binary(skeleton_data, output_file)
+    IMPORTANT: This function uses global variables and is NOT thread-safe.
+    A lock is used to ensure only one conversion runs at a time.
+    """
+    with _conversion_lock:
+        try:
+            with open(json_file, "r", encoding="utf-8") as f:
+                skeleton_data = json.load(f)
+        except UnicodeDecodeError:
+            with open(json_file, "r", encoding="utf-8-sig") as f:
+                skeleton_data = json.load(f)
+        
+        if not skeleton_data.get('skeleton').get('spine').startswith("4.1"):
+            raise Exception("Cannot convert this file, unsupported Spine version.")
+        
+        write_skeleton_data_to_binary(skeleton_data, output_file)
+
 
 
 # Function to write skeleton data into binary
@@ -939,4 +953,3 @@ def write_long(binary_file, value):
 # So out file will be a little bit different than if it was actually exported with Spine      
 def write_float(binary_file, value):
     binary_file.write(struct.pack('>f', value))
-    
