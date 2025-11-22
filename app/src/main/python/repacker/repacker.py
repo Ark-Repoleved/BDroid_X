@@ -1,945 +1,500 @@
-import hashlib
-import json
-import struct
+from PIL import Image
+import os
+import ctypes
+from ctypes import *
+from .json_to_skel import json_to_skel
+import tempfile
+import time
+import gc
+import re
+import shutil
+import glob
 
-transform_mode = { 'normal': 0, 'onlytranslation': 1, 'norotationorreflection': 2, 'noscale': 3, 'noscaleorreflection': 4 }
-blend_mode = {'normal': 0, 'additive': 1, 'multiply': 2, 'screen': 3 }
-position_mode = { 'fixed': 0, 'percent': 1 }
-spacing_mode = { 'length': 0, 'fixed': 1, 'percent': 2, 'proportional': 3 }
-rotate_mode = { 'tangent': 0, 'chain': 1, 'chainscale': 2 }
-attachment_type = { 'region': 0, 'boundingbox': 1, 'mesh': 2, 'linkedmesh': 3, 'path': 4, 'point': 5, 'clipping': 6, 'sequence': 7 }
+from UnityPy.helpers import TypeTreeHelper
+TypeTreeHelper.read_typetree_boost = False
+import UnityPy
 
-timeline_slot_type = { "attachment": 0, "rgba": 1, "rgb": 2, "rgba2": 3, "rgb2": 4, "alpha": 5 }
-timeline_bone_type = { "rotate": 0, "translate": 1, "translatex": 2, "translatey": 3, "scale": 4, "scalex": 5, "scaley": 6, "shear": 7, "shearx": 8, "sheary": 9 }
-timeline_attachment_type = { "deform": 0, "sequence": 1 }
-timeline_path_type = { "position": 0, "spacing": 1, "mix": 2 }
-timeline_curve_type = { "linear": 0, "stepped": 1, "bezier": 2 }
+UnityPy.config.FALLBACK_UNITY_VERSION = '2022.3.22f1'
 
-import threading
+_astcenc_lib = None
+_astcenc_structures = {}
 
-# Use thread-local storage to avoid race conditions in concurrent execution
-_thread_local = threading.local()
+def _load_astcenc_library():
+    global _astcenc_lib
+    if _astcenc_lib is not None:
+        return _astcenc_lib if _astcenc_lib else None
 
-def _get_context():
-    """Get or create thread-local context for this conversion."""
-    if not hasattr(_thread_local, 'strings_name_to_index'):
-        _thread_local.strings_name_to_index = {}
-        _thread_local.bones_name_to_index = {}
-        _thread_local.slots_name_to_index = {}
-        _thread_local.iks_name_to_index = {}
-        _thread_local.transforms_name_to_index = {}
-        _thread_local.paths_name_to_index = {}
-        _thread_local.skins_name_to_index = {}
-    return _thread_local
-
-
-# Main function to convert JSON file to binary
-def json_to_skel(json_file, output_file):
     try:
-        with open(json_file, "r", encoding="utf-8") as f:
-            skeleton_data = json.load(f)
-    except UnicodeDecodeError:
-        with open(json_file, "r", encoding="utf-8-sig") as f:
-            skeleton_data = json.load(f)
+        lib = ctypes.cdll.LoadLibrary("libastcenc.so")
+    except OSError as e:
+        print(f"FATAL: Could not load libastcenc.so. Make sure it's in jniLibs. Error: {e}")
+        _astcenc_lib = False
+        return None
+
+    _astcenc_structures['ASTCENC_SUCCESS'] = 0
+    _astcenc_structures['ASTCENC_PRF_LDR_SRGB'] = 0
+    _astcenc_structures['ASTCENC_PRE_MEDIUM'] = 60.0
+    _astcenc_structures['ASTCENC_TYPE_U8'] = 0
+    _astcenc_structures['ASTCENC_FLG_USE_DECODE_UNORM8'] = 1 << 1
+
+    class astcenc_swizzle(Structure):
+        _fields_ = [("r", c_uint), ("g", c_uint), ("b", c_uint), ("a", c_uint)]
+    _astcenc_structures['astcenc_swizzle'] = astcenc_swizzle
+
+    class astcenc_config(Structure):
+        _fields_ = [
+            ("profile", c_uint), ("flags", c_uint), ("block_x", c_uint),
+            ("block_y", c_uint), ("block_z", c_uint), ("cw_r_weight", c_float),
+            ("cw_g_weight", c_float), ("cw_b_weight", c_float), ("cw_a_weight", c_float),
+            ("a_scale_radius", c_uint), ("rgbm_m_scale", c_float),
+            ("tune_partition_count_limit", c_uint), ("tune_2partition_index_limit", c_uint),
+            ("tune_3partition_index_limit", c_uint), ("tune_4partition_index_limit", c_uint),
+            ("tune_block_mode_limit", c_uint), ("tune_refinement_limit", c_uint),
+            ("tune_candidate_limit", c_uint), ("tune_2partitioning_candidate_limit", c_uint),
+            ("tune_3partitioning_candidate_limit", c_uint), ("tune_4partitioning_candidate_limit", c_uint),
+            ("tune_db_limit", c_float), ("tune_mse_overshoot", c_float),
+            ("tune_2partition_early_out_limit_factor", c_float), ("tune_3partition_early_out_limit_factor", c_float),
+            ("tune_2plane_early_out_limit_correlation", c_float), ("tune_search_mode0_enable", c_float),
+            ("progress_callback", c_void_p),
+        ]
+    _astcenc_structures['astcenc_config'] = astcenc_config
+
+    class astcenc_image(Structure):
+        _fields_ = [
+            ("dim_x", c_uint), ("dim_y", c_uint), ("dim_z", c_uint),
+            ("data_type", c_uint), ("data", POINTER(c_void_p)),
+        ]
+    _astcenc_structures['astcenc_image'] = astcenc_image
     
-    if not skeleton_data.get('skeleton').get('spine').startswith("4.1"):
-        raise Exception("Cannot convert this file, unsupported Spine version.")
+    lib.astcenc_config_init.argtypes = [c_uint, c_uint, c_uint, c_uint, c_float, c_uint, POINTER(astcenc_config)]
+    lib.astcenc_config_init.restype = c_int
+
+    lib.astcenc_context_alloc.argtypes = [POINTER(astcenc_config), c_uint, POINTER(c_void_p)]
+    lib.astcenc_context_alloc.restype = c_int
+
+    lib.astcenc_compress_image.argtypes = [c_void_p, POINTER(astcenc_image), POINTER(astcenc_swizzle), POINTER(c_ubyte), c_size_t, c_uint]
+    lib.astcenc_compress_image.restype = c_int
+
+    lib.astcenc_context_free.argtypes = [c_void_p]
+    lib.astcenc_context_free.restype = None
+
+    lib.astcenc_get_error_string.argtypes = [c_int]
+    lib.astcenc_get_error_string.restype = c_char_p
+
+    _astcenc_lib = lib
+    return _astcenc_lib
+
+def get_error_string(astcenc_lib, status):
+    return astcenc_lib.astcenc_get_error_string(status).decode('utf-8')
+
+from utils.atlas_operations import parse_atlas_file
+
+def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
+    report_progress(f"Starting Spine asset merge for '{base_name}' in temporary directory.")
+
+    original_png_files = sorted(glob.glob(os.path.join(mod_dir_path, f'{base_name}*.png')))
+    original_atlas_path = os.path.join(mod_dir_path, f"{base_name}.atlas")
+
+    if not original_png_files or not os.path.exists(original_atlas_path):
+        return f"SKIPPING: Missing png or atlas files for {base_name} in the working directory."
+
+    atlas_db, err = parse_atlas_file(original_atlas_path)
+    if err:
+        return f"FAILED: Could not parse atlas file: {err}"
+
+    # Sort pngs correctly (_2 before _10)
+    def sort_key(filename):
+        if filename.endswith(f"{base_name}.png"): return 1
+        match = re.search(r'_(\d+)\.png$', filename)
+        return int(match.group(1)) if match else float('inf')
+    original_png_files.sort(key=lambda x: sort_key(os.path.basename(x)))
+
+    if len(original_png_files) <= target_count:
+        # This case should be handled by the calling function, but as a safeguard:
+        return "Merge not needed, texture count is already at or below target."
+
+    report_progress(f"Merging {len(original_png_files)} textures down to {target_count}.")
+
+    images = {os.path.basename(p): Image.open(p) for p in original_png_files}
     
-    write_skeleton_data_to_binary(skeleton_data, output_file)
-
-
-# Function to write skeleton data into binary
-def write_skeleton_data_to_binary(skeleton_data, output_file):
-    # Get thread-local context to avoid race conditions in concurrent execution
-    ctx = _get_context()
+    merging_plan = {i: [] for i in range(target_count)}
+    for i, png_path in enumerate(original_png_files):
+        merging_plan[i % target_count].append(os.path.basename(png_path))
     
-    bones = skeleton_data.get('bones', [])
-    ctx.bones_name_to_index = {bone['name']: index for index, bone in enumerate(bones)}
-    
-    slots = skeleton_data.get('slots', [])
-    ctx.slots_name_to_index = {slot['name']: index for index, slot in enumerate(slots)}
-    
-    iks = skeleton_data.get('ik', [])
-    ctx.iks_name_to_index = {ik['name']: index for index, ik in enumerate(iks)}
-    
-    transforms = skeleton_data.get('transform', [])
-    ctx.transforms_name_to_index = {transform['name']: index for index, transform in enumerate(transforms)}
-    
-    paths = skeleton_data.get('path', [])
-    ctx.paths_name_to_index = {path['name']: index for index, path in enumerate(paths)}
-    
-    skins = skeleton_data.get('skins', [])    
-    ctx.skins_name_to_index = {skin['name']: index for index, skin in enumerate(skins)}
-    
-    animations = skeleton_data.get('animations', {})
+    final_atlas_blocks = []
 
-    with open(output_file, 'wb') as binary_file:
+    for i in range(target_count):
+        target_pngs = merging_plan[i]
+        if not target_pngs: continue
+
+        base_image_name = target_pngs[0]
+        base_image = images[base_image_name].copy()
         
-        # Write the hash
-        # I don't know how it's actually generated so I just rehash the
-        # hash string from the JSON file, but it doesn't matter anyway
-        hash_string = skeleton_data.get('skeleton').get('hash', '')
-        hash_bytes = hashlib.sha256(hash_string.encode('utf-8')).digest()
-        hash_int = int.from_bytes(hash_bytes[:8], byteorder='big')
-        write_long(binary_file, hash_int)
-
-        # Write version string
-        write_string(binary_file, skeleton_data.get('skeleton').get('spine', ""))
-
-        # Write basic properties (x, y, width, height)
-        write_float(binary_file, skeleton_data.get('skeleton').get('x', 0.0))
-        write_float(binary_file, skeleton_data.get('skeleton').get('y', 0.0))
-        write_float(binary_file, skeleton_data.get('skeleton').get('width', 0.0))
-        write_float(binary_file, skeleton_data.get('skeleton').get('height', 0.0))
-
-        # We're not writing any on the non-essential data to the file since those aren't needed
-        # write_bool(binary_file, skeleton_data.get('nonessential', False))
-        write_bool(binary_file, False)
+        merged_offsets = {base_image_name: (0, 0)}
         
-        # This strings_name_to_index thing is wrong but it seems to be working at the moment...
-        # It should actually be a dict for a lot of different strings in the file (attachments, events, etc)
-        # Using just the list of attachments in the skin works for BD2 since they don't have events and such so far
-        temp = []
-
-        # From skins: attachment names and paths
-        for skin in skins:
-            for attachment in skin.get('attachments', {}).values():
-                for name, slot in attachment.items():
-                    if name:
-                        temp.append(name)
-                    if isinstance(slot, dict):
-                        if 'path' in slot and slot['path']:
-                            temp.append(slot['path'])
-                        # Linked mesh references may use skin/parent names via string refs
-                        if 'skin' in slot and slot['skin']:
-                            temp.append(slot['skin'])
-                        if 'parent' in slot and slot['parent']:
-                            temp.append(slot['parent'])
-
-        # From slots: default attachment names
-        for slot in slots:
-            att = slot.get('attachment')
-            if att:
-                temp.append(att)
-
-        # From animations: slot attachment timeline names
-        animations = skeleton_data.get('animations', {})
-        for anim in animations.values():
-            slots_timelines = anim.get('slots', {})
-            for _slot_name, timelines in slots_timelines.items():
-                attach_frames = timelines.get('attachment', [])
-                for frame in attach_frames:
-                    name = frame.get('name')
-                    if name:
-                        temp.append(name)
-
-        # Build unique list preserving order
-        ctx.strings_name_to_index = {name: index for index, name in enumerate(dict.fromkeys(temp))}
-            
-        write_varint(binary_file, len(ctx.strings_name_to_index))
-        for name in ctx.strings_name_to_index:
-            write_string(binary_file, name)
-
-
-        # Bones
-        write_varint(binary_file, len(bones))
-        i = 0
-        for bone in bones:
-            # Bone name
-            write_string(binary_file, bone['name'])
+        current_width = base_image.width
+        max_height = base_image.height
         
-            # Parent bone index
-            if i > 0:
-                parent_index = ctx.bones_name_to_index.get(bone.get('parent'), 0)
-                write_varint(binary_file, parent_index)
-                
-            # Bone properties
-            write_float(binary_file, bone.get('rotation', 0.0))
-            write_float(binary_file, bone.get('x', 0.0))
-            write_float(binary_file, bone.get('y', 0.0))
-            write_float(binary_file, bone.get('scaleX', 1.0))
-            write_float(binary_file, bone.get('scaleY', 1.0))
-            write_float(binary_file, bone.get('shearX', 0.0))
-            write_float(binary_file, bone.get('shearY', 0.0))
-            write_float(binary_file, bone.get('length', 0.0))
-            write_varint(binary_file, transform_mode.get(bone.get('transform', 'normal').lower(), 0))
-            write_bool(binary_file, bone.get('skin', False))
-
-            i+=1
+        for extra_image_name in target_pngs[1:]:
+            extra_image = images[extra_image_name]
+            merged_offsets[extra_image_name] = (current_width, 0)
             
-
-        # Slots
-        write_varint(binary_file, len(slots))
-        for slot in slots:
-            # Slot name
-            write_string(binary_file, slot['name'])
-        
-            # Bone index the slot is attached to
-            bone_index = ctx.bones_name_to_index.get(slot['bone'], -1)
-            write_varint(binary_file, bone_index)
-        
-            # Slot colors
-            write_rgba(binary_file, slot.get('color'))
-            write_rgba(binary_file, slot.get('dark'))
-        
-            # Attachment name as a reference (index from the strings dict)
-            write_string_ref(binary_file, slot.get('attachment'))
-        
-            # Blend mode
-            write_varint(binary_file, blend_mode.get(slot.get('blend', 'normal').lower(), 0))
+            new_width = current_width + extra_image.width
+            max_height = max(max_height, extra_image.height)
             
-
-        # IK constraints
-        write_varint(binary_file, len(iks))
-        for ik in iks:
-            write_string(binary_file, ik.get('name'))
-            write_varint(binary_file, ik.get('order', 0))
-            write_bool(binary_file, ik.get('skin', False))
-        
-            ik_bones = ik.get('bones', [])
-            write_varint(binary_file, len(ik_bones))
-            for ik_bone in ik_bones:
-                bone_index = ctx.bones_name_to_index.get(ik_bone)
-                write_varint(binary_file, bone_index)
-               
-            target_index = ctx.bones_name_to_index.get(ik.get('target'))
-            write_varint(binary_file, target_index)
+            new_base_image = Image.new('RGBA', (new_width, max_height))
+            new_base_image.paste(base_image, (0, 0))
+            new_base_image.paste(extra_image, (current_width, 0))
             
-            write_float(binary_file, ik.get('mix', 1.0))
-            write_float(binary_file, ik.get('softness', 0.0))
-            write_sbyte(binary_file, 1 if ik.get('bendPositive', True) else -1)
-            write_bool(binary_file, ik.get('compress', False))
-            write_bool(binary_file, ik.get('stretch', False))
-            write_bool(binary_file, ik.get('uniform', False))
+            # Clean up old base_image to free memory
+            base_image.close()
+            base_image = new_base_image
+            current_width = new_width
+
+        output_image_name = f"{base_name}.png" if i == 0 else f"{base_name}_{i+1}.png"
+        output_path = os.path.join(mod_dir_path, output_image_name)
+        base_image.save(output_path)
+        base_image.close()  # Close after saving
+        report_progress(f"Saved merged image: {output_path}")
+
+        all_sprites_for_block = []
+        for original_png_name in target_pngs:
+            atlas_data = atlas_db.get(original_png_name)
+            if not atlas_data: continue
+
+            offset_x, offset_y = merged_offsets[original_png_name]
             
-
-        # Transform constraints
-        write_varint(binary_file, len(transforms))
-        for transform in transforms:
-            write_string(binary_file, transform.get('name'))
-            write_varint(binary_file, transform.get('order', 0))
-            write_bool(binary_file, transform.get('skin', False))
-        
-            transform_bones = transform.get('bones', [])
-            write_varint(binary_file, len(transform_bones))
-            for transform_bone in transform_bones:
-                bone_index = ctx.bones_name_to_index.get(transform_bone)
-                write_varint(binary_file, bone_index)
-               
-            target_index = ctx.bones_name_to_index.get(transform.get('target'))
-            write_varint(binary_file, target_index)
-            
-            write_bool(binary_file, transform.get('local', False))
-            write_bool(binary_file, transform.get('relative', False))
-            
-            write_float(binary_file, transform.get('rotation', 0.0))
-            write_float(binary_file, transform.get('x', 0.0))
-            write_float(binary_file, transform.get('y', 0.0))
-            write_float(binary_file, transform.get('scaleX', 0.0))
-            write_float(binary_file, transform.get('scaleY', 0.0))
-            write_float(binary_file, transform.get('shearY', 0.0))
-            
-            write_float(binary_file, transform.get('mixRotate', 1.0))
-            write_float(binary_file, transform.get('mixX', 1.0))
-            write_float(binary_file, transform.get('mixY', transform.get('mixX', 1.0)))
-            write_float(binary_file, transform.get('mixScaleX', 1.0))
-            write_float(binary_file, transform.get('mixScaleY', transform.get('mixScaleX', 1.0)))
-            write_float(binary_file, transform.get('mixShearY', 1.0))
-
-
-        # Path constraints
-        write_varint(binary_file, len(paths))
-        for path in paths:
-            write_string(binary_file, path.get('name'))
-            write_varint(binary_file, path.get('order', 0))
-            write_bool(binary_file, path.get('skin', False))
-        
-            path_bones = path.get('bones', [])
-            write_varint(binary_file, len(path_bones))
-            for path_bone in path_bones:
-                bone_index = ctx.bones_name_to_index.get(path_bone)
-                write_varint(binary_file, bone_index)
-               
-            target_index = ctx.slots_name_to_index.get(path.get('target'))
-            write_varint(binary_file, target_index)
-            
-            write_varint(binary_file, position_mode.get(path.get('positionMode', 'percent').lower(), 1))
-            write_varint(binary_file, spacing_mode.get(path.get('spacingMode', 'length').lower(), 0))
-            write_varint(binary_file, rotate_mode.get(path.get('rotateMode', 'tangent').lower(), 0))
-            
-            write_float(binary_file, path.get('rotation', 0.0))
-            write_float(binary_file, path.get('position', 0.0))
-            write_float(binary_file, path.get('spacing', 0.0))
-            
-            write_float(binary_file, path.get('mixRotate', 1.0))
-            write_float(binary_file, path.get('mixX', 1.0))
-            write_float(binary_file, path.get('mixY', path.get('mixX', 1.0)))
-            
-        # Skins
-        default_skin = next((s for s in skins if s.get('name') == 'default'), None)
-        if default_skin == None:
-            write_varint(binary_file, 0)
-        else:
-            skin_attachments = default_skin.get('attachments', {})
-            write_varint(binary_file, len(skin_attachments))
-            for key, entry in skin_attachments.items():
-                write_varint(binary_file, ctx.slots_name_to_index.get(key))
-                write_varint(binary_file, len(entry))   
-                for name, attachment in entry.items():
-                    write_string_ref(binary_file, name)
-                    write_attachment(binary_file, attachment, name)
-                    
-        # No other skin, at least with BD2   
-        write_varint(binary_file, 0)
-        
-        # Events
-        # o = skeletonData.events.Resize(n = input.ReadInt(true)).Items;
-        # for (int i = 0; i < n; i++) {
-        #     EventData data = new EventData(input.ReadStringRef());
-        #     data.Int = input.ReadInt(false);
-        #     data.Float = input.ReadFloat();
-        #     data.String = input.ReadString();
-        #     data.AudioPath = input.ReadString();
-        #     if (data.AudioPath != null) {
-        #         data.Volume = input.ReadFloat();
-        #         data.Balance = input.ReadFloat();
-        #     }
-        #     o[i] = data;
-        # }
-        # No events, at least with BD2
-        write_varint(binary_file, 0)
-        
-        # Animations
-        # This took a while to reverse
-        write_varint(binary_file, len(animations))
-        for name, animation in animations.items():
-            write_string(binary_file, name)
-            write_animation(binary_file, name, animation)
-
-def count_animation_timelines(animation):
-    count = 0
-
-    slots = animation.get('slots', {})
-    if isinstance(slots, dict):
-        for timelines in slots.values():
-            if isinstance(timelines, dict):
-                count += len(timelines)
-
-    bones = animation.get('bones', {})
-    if isinstance(bones, dict):
-        for timelines in bones.values():
-            if isinstance(timelines, dict):
-                count += len(timelines)
-
-    iks = animation.get('ik', {})
-    if isinstance(iks, dict):
-        count += len(iks)
-
-    transforms = animation.get('transform', {})
-    if isinstance(transforms, dict):
-        count += len(transforms)
-
-    paths = animation.get('path', {})
-    if isinstance(paths, dict):
-        for timelines in paths.values():
-            if isinstance(timelines, dict):
-                count += len(timelines)
-
-    attachments = animation.get('attachments', {})
-    if isinstance(attachments, dict):
-        for skin in attachments.values():
-            if not isinstance(skin, dict):
-                continue
-            for slot in skin.values():
-                if not isinstance(slot, dict):
-                    continue
-                for attachment in slot.values():
-                    if isinstance(attachment, dict):
-                        count += len(attachment)
-
-    draw_order = animation.get('drawOrder')
-    if draw_order:
-        count += 1
-
-    events = animation.get('events')
-    if events:
-        count += 1
-
-    return count
-
-def write_animation(binary_file, name, animation):
-    ctx = _get_context()
-    timeline_count = count_animation_timelines(animation)
-    write_varint(binary_file, timeline_count)
-
-    # Slots timelines
-    slots = animation.get('slots', {})
-    write_varint(binary_file, len(slots))
-    for name, slot in slots.items():
-        slot_index = ctx.slots_name_to_index.get(name)
-        write_varint(binary_file, slot_index)
-        write_varint(binary_file, len(slot))
-        for ttype, frames in slot.items():
-            timeline_type = timeline_slot_type.get(ttype.lower(), -1)
-            write_varint(binary_file, timeline_type)
-            frames_count = len(frames)
-            write_varint(binary_file, frames_count)
-            
-            if frames_count == 0:
-                continue
-            
-            # attachment
-            if timeline_type == 0:
-                for frame in frames:
-                    write_float(binary_file, frame.get('time', 0.0))
-                    write_string_ref(binary_file, frame.get('name'))
-            # rgba
-            elif timeline_type == 1:
-                bezier = int(sum(len(f.get('curve')) for f in frames if f.get('curve') and not isinstance(f.get('curve'), str)) / 4)
-                write_varint(binary_file, bezier)
-                for index in range(len(frames)):
-                    frame = frames[index]
-                    write_float(binary_file, frame.get('time', 0.0))
-                    write_rgba(binary_file, frame.get('color'))
-                    if index == 0:
-                        continue
-                    previous_frame = frames[index - 1]
-                    curve = previous_frame.get('curve', 'linear')
-                    if isinstance(curve, str):
-                        write_byte(binary_file, timeline_curve_type.get(curve, 0))
-                    else:
-                        write_byte(binary_file, timeline_curve_type.get('bezier'))
-                        for c in curve:
-                            write_float(binary_file, c)
-            # rgb
-            elif timeline_type == 2:
-                bezier = int(sum(len(f.get('curve')) for f in frames if f.get('curve') and not isinstance(f.get('curve'), str)) / 4)
-                write_varint(binary_file, bezier)
-                for index in range(len(frames)):
-                    frame = frames[index]
-                    write_float(binary_file, frame.get('time', 0.0))
-                    write_rgb(binary_file, frame.get('color'))
-                    if index == 0:
-                        continue
-                    previous_frame = frames[index - 1]
-                    curve = previous_frame.get('curve', 'linear')
-                    if isinstance(curve, str):
-                        write_byte(binary_file, timeline_curve_type.get(curve, 0))
-                    else:
-                        write_byte(binary_file, timeline_curve_type.get('bezier'))
-                        for c in curve:
-                            write_float(binary_file, c)
-            # rgba2
-            elif timeline_type == 3:
-                bezier = int(sum(len(f.get('curve')) for f in frames if f.get('curve') and not isinstance(f.get('curve'), str)) / 4)
-                write_varint(binary_file, bezier)
-                for index in range(len(frames)):
-                    frame = frames[index]
-                    write_float(binary_file, frame.get('time', 0.0))
-                    write_rgba(binary_file, frame.get('light'))
-                    write_rgb(binary_file, frame.get('dark'))
-                    if index == 0:
-                        continue
-                    previous_frame = frames[index - 1]
-                    curve = previous_frame.get('curve', 'linear')
-                    if isinstance(curve, str):
-                        write_byte(binary_file, timeline_curve_type.get(curve, 0))
-                    else:
-                        write_byte(binary_file, timeline_curve_type.get('bezier'))
-                        for c in curve:
-                            write_float(binary_file, c)
-
-            # rgb2 (RGB + RGB)
-            elif timeline_type == 4:
-                bezier = int(sum(len(f.get('curve')) for f in frames if f.get('curve') and not isinstance(f.get('curve'), str)) / 4)
-                write_varint(binary_file, bezier)
-                for index in range(len(frames)):
-                    frame = frames[index]
-                    write_float(binary_file, frame.get('time', 0.0))
-                    write_rgb(binary_file, frame.get('light'))
-                    write_rgb(binary_file, frame.get('dark'))
-                    if index == 0:
-                        continue
-                    previous_frame = frames[index - 1]
-                    curve = previous_frame.get('curve', 'linear')
-                    if isinstance(curve, str):
-                        write_byte(binary_file, timeline_curve_type.get(curve, 0))
-                    else:
-                        write_byte(binary_file, timeline_curve_type.get('bezier'))
-                        for c in curve:
-                            write_float(binary_file, c)
-
-            # alpha (binary stores values as 1 byte 0..255)
-            elif timeline_type == 5:
-                bezier = int(sum(len(f.get('curve')) for f in frames if f.get('curve') and not isinstance(f.get('curve'), str)) / 4)
-                write_varint(binary_file, bezier)
-                for index in range(len(frames)):
-                    frame = frames[index]
-                    write_float(binary_file, frame.get('time', 0.0))
-                    val = frame.get('value', 0.0)
-                    try:
-                        b = int(max(0.0, min(1.0, float(val))) * 255 + 0.5)
-                    except Exception:
-                        b = 0
-                    write_byte(binary_file, b)
-                    if index == 0:
-                        continue
-                    previous_frame = frames[index - 1]
-                    curve = previous_frame.get('curve', 'linear')
-                    if isinstance(curve, str):
-                        write_byte(binary_file, timeline_curve_type.get(curve, 0))
-                    else:
-                        write_byte(binary_file, timeline_curve_type.get('bezier'))
-                        for c in curve:
-                            write_float(binary_file, c)
-                            
-    # Bones timelines
-    bones = animation.get('bones', {})
-    write_varint(binary_file, len(bones))
-    for name, bone in bones.items():
-        bone_index = ctx.bones_name_to_index.get(name)
-        write_varint(binary_file, bone_index)
-        write_varint(binary_file, len(bone))
-        for ttype, frames in bone.items():
-            timeline_type = timeline_bone_type.get(ttype.lower(), -1)
-            write_varint(binary_file, timeline_type)
-            frames_count = len(frames)
-            write_varint(binary_file, frames_count)
-            
-            bezier = int(sum(len(f.get('curve')) for f in frames if f.get('curve') and not isinstance(f.get('curve'), str)) / 4)
-            write_varint(binary_file, bezier)
-            if frames_count == 0:
-                continue          
-            
-            for index in range(len(frames)):
-                frame = frames[index]
-                write_float(binary_file, frame.get('time', 0.0))
-                
-                # default for scale, scaleX and scaleY is 1.0
-                default_value = 1.0 if timeline_type in [4, 5, 6] else 0.0
-                
-                # translate, scale or shear will use both "x" and "y"
-                if timeline_type in [1, 4, 7]:
-                    write_float(binary_file, frame.get('x', default_value))
-                    write_float(binary_file, frame.get('y', default_value))
-                # rest uses "value"
-                else:
-                    write_float(binary_file, frame.get('value', default_value))
-                
-                # first frame, no curve
-                if index == 0:
-                    continue
-                
-                previous_frame = frames[index - 1]
-                curve = previous_frame.get('curve', 'linear')
-                if isinstance(curve, str):
-                    write_byte(binary_file, timeline_curve_type.get(curve, 0))
-                else:
-                    write_byte(binary_file, timeline_curve_type.get('bezier'))
-                    for c in curve:
-                        write_float(binary_file, c)
-        
-    # IK constraint timelines
-    iks = animation.get('ik', {})
-    write_varint(binary_file, len(iks))
-    for name, ik in iks.items():
-        ik_index = ctx.iks_name_to_index.get(name)
-        write_varint(binary_file, ik_index)
-        frames_count = len(ik)
-        write_varint(binary_file, frames_count)
-        
-        bezier = int(sum(len(f.get('curve')) for f in ik if f.get('curve') and not isinstance(f.get('curve'), str)) / 4)
-        write_varint(binary_file, bezier)
-        
-        write_float(binary_file, ik[0].get('time', 0.0))
-        write_float(binary_file, ik[0].get('mix', 1.0))
-        write_float(binary_file, ik[0].get('softness', 0.0))
-        for index in range(frames_count):
-            frame = ik[index]
-            write_sbyte(binary_file, 1 if frame.get('bendPositive', True) else -1)
-            write_bool(binary_file, frame.get('compress', False))
-            write_bool(binary_file, frame.get('stretch', False))
-            
-            if index == frames_count - 1:
-                break
-            
-            next_frame = ik[index + 1]
-            write_float(binary_file, next_frame.get('time', 0.0))
-            write_float(binary_file, next_frame.get('mix', 1.0))
-            write_float(binary_file, next_frame.get('softness', 0.0))
-            
-            curve = frame.get('curve', 'linear')
-            if isinstance(curve, str):
-                write_byte(binary_file, timeline_curve_type.get(curve, 0))
+            if offset_x == 0 and offset_y == 0:
+                all_sprites_for_block.append(atlas_data['sprites'])
             else:
-                write_byte(binary_file, timeline_curve_type.get('bezier'))
-                for c in curve:
-                    write_float(binary_file, c)
-                    
-    # Transform constraint timelines
-    transforms = animation.get('transform', {})
-    write_varint(binary_file, len(transforms))
-    for name, transform in transforms.items():
-        transform_index = ctx.transforms_name_to_index.get(name)
-        write_varint(binary_file, transform_index)
-        frames_count = len(transform)
-        write_varint(binary_file, frames_count)
+                modified_sprites = []
+                for line in atlas_data['sprites'].split('\n'):
+                    if line.strip().startswith('bounds:'):
+                        try:
+                            parts = line.strip().split(':')
+                            coords = parts[1].strip().split(',')
+                            x, y, w, h = [int(c.strip()) for c in coords]
+                            x += offset_x
+                            y += offset_y
+                            modified_sprites.append(f" bounds: {x},{y},{w},{h}")
+                        except: modified_sprites.append(line)
+                    else: modified_sprites.append(line)
+                all_sprites_for_block.append('\n'.join(modified_sprites))
+
+        filter_line = atlas_db[target_pngs[0]]['filter_line']
+        new_block = [
+            output_image_name,
+            f" size: {base_image.width},{base_image.height}",
+            filter_line,
+            '\n'.join(all_sprites_for_block)
+        ]
+        final_atlas_blocks.append('\n'.join(new_block))
+    
+    final_atlas_path = os.path.join(mod_dir_path, f"{base_name}.atlas")
+    with open(final_atlas_path, 'w', encoding='utf-8') as f:
+        f.write('\n\n'.join(final_atlas_blocks))
+    report_progress(f"Wrote final atlas file to: {final_atlas_path}")
+    
+    # Clean up images dict to free memory
+    for img in images.values():
+        img.close()
+    del images
+    
+    # Clean up old, unmerged png files
+    report_progress("Cleaning up original, unmerged texture files...")
+    for png_path in original_png_files:
+        try:
+            # Check if the file is one of the NEWLY created merged files.
+            # If so, don't delete it.
+            if os.path.basename(png_path) not in [f"{base_name}.png" if i == 0 else f"{base_name}_{i+1}.png" for i in range(target_count)]:
+                os.remove(png_path)
+        except OSError as e:
+            report_progress(f"Could not delete old file {png_path}: {e}")
+            
+    return None
+
+from utils.file_operations import find_file_case_insensitive
+
+def compress_image_astc(image_bytes, width, height, block_x, block_y):
+    astcenc = _load_astcenc_library()
+    if not astcenc:
+        return None, "libastcenc.so could not be loaded."
         
-        bezier = int(sum(len(f.get('curve')) for f in transform if f.get('curve') and not isinstance(f.get('curve'), str)) / 4)
-        write_varint(binary_file, bezier)
+    ASTCENC_SUCCESS = _astcenc_structures['ASTCENC_SUCCESS']
+    ASTCENC_PRF_LDR_SRGB = _astcenc_structures['ASTCENC_PRF_LDR_SRGB']
+    ASTCENC_PRE_MEDIUM = _astcenc_structures['ASTCENC_PRE_MEDIUM']
+    ASTCENC_TYPE_U8 = _astcenc_structures['ASTCENC_TYPE_U8']
+    ASTCENC_FLG_USE_DECODE_UNORM8 = _astcenc_structures['ASTCENC_FLG_USE_DECODE_UNORM8']
+    astcenc_config = _astcenc_structures['astcenc_config']
+    astcenc_image = _astcenc_structures['astcenc_image']
+    astcenc_swizzle = _astcenc_structures['astcenc_swizzle']
+
+    config = astcenc_config()
+    quality = ASTCENC_PRE_MEDIUM
+    profile = ASTCENC_PRF_LDR_SRGB
+    flags = ASTCENC_FLG_USE_DECODE_UNORM8
+    status = astcenc.astcenc_config_init(profile, block_x, block_y, 1, quality, flags, byref(config))
+    if status != ASTCENC_SUCCESS:
+        return None, f"astcenc_config_init failed: {get_error_string(astcenc, status)}"
+
+    context = c_void_p()
+    thread_count = os.cpu_count() or 1
+    status = astcenc.astcenc_context_alloc(byref(config), thread_count, byref(context))
+    if status != ASTCENC_SUCCESS:
+        return None, f"astcenc_context_alloc failed: {get_error_string(astcenc, status)}"
+
+    image_data_p = (c_void_p * 1)()
+    image_data_p[0] = ctypes.cast(image_bytes, c_void_p)
+
+    image = astcenc_image()
+    image.dim_x = width
+    image.dim_y = height
+    image.dim_z = 1
+    image.data_type = ASTCENC_TYPE_U8
+    image.data = image_data_p
+
+    swizzle = astcenc_swizzle(r=0, g=1, b=2, a=3)
+
+    blocks_x = (width + block_x - 1) // block_x
+    blocks_y = (height + block_y - 1) // block_y
+    buf_size = blocks_x * blocks_y * 16
+    comp_buf = (c_ubyte * buf_size)()
+
+    status = astcenc.astcenc_compress_image(context, byref(image), byref(swizzle), comp_buf, buf_size, 0)
+    
+    astcenc.astcenc_context_free(context)
+
+    if status != ASTCENC_SUCCESS:
+        return None, f"astcenc_compress_image failed: {get_error_string(astcenc, status)}"
+
+    return bytes(comp_buf), None
+
+
+def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_path: str, use_astc: bool, progress_callback=None):
+    def report_progress(message):
+        if progress_callback:
+            progress_callback(message)
+        print(message)
         
-        write_float(binary_file, transform[0].get('time', 0.0))
-        write_float(binary_file, transform[0].get('mixRotate', 1.0))
-        write_float(binary_file, transform[0].get('mixX', 1.0))
-        write_float(binary_file, transform[0].get('mixY', transform[0].get('mixX', 1.0)))
-        write_float(binary_file, transform[0].get('mixScaleX', 1.0))
-        write_float(binary_file, transform[0].get('mixScaleY', transform[0].get('mixScaleX', 1.0)))
-        write_float(binary_file, transform[0].get('mixShearY', 1.0))
-        
-        for index in range(frames_count):
-            frame = transform[index]
-            
-            if index == frames_count - 1:
-                break
-            
-            next_frame = transform[index + 1]
-            write_float(binary_file, next_frame.get('time', 0.0))
-            write_float(binary_file, next_frame.get('mixRotate', 1.0))
-            write_float(binary_file, next_frame.get('mixX', 1.0))
-            write_float(binary_file, next_frame.get('mixY', next_frame.get('mixX', 1.0)))
-            write_float(binary_file, next_frame.get('mixScaleX', 1.0))
-            write_float(binary_file, next_frame.get('mixScaleY', next_frame.get('mixScaleX', 1.0)))
-            write_float(binary_file, next_frame.get('mixShearY', 1.0))
-            
-            curve = frame.get('curve', 'linear')
-            if isinstance(curve, str):
-                write_byte(binary_file, timeline_curve_type.get(curve, 0))
-            else:
-                write_byte(binary_file, timeline_curve_type.get('bezier'))
-                for c in curve:
-                    write_float(binary_file, c)
-                    
-    # Path constraint timelines
-    paths = animation.get('path', {})\n    write_varint(binary_file, len(paths))
-    for name, path in paths.items():
-        path_index = ctx.paths_name_to_index.get(name)
-        write_varint(binary_file, path_index)
-        write_varint(binary_file, len(path))
-        for ttype, frames in path.items():
-            timeline_type = timeline_path_type.get(ttype.lower(), -1)
-            write_varint(binary_file, timeline_type)
-            frames_count = len(frames)
-            write_varint(binary_file, frames_count)
-            
-            bezier = int(sum(len(f.get('curve')) for f in frames if f.get('curve') and not isinstance(f.get('curve'), str)) / 4)
-            write_varint(binary_file, bezier)
-            
-            for index in range(len(frames)):
-                frame = frames[index]
-                
-                # Position or Spacing
-                if timeline_type == 0 or timeline_type == 1:
-                    write_float(binary_file, frame.get('time', 0.0))
-                    write_float(binary_file, frame.get('value', 0.0))
-                    
-                # Mix
-                elif timeline_type == 2:
-                    write_float(binary_file, frame.get('time', 0.0))
-                    write_float(binary_file, frame.get('mixRotate', 1.0))
-                    write_float(binary_file, frame.get('mixX', 1.0))
-                    write_float(binary_file, frame.get('mixY', frame.get('mixX', 1.0)))
-                    
-                # first frame, no curve
-                if index == 0:
-                    continue
-                
-                previous_frame = frames[index - 1]
-                curve = previous_frame.get('curve', 'linear')
-                if isinstance(curve, str):
-                    write_byte(binary_file, timeline_curve_type.get(curve, 0))
+    env = None
+    temp_dir_obj = None
+    try:
+        temp_dir_obj = tempfile.TemporaryDirectory()
+        working_dir = os.path.join(temp_dir_obj.name, "mod")
+        report_progress(f"Using temporary directory: {working_dir}")
+        shutil.copytree(modded_assets_folder, working_dir)
+
+        report_progress("Loading original game file...")
+        env = UnityPy.load(original_bundle_path)
+        edited = False
+
+        # --- Pre-processing Step: Scan for all unique spine mods and their paths ---
+        spine_mods_to_process = {}  # base_name -> directory_path
+        for root, _, files in os.walk(working_dir):
+            if '.old' in root:
+                continue
+            for f in files:
+                if f.lower().endswith(('.skel', '.json')):
+                    base_name = os.path.splitext(f)[0]
+                    if base_name not in spine_mods_to_process:
+                        spine_mods_to_process[base_name] = root
+
+        if spine_mods_to_process:
+            report_progress(f"Detected {len(spine_mods_to_process)} unique Spine mods for pre-processing: {list(spine_mods_to_process.keys())}")
+            for spine_base_name, mod_dir_path in spine_mods_to_process.items():
+                report_progress(f"--- Processing: {spine_base_name} ---")
+                pattern = re.compile(f"^{re.escape(spine_base_name)}(_\\d+)?$", re.IGNORECASE)
+
+                original_texture_count = 0
+                for obj in env.objects:
+                    if obj.type.name == "Texture2D":
+                        try:
+                            asset_name = obj.read().m_Name
+                            if pattern.match(asset_name):
+                                original_texture_count += 1
+                        except Exception as e:
+                            report_progress(f"Couldn't read asset name, skipping. Error: {e}")
+
+                report_progress(f"Found {original_texture_count} matching textures in the original game file for {spine_base_name}.")
+
+                mod_texture_count = len(glob.glob(os.path.join(mod_dir_path, f'{spine_base_name}*.png')))
+                report_progress(f"Mod has {mod_texture_count} textures for {spine_base_name}.")
+
+                if mod_texture_count > original_texture_count and original_texture_count > 0:
+                    report_progress("Mod texture count exceeds original, starting merge process into temp directory...")
+                    merge_error = _merge_spine_assets(mod_dir_path, spine_base_name, original_texture_count, report_progress)
+
+                    if merge_error:
+                        report_progress(f"ERROR during merge for {spine_base_name}: {merge_error}.")
+                    else:
+                        report_progress(f"Merge successful for {spine_base_name}.")
                 else:
-                    write_byte(binary_file, timeline_curve_type.get('bezier'))
-                    for c in curve:
-                        write_float(binary_file, c)
-    
-    # Attachment timelines
-    attachments = animation.get('attachments', {})
-    write_varint(binary_file, len(attachments))
-    for skin_name, skin in attachments.items():
-        skin_index = ctx.skins_name_to_index.get(skin_name)
-        write_varint(binary_file, skin_index)
-        write_varint(binary_file, len(skin))
-        for slot_name, slot in skin.items():
-            slot_index = ctx.slots_name_to_index.get(slot_name)
-            write_varint(binary_file, slot_index)
-            write_varint(binary_file, len(slot))
-            for name, attachment in slot.items():
-                for ttype, frames in attachment.items():
-                    write_string_ref(binary_file, name)
-                    timeline_type = timeline_attachment_type.get(ttype.lower(), -1)
-                    write_varint(binary_file, timeline_type)
-                    frames_count = len(frames)
-                    write_varint(binary_file, frames_count)
+                    report_progress("Texture count matches or is lower, no merge needed.")
+
+        report_progress("Scanning for moddable assets...")
+        
+        # Build asset_map more efficiently
+        total_objects = len(env.objects)
+        asset_map = {}
+        for obj in env.objects:
+            try:
+                data = obj.read()
+                if hasattr(data, 'm_Name'):
+                    asset_map[data.m_Name.lower()] = obj
+            except Exception:
+                pass  # Skip objects that can't be read
+
+        mod_files = []
+        for root, _, files in os.walk(working_dir):
+            if '.old' in root:
+                continue
+            for f in files:
+                mod_files.append(os.path.join(root, f))
+
+        total_assets = len(mod_files)
+        for i, mod_filepath in enumerate(mod_files):
+            mod_filename = os.path.basename(mod_filepath)
+            current_progress = f"({i+1}/{total_assets}) "
+
+            try:
+                if mod_filename.lower().endswith('.json'):
+                    base_name, _ = os.path.splitext(mod_filename)
+                    target_asset_name = (base_name + ".skel").lower()
                     
-                    # Deform
-                    if timeline_type == 0:
-                        bezier = int(sum(len(f.get('curve')) for f in frames if f.get('curve') and not isinstance(f.get('curve'), str)) / 4)
-                        write_varint(binary_file, bezier)
-            
-                        write_float(binary_file, frames[0].get('time', 0.0))
-                        for index in range(len(frames)):
-                            frame = frames[index]
-                            vertices = frame.get('vertices', [])
-                            end = len(vertices)
+                    if target_asset_name in asset_map:
+                        report_progress(f"{current_progress}Converting and replacing animation: {mod_filename}")
+                        obj = asset_map[target_asset_name]
+                        data = obj.read()
+
+                        # Use PID + timestamp for unique temp file to avoid conflicts in concurrent execution
+                        pid = os.getpid()
+                        timestamp = int(time.time() * 1000000)  # Microsecond precision
+                        temp_skel_filename = f"skel_{pid}_{timestamp}_{base_name}.tmp"
+                        temp_skel_path = os.path.join(tempfile.gettempdir(), temp_skel_filename)
+                        
+                        try:
+                            json_to_skel(mod_filepath, temp_skel_path)
                             
-                            write_varint(binary_file, end)
+                            # Verify the file was created successfully
+                            if not os.path.exists(temp_skel_path):
+                                report_progress(f"{current_progress}ERROR: json_to_skel did not create output file for {mod_filename}")
+                                continue
                             
-                            if end != 0:
-                                start = frame.get('offset', 0)
-                                write_varint(binary_file, start)
-                                for vertex in vertices:
-                                    write_float(binary_file, vertex)
+                            with open(temp_skel_path, 'rb') as f:
+                                skel_binary_data = f.read()
+                            
+                            if not skel_binary_data:
+                                report_progress(f"{current_progress}ERROR: json_to_skel created empty file for {mod_filename}")
+                                continue
+                            
+                            data.m_Script = skel_binary_data.decode("utf-8", "surrogateescape")
+                            data.save()
+                            edited = True
+                            report_progress(f"{current_progress}Successfully replaced animation for {mod_filename}")
+                        except Exception as e:
+                            report_progress(f"{current_progress}ERROR converting {mod_filename}: {e}")
+                            import traceback
+                            report_progress(traceback.format_exc())
+                        finally:
+                            # Clean up temp file
+                            if os.path.exists(temp_skel_path):
+                                try:
+                                    os.remove(temp_skel_path)
+                                except Exception as e:
+                                    report_progress(f"{current_progress}Warning: Could not remove temp file {temp_skel_path}: {e}")
+                    continue
+
+                if mod_filename.lower().endswith('.png'):
+                    target_asset_name = os.path.splitext(mod_filename)[0].lower()
+                    if target_asset_name in asset_map:
+                        obj = asset_map[target_asset_name]
+                        if obj.type.name == "Texture2D":
+                            report_progress(f"{current_progress}Replacing texture: {mod_filename}")
+                            data = obj.read()
+                            
+                            # Use context manager equivalent for PIL Image
+                            pil_img = None
+                            try:
+                                pil_img = Image.open(mod_filepath).convert("RGBA")
+
+                                if use_astc:
+                                    flipped_img = pil_img.transpose(Image.FLIP_TOP_BOTTOM)
+                                    report_progress(f"{current_progress}Compressing texture to ASTC: {mod_filename}")
+                                    block_x, block_y = 4, 4
+                                    compressed_data, err = compress_image_astc(flipped_img.tobytes(), pil_img.width, pil_img.height, block_x, block_y)
                                     
-                            if index == frames_count - 1:
-                                break
-                            
-                            write_float(binary_file, frames[index + 1].get('time', 0.0))
-                
-                            curve = frame.get('curve', 'linear')
-                            if isinstance(curve, str):
-                                write_byte(binary_file, timeline_curve_type.get(curve, 0))
-                            else:
-                                write_byte(binary_file, timeline_curve_type.get('bezier'))
-                                for c in curve:
-                                    write_float(binary_file, c)
-                                    
-    # Draw order timelines
-    draw_order = animation.get('drawOrder', {})
-    write_varint(binary_file, len(draw_order))
-    for draw in draw_order:
-        write_float(binary_file, draw.get('time', 0.0))
-        offsets = draw.get('offsets', [])
-        write_varint(binary_file, len(offsets))
+                                    flipped_img.close()
+                                    del flipped_img
+                                    gc.collect()
+
+                                    if err:
+                                        report_progress(f"ERROR: ASTC compression failed for {mod_filename}: {err}")
+                                        continue
+
+                                    data.m_TextureFormat = 48
+                                    data.image_data = compressed_data
+                                    data.m_CompleteImageSize = len(compressed_data)
+                                else:
+                                    report_progress(f"{current_progress}Using uncompressed RGBA32 for texture: {mod_filename}")
+                                    data.m_TextureFormat = 4
+                                    data.image = pil_img
+
+                                data.m_Width, data.m_Height = pil_img.size
+                                data.m_MipCount = 1
+                                data.m_StreamData.offset = 0
+                                data.m_StreamData.size = 0
+                                data.m_StreamData.path = ""
+                                data.save()
+                                edited = True
+                            finally:
+                                if pil_img:
+                                    pil_img.close()
+                                    del pil_img
+
+                    continue
+
+                target_asset_name = mod_filename.lower()
+                if target_asset_name in asset_map:
+                    obj = asset_map[target_asset_name]
+                    if obj.type.name == "TextAsset":
+                        report_progress(f"{current_progress}Replacing asset: {mod_filename}")
+                        data = obj.read()
+                        with open(mod_filepath, "rb") as f:
+                            data.m_Script = f.read().decode("utf-8", "surrogateescape")
+                        data.save()
+                        edited = True
+
+            except Exception as e:
+                import traceback
+                report_progress(f"Error processing asset {mod_filename}: {traceback.format_exc()}")
         
-        for offset in offsets:
-            slot_index = ctx.slots_name_to_index.get(offset.get('slot'))
-            write_varint(binary_file, slot_index)
-            write_varint(binary_file, int(offset.get('offset')))
-            
-    # Event timelines
-    draw_order = animation.get('events', {})
-    write_varint(binary_file, len(draw_order))
+        del asset_map
+        del mod_files
+        gc.collect()
 
-
-
-
-def write_attachment(binary_file, attachment, name):
-    write_string_ref(binary_file, attachment.get('name'))
-    attach_type = attachment_type.get(attachment.get('type', 'region').lower())
-    write_byte(binary_file, attach_type)
-    
-    # Region
-    if attach_type == 0:
-        write_string_ref(binary_file, attachment.get('path'))
-        write_float(binary_file, attachment.get('rotation', 0.0))
-        write_float(binary_file, attachment.get('x', 0.0))
-        write_float(binary_file, attachment.get('y', 0.0))
-        write_float(binary_file, attachment.get('scaleX', 1.0))
-        write_float(binary_file, attachment.get('scaleY', 1.0))
-        write_float(binary_file, attachment.get('width', 32.0))
-        write_float(binary_file, attachment.get('height', 32.0))
-        write_rgba(binary_file, attachment.get('color'))
-        write_sequence(binary_file, attachment.get('sequence'))
-
-    # Boundingbox
-    elif attach_type == 1:
-        vertex_count = attachment.get('vertexCount', 0)
-        write_varint(binary_file, vertex_count)
-        write_vertices(binary_file, attachment, vertex_count)
-    
-    # Mesh
-    elif attach_type == 2:
-        write_string_ref(binary_file, attachment.get('path'))
-        write_rgba(binary_file, attachment.get('color'))
-        
-        uvs = attachment.get('uvs', [])
-        vertex_count = int(len(uvs) / 2)
-        write_varint(binary_file, vertex_count)
-        for uv in uvs:
-            write_float(binary_file, uv)
-        triangles = attachment.get('triangles', [])
-        write_short_array(binary_file, triangles)
-        write_vertices(binary_file, attachment, vertex_count)
-        write_varint(binary_file, attachment.get('hull', 0))
-        write_sequence(binary_file, attachment.get('sequence'))
-        
-    # Linkedmesh
-    elif attach_type == 3:
-        write_string_ref(binary_file, attachment.get('path'))
-        write_rgba(binary_file, attachment.get('color'))
-        write_string_ref(binary_file, attachment.get('skin'))
-        write_string_ref(binary_file, attachment.get('parent'))
-            
-        write_bool(binary_file, attachment.get('timelines', True))
-        write_sequence(binary_file, attachment.get('sequence'))
-    
-    # Path
-    elif attach_type == 4:
-        write_bool(binary_file, attachment.get('closed', False))
-        write_bool(binary_file, attachment.get('constantSpeed', True))
-        vertex_count = attachment.get('vertexCount', 0)
-        write_varint(binary_file, vertex_count)
-        write_vertices(binary_file, attachment, vertex_count)
-        for length in attachment.get('lengths', []):
-            write_float(binary_file, length)
-
-    # Point
-    elif attach_type == 5:
-        write_float(binary_file, attachment.get('rotation', 0.0))
-        write_float(binary_file, attachment.get('x', 0.0))
-        write_float(binary_file, attachment.get('y', 0.0))
-        
-    # Clipping
-    elif attach_type == 6:
-        ctx = _get_context()
-        write_varint(binary_file, ctx.slots_name_to_index.get(attachment.get('end'), 0))
-        vertex_count = attachment.get('vertexCount', 0)
-        write_varint(binary_file, vertex_count)
-        write_vertices(binary_file, attachment, vertex_count)
-
-
-
-
-def write_sequence(binary_file, sequence):
-    if sequence == None:
-        write_bool(binary_file, False)
-        return
-    
-    write_bool(binary_file, True)
-    write_varint(binary_file, sequence.get('count'))
-    write_varint(binary_file, sequence.get('start', 1))
-    write_varint(binary_file, sequence.get('digits', 0))
-    write_varint(binary_file, sequence.get('setup', 0))
-    
-
-def write_vertices(binary_file, attachment, vertex_count):
-    vertex_length = vertex_count * 2
-    vertices = attachment.get('vertices', [])
-    if (len(vertices) == vertex_length):
-        write_bool(binary_file, False)
-        for vertex in vertices:
-            write_float(binary_file, vertex)
-    else:
-        write_bool(binary_file, True)
-        i = 0
-        l = len(vertices)
-        while i < l:
-            bone_count = int(vertices[i])
-            i += 1
-            write_varint(binary_file, bone_count)
-            ll = i + bone_count * 4
-            while i < ll:
-                write_varint(binary_file, int(vertices[i]))
-                i += 1
-                write_float(binary_file, vertices[i])
-                i += 1
-                write_float(binary_file, vertices[i])
-                i += 1
-                write_float(binary_file, vertices[i])
-                i += 1
-
-
-def write_rgba(binary_file, color, default='ffffffff'):
-    color = int(color or default, 16)  # Parse the color as a 32-bit hex value
-    r = (color >> 24) & 0xFF  # Extract the red byte
-    g = (color >> 16) & 0xFF  # Extract the green byte
-    b = (color >> 8) & 0xFF   # Extract the blue byte
-    a = color & 0xFF          # Extract the alpha byte
-
-    # Write each byte as a separate value
-    write_byte(binary_file, r)
-    write_byte(binary_file, g)
-    write_byte(binary_file, b)
-    write_byte(binary_file, a)
-    
-def write_rgb(binary_file, color, default='ffffff'):
-    color = int(color or default, 16)  # Parse the color as a 24-bit hex value
-    
-    # Extract RGB components
-    r = (color >> 16) & 0xFF  # Extract the red byte
-    g = (color >> 8) & 0xFF   # Extract the green byte
-    b = color & 0xFF          # Extract the blue byte
-
-    # Write each byte as a separate value
-    write_byte(binary_file, r)
-    write_byte(binary_file, g)
-    write_byte(binary_file, b)
-
-    
-# Write strings with length prefix
-def write_string(binary_file, string):
-    if string is None:
-        write_varint(binary_file, 0)
-    elif string == "":
-        write_varint(binary_file, 1)
-    else:
-        byte_string = string.encode('utf-8')
-        write_varint(binary_file, len(byte_string) + 1)
-        binary_file.write(byte_string)
-        
-# Write index to the string dictionary
-def write_string_ref(binary_file, string):
-    ctx = _get_context()
-    if string is None:
-        write_varint(binary_file, 0)
-    else:
-        index = ctx.strings_name_to_index.get(string, -1) + 1
-        write_varint(binary_file, index)
-    
-def write_byte(binary_file, value):
-    binary_file.write(struct.pack('B', value))
-    
-def write_sbyte(binary_file, value):
-    if not -128 <= value <= 127:
-        raise ValueError("Value out of range for sbyte: must be between -128 and 127")
-    binary_file.write(struct.pack('b', value))
-    
-def write_bool(binary_file, value):
-    binary_file.write(struct.pack('>?', value))
-    
-def write_int(binary_file, value):
-    if value > 0x7FFFFFFF:
-        value -= 0x100000000
-    binary_file.write(struct.pack('>i', value))
-        
-def write_varint(binary_file, value, optimize_positive=True):
-    if not optimize_positive:
-        value = (value << 1) ^ (value >> 31)
-    value &= 0xFFFFFFFF
-
-    while True:
-        byte = value & 0x7F
-        value >>= 7
-        if value:
-            binary_file.write(struct.pack('B', byte | 0x80))
+        if edited:
+            report_progress("Saving modified game file...")
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            try:
+                with open(output_path, "wb") as f:
+                    env.file.save(f, packer="lz4")
+                report_progress("Saved successfully!")
+                return True
+            except Exception as e:
+                report_progress(f"Error saving bundle: {e}")
+                return False
         else:
-            binary_file.write(struct.pack('B', byte))
-            break
+            report_progress("No modifications were made.")
+            return False
 
-def write_short_array(binary_file, short_array):
-    # Write the length of the array as a varint
-    write_varint(binary_file, len(short_array))
-
-    for value in short_array:
-        if not -32768 <= value <= 32767:
-            raise ValueError(f"Value out of range for short: {value}")
-        binary_file.write(struct.pack('>H', value & 0xFFFF))
-        
-def write_long(binary_file, value):
-    if value >= (1 << 63):
-        value -= (1 << 64)
-    binary_file.write(struct.pack('>q', value))
-   
-def write_float(binary_file, value):
-    binary_file.write(struct.pack('>f', value))
-    
+    except Exception as e:
+        import traceback
+        message = f"Error processing bundle: {traceback.format_exc()}"
+        report_progress(message)
+        return False
+    finally:
+        if env is not None:
+            del env
+        if temp_dir_obj:
+            temp_dir_obj.cleanup()
+        gc.collect()
