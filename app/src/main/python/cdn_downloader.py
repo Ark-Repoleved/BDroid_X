@@ -126,6 +126,70 @@ def read_object_from_byte_array(key_data, data_index):
         print(f"Exception during object parsing: {ex}")
         return None
 
+def _try_download_bundle(url, output_file_path, bundle_size, progress_callback=None):
+    """
+    Helper function to attempt downloading a bundle from a given URL.
+    Returns (success: bool, error_message: str or None)
+    """
+    try:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        with open(output_file_path, 'wb') as file:
+            total_downloaded = 0
+            for chunk in response.iter_content(chunk_size=65536):
+                if chunk:
+                    file.write(chunk)
+                    total_downloaded += len(chunk)
+                    if progress_callback:
+                        progress_callback(f"Downloading... {total_downloaded / 1024:.2f} KB / {bundle_size / 1024:.2f} KB")
+        return True, None
+    except requests.exceptions.RequestException as e:
+        return False, str(e)
+
+
+def _generate_download_urls(base_url, download_name, bundle_name, bundle_hash):
+    """
+    Generate a list of possible download URLs to try.
+    Handles cases where the CDN file may or may not include the hash in the filename.
+    """
+    urls = []
+    
+    # 1. Primary: use raw download_name from catalog
+    urls.append(f"{base_url}/{download_name}")
+    
+    # 2. If download_name doesn't contain hash, try adding it
+    #    e.g., common-skeleton-data_assets_all.bundle -> common-skeleton-data_assets_all_{hash}.bundle
+    if bundle_hash and bundle_hash not in download_name:
+        if download_name.endswith('.bundle'):
+            name_with_hash = download_name[:-7] + f"_{bundle_hash}.bundle"
+            urls.append(f"{base_url}/{name_with_hash}")
+    
+    # 3. If download_name contains hash but CDN expects without hash, try removing it
+    #    e.g., common-skeleton-data_assets_all_{hash}.bundle -> common-skeleton-data_assets_all.bundle
+    if bundle_hash and bundle_hash in download_name:
+        name_without_hash = download_name.replace(f"_{bundle_hash}", "")
+        if name_without_hash != download_name:
+            urls.append(f"{base_url}/{name_without_hash}")
+    
+    # 4. Use bundle_name directly if different from download_name
+    if bundle_name and bundle_name != download_name:
+        urls.append(f"{base_url}/{bundle_name}")
+        # Also try bundle_name with hash
+        if bundle_hash and bundle_name.endswith('.bundle'):
+            name_with_hash = bundle_name[:-7] + f"_{bundle_hash}.bundle"
+            urls.append(f"{base_url}/{name_with_hash}")
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_urls = []
+    for url in urls:
+        if url not in seen:
+            seen.add(url)
+            unique_urls.append(url)
+    
+    return unique_urls
+
+
 def find_and_download_bundle(catalog_content, version, quality, hashed_name, output_dir, progress_callback=None):
     if not catalog_content:
         return None, "Catalog content is missing or empty."
@@ -170,34 +234,38 @@ def find_and_download_bundle(catalog_content, version, quality, hashed_name, out
                 if not download_name:
                     continue
 
-                bundle_size = bundle_info.get('m_BundleSize')
-                
-                url = f"https://cdn.bd2.pmang.cloud/ServerData/Android/{quality}/{version}/{download_name}"
-                if progress_callback: progress_callback(f"Found bundle. Downloading from {url}...")
-
+                bundle_size = bundle_info.get('m_BundleSize', 0)
                 bundle_name = bundle_info.get('m_BundleName')
                 bundle_hash = bundle_info.get('m_Hash')
+                
+                base_url = f"https://cdn.bd2.pmang.cloud/ServerData/Android/{quality}/{version}"
+                urls_to_try = _generate_download_urls(base_url, download_name, bundle_name, bundle_hash)
+                
                 output_file_path = Path(output_dir).joinpath(bundle_name, bundle_hash, "__data")
                 output_file_path.parent.mkdir(parents=True, exist_ok=True)
 
-                try:
-                    response = requests.get(url, stream=True)
-                    response.raise_for_status()
-                    with open(output_file_path, 'wb') as file:
-                        total_downloaded = 0
-                        for chunk in response.iter_content(chunk_size=65536):  # 64KB chunks for better performance
-                            if chunk:
-                                file.write(chunk)
-                                total_downloaded += len(chunk)
-                                if progress_callback:
-                                    progress_callback(f"Downloading... {total_downloaded / 1024:.2f} KB / {bundle_size / 1024:.2f} KB")
+                last_error = None
+                for i, url in enumerate(urls_to_try):
+                    if progress_callback:
+                        if i == 0:
+                            progress_callback(f"Found bundle. Downloading from {url}...")
+                        else:
+                            progress_callback(f"Retrying with alternative URL ({i+1}/{len(urls_to_try)}): {url}...")
                     
-                    if progress_callback: progress_callback("Download complete.")
-                    return str(output_file_path), None
-                except requests.exceptions.RequestException as e:
-                    error_message = f"Failed to download bundle: {e}"
-                    if progress_callback: progress_callback(error_message)
-                    return None, error_message
+                    success, error = _try_download_bundle(url, output_file_path, bundle_size, progress_callback)
+                    
+                    if success:
+                        if progress_callback: progress_callback("Download complete.")
+                        return str(output_file_path), None
+                    else:
+                        last_error = error
+                        if progress_callback and i < len(urls_to_try) - 1:
+                            progress_callback(f"Download failed: {error}. Trying alternative...")
+                
+                # All URLs failed
+                error_message = f"Failed to download bundle after trying {len(urls_to_try)} URL(s). Last error: {last_error}"
+                if progress_callback: progress_callback(error_message)
+                return None, error_message
 
     return None, f"Bundle with hash {hashed_name} not found in catalog."
     
