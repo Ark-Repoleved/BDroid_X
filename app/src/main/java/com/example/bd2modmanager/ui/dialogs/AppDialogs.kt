@@ -325,3 +325,66 @@ fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
         dismissButton = null
     )
 }
+
+@Composable
+fun MergeSpineDialog(state: MergeState, onDismiss: () -> Unit) {
+    if (state is MergeState.Idle) return
+
+    AlertDialog(
+        onDismissRequest = {
+            if (state !is MergeState.Merging) {
+                onDismiss()
+            }
+        },
+        icon = {
+            when (state) {
+                is MergeState.Merging -> Icon(Icons.Default.Merge, contentDescription = "Merging")
+                is MergeState.Finished -> Icon(Icons.Default.CheckCircle, contentDescription = "Success")
+                is MergeState.Failed -> Icon(Icons.Default.Error, contentDescription = "Failed")
+                else -> {}
+            }
+        },
+        title = {
+            val text = when (state) {
+                is MergeState.Merging -> "Merging Spine Assets..."
+                is MergeState.Finished -> "Merge Successful!"
+                is MergeState.Failed -> "Merge Failed"
+                else -> ""
+            }
+            Text(text)
+        },
+        text = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                when (state) {
+                    is MergeState.Merging -> {
+                        Text("Merging spine assets...", textAlign = TextAlign.Center)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(state.progressMessage, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                    }
+                    is MergeState.Finished -> {
+                        Icon(Icons.Default.CheckCircle, contentDescription = "Success", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(state.message, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    is MergeState.Failed -> {
+                        Text(state.error, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.error)
+                    }
+                    else -> {}
+                }
+            }
+        },
+        confirmButton = {
+            if (state !is MergeState.Merging) {
+                Button(onClick = onDismiss) {
+                    Text("OK")
+                }
+            }
+        },
+        dismissButton = null
+    )
+}
