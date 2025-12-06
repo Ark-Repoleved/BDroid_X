@@ -115,7 +115,7 @@ If you find this tool useful and want to support its development, please conside
         1.  **Texture Count Mismatch:** The mod's `.png` count differs from the original (the app usually fixes this automatically).
         2.  **Incorrect Filenames:** All filenames must be **lowercase** (e.g., `char000104.png`). The image reference inside `.atlas` must also be lowercase.
 
-        If the issue persists, try using the **'Merge Spine'** feature manually. If that fails, the mod file might be corrupted.
+        If the issue persists, try using the **'Merge Spine'** feature manually. If it still fails, the mod itself might be corrupted or incompatible.
 
 *   **Q: The installation failed. What should I do?_
     *   **A:** Failures are usually caused by:
