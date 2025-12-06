@@ -40,7 +40,8 @@ fun ModScreen(
     viewModel: MainViewModel,
     onSelectModSource: () -> Unit,
     onUninstallRequest: (String) -> Unit,
-    onUnpackRequest: () -> Unit
+    onUnpackRequest: () -> Unit,
+    onMergeRequest: () -> Unit
 ) {
     val modSourceDirectoryUri by viewModel.modSourceDirectoryUri.collectAsState()
     val modsList by viewModel.filteredModsList.collectAsState()
@@ -70,6 +71,13 @@ fun ModScreen(
     Scaffold(
         floatingActionButton = {
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                AnimatedVisibility(visible = selectedMods.size == 1) {
+                    ExtendedFloatingActionButton(
+                        onClick = onMergeRequest,
+                        icon = { Icon(Icons.Default.Merge, contentDescription = "Merge") },
+                        text = { Text("Merge Spine") }
+                    )
+                }
                 AnimatedVisibility(visible = modSourceDirectoryUri != null && selectedMods.isEmpty()) {
                     FloatingActionButton(
                         onClick = onUnpackRequest,
