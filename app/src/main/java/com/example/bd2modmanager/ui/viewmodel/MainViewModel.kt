@@ -101,6 +101,12 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _unpackInputFile = MutableStateFlow<Uri?>(null)
     val unpackInputFile: StateFlow<Uri?> = _unpackInputFile.asStateFlow()
 
+    private val _mergeState = MutableStateFlow<MergeState>(MergeState.Idle)
+    val mergeState: StateFlow<MergeState> = _mergeState.asStateFlow()
+
+    private val _showMergeDialog = MutableStateFlow(false)
+    val showMergeDialog: StateFlow<Boolean> = _showMergeDialog.asStateFlow()
+
 
     fun initialize(context: Context) {
         characterRepository = CharacterRepository(context)
@@ -419,6 +425,129 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     fun resetUnpackState() {
         _unpackState.value = UnpackState.Idle
         _unpackInputFile.value = null
+    }
+
+    fun initiateMerge(context: Context) {
+        if (selectedMods.value.size != 1) return
+
+        val modUri = selectedMods.value.first()
+        val modInfo = _modsList.value.find { it.uri == modUri } ?: return
+
+        _showMergeDialog.value = true
+        _mergeState.value = MergeState.Merging("Preparing files...")
+
+        viewModelScope.launch {
+            val tempDir = File(context.cacheDir, "temp_merge_${System.currentTimeMillis()}")
+            try {
+                withContext(Dispatchers.IO) {
+                    if (tempDir.exists()) tempDir.deleteRecursively()
+                    tempDir.mkdirs()
+
+                    if (modInfo.isDirectory) {
+                        DocumentFile.fromTreeUri(context, modInfo.uri)?.let { 
+                            copyDirectoryToCacheNonRecursive(context, it, tempDir)
+                        }
+                    } else {
+                        context.contentResolver.openInputStream(modInfo.uri)?.use { fis ->
+                            ZipInputStream(fis).use { zis ->
+                                var entry = zis.nextEntry
+                                while (entry != null) {
+                                    if (!entry.isDirectory) {
+                                        val newFile = File(tempDir, entry.name.substringAfterLast('/'))
+                                        newFile.outputStream().use { fos -> zis.copyTo(fos) }
+                                    }
+                                    entry = zis.nextEntry
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val (success, message) = withContext(Dispatchers.IO) {
+                    ModdingService.mergeSpineAssets(tempDir.absolutePath) { progress ->
+                        viewModelScope.launch(Dispatchers.Main) {
+                            _mergeState.value = MergeState.Merging(progress)
+                        }
+                    }
+                }
+
+                if (success) {
+                    val originalModDoc = DocumentFile.fromTreeUri(context, modInfo.uri)
+                    if (originalModDoc != null && originalModDoc.isDirectory) {
+                        val filesToDelete = originalModDoc.listFiles().filter {
+                            it.isFile && (it.name?.endsWith(".png") == true || it.name?.endsWith(".atlas") == true)
+                        }
+                        filesToDelete.forEach { it.delete() }
+
+                        tempDir.listFiles()?.forEach { file ->
+                            if (file.isFile && (file.name.endsWith(".png") || file.name.endsWith(".atlas"))) {
+                                val newFile = originalModDoc.createFile("application/octet-stream", file.name)
+                                newFile?.let {
+                                    context.contentResolver.openOutputStream(it.uri)?.use { output ->
+                                        file.inputStream().use { input -> input.copyTo(output) }
+                                    }
+                                }
+                            } else if (file.isDirectory && file.name == ".old") {
+                                val oldDirDoc = originalModDoc.createDirectory(".old")
+                                oldDirDoc?.let {
+                                    copyDirectoryToSaf(context, file, it)
+                                }
+                            }
+                        }
+                        _mergeState.value = MergeState.Finished("Successfully merged mod in-place!")
+                    } else {
+                        _mergeState.value = MergeState.Failed("Failed to access original mod directory.")
+                    }
+                } else {
+                    _mergeState.value = MergeState.Failed(message)
+                }
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _mergeState.value = MergeState.Failed(e.message ?: "An unknown error occurred.")
+            } finally {
+                withContext(Dispatchers.IO) {
+                    if (tempDir.exists()) tempDir.deleteRecursively()
+                }
+            }
+        }
+    }
+
+    fun resetMergeState() {
+        _mergeState.value = MergeState.Idle
+        _showMergeDialog.value = false
+    }
+
+    private fun copyDirectoryToCacheNonRecursive(context: Context, sourceDir: DocumentFile, destinationDir: File) {
+        if (!destinationDir.exists()) destinationDir.mkdirs()
+        sourceDir.listFiles().forEach { file ->
+            if (file.isFile) {
+                val destFile = File(destinationDir, file.name!!)
+                try {
+                    context.contentResolver.openInputStream(file.uri)?.use { input -> destFile.outputStream().use { output -> input.copyTo(output) } }
+                } catch (e: Exception) { e.printStackTrace() }
+            }
+        }
+    }
+
+    private fun copyDirectoryToSaf(context: Context, sourceDir: File, destinationDoc: DocumentFile) {
+        sourceDir.listFiles()?.forEach { file ->
+            if (file.isFile) {
+                val newFile = destinationDoc.createFile("application/octet-stream", file.name)
+                newFile?.let {
+                    context.contentResolver.openOutputStream(it.uri)?.use { output ->
+                        file.inputStream().use { input ->
+                            input.copyTo(output)
+                        }
+                    }
+                }
+            } else if (file.isDirectory) {
+                val newDir = destinationDoc.createDirectory(file.name)
+                newDir?.let {
+                    copyDirectoryToSaf(context, file, it)
+                }
+            }
+        }
     }
 
 
