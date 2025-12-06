@@ -63,3 +63,10 @@ sealed class UnpackState {
     data class Finished(val message: String) : UnpackState()
     data class Failed(val error: String) : UnpackState()
 }
+
+sealed class MergeState {
+    object Idle : MergeState()
+    data class Merging(val progressMessage: String = "Initializing...") : MergeState()
+    data class Finished(val message: String) : MergeState()
+    data class Failed(val error: String) : MergeState()
+}
