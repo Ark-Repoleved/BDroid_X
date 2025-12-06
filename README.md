@@ -81,9 +81,13 @@ Not sure what a mod looks like in action?
 3.  A preview screen will open, playing the animation.
 
 ### Spine Atlas Merger (Troubleshooting Tool)
-**This feature is now automated.**
+**Automated with manual fallback.**
 
-If a mod has a texture count that mismatches the original game files (which often causes crashes), the app will now **automatically detect** and **merge** the textures during the repacking process. You no longer need to do this manually.
+The app automatically detects and merges mismatched textures during repacking, preventing most crashes. However, if a mod still displays incorrectly:
+1.  On the main screen, find the mod that is causing the crash. Select **only that mod**.
+2.  Tap the **"Merge Spine"** button.
+3.  The app will process the files. The originals will be backed up into a new `.old` subfolder.
+4.  Re-install the newly merged mod. The crash should be resolved.
 
 ### Standalone Bundle Unpacker
 For users who want to extract original game files:
