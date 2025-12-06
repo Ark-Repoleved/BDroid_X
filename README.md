@@ -43,7 +43,7 @@
 
 For the app to recognize your mods, they must follow a specific structure. Each mod needs its own folder, and the filenames inside must **exactly match** the game's original asset names.
 
-> **⚠️ Warning:** All filenames must be **lowercase** (e.g., `char000104.png`, not `Char000104.png`). Additionally, the image filename referenced inside the `.atlas` file must also be **lowercase**. Otherwise, the game will **crash**.
+> **⚠️ Warning:** All filenames must be **lowercase** (e.g., `char000104.png`, not `Char000104.png`). Additionally, the image filename referenced inside the `.atlas` file must also be **lowercase**. Otherwise, the game might **crash**.
 
 **Example Folder Structure:**
 ```
