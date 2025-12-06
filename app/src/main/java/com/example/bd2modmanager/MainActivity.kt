@@ -49,7 +49,8 @@ class MainActivity : ComponentActivity() {
                         viewModel = viewModel,
                         onSelectModSource = { modSourceDirLauncher.launch(Unit) },
                         onUninstallRequest = { hash -> uninstallConfirmationTarget = hash },
-                        onUnpackRequest = { showUnpackDialog = true }
+                        onUnpackRequest = { showUnpackDialog = true },
+                        onMergeRequest = { viewModel.initiateMerge(this) }
                     )
                 }
 
@@ -91,6 +92,15 @@ class MainActivity : ComponentActivity() {
                         onInitiateUnpack = { viewModel.initiateUnpack(this) },
                         onResetState = { viewModel.resetUnpackState() },
                         onDismiss = { showUnpackDialog = false }
+                    )
+                }
+
+                val showMergeDialog by viewModel.showMergeDialog.collectAsState()
+                if (showMergeDialog) {
+                    val mergeState by viewModel.mergeState.collectAsState()
+                    MergeSpineDialog(
+                        state = mergeState,
+                        onDismiss = { viewModel.resetMergeState() }
                     )
                 }
             }
