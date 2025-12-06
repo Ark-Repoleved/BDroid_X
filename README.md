@@ -109,7 +109,7 @@ If you find this tool useful and want to support its development, please conside
     *   **A:** Double-check that you've selected the correct "Mod Source Folder" in the setup. Also, ensure your mods are in unzipped folders and follow the correct [folder structure](#1-prepare-your-mods-important).
 
 *   **Q: The game crashes after installing a mod.**
-    *   **A:** This is often because the mod's texture (`.png`) file count doesn't match the game's original assets. The latest version of the app **handles this automatically**. If you still experience a crash, the issue is likely with the mod itself (e.g., corrupted files or incompatibility).
+    *   **A:** This is often because the mod's texture (`.png`) file count doesn't match the game's original assets. The latest version of the app handles this automatically. If you still experience a crash, try using the **'Merge Spine'** feature manually on that specific mod. If it still fails, the mod itself might be corrupted or incompatible.
 
 *   **Q: The installation failed. What should I do?_
     *   **A:** Failures are usually caused by:
