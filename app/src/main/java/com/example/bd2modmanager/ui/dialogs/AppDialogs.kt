@@ -160,6 +160,33 @@ fun ParallelInstallDialog(
                                 )
                             }
                             
+                            finalResult.command?.let {
+                                Spacer(Modifier.height(16.dp))
+                                Text("Run this command in a root shell to move all files:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                                Spacer(Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(it))
+                                        Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                                    }
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Copy Command")
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                SelectionContainer {
+                                    Text(
+                                        text = it,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                        modifier = Modifier
+                                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                            .padding(12.dp)
+                                            .fillMaxWidth()
+                                    )
+                                }
+                            }
+                            
                             // 顯示失敗任務的詳細資訊
                             if (finalResult.failedJobDetails.isNotEmpty()) {
                                 Spacer(Modifier.height(16.dp))
@@ -197,33 +224,6 @@ fun ParallelInstallDialog(
                                             )
                                         }
                                     }
-                                }
-                            }
-                            
-                            finalResult.command?.let {
-                                Spacer(Modifier.height(16.dp))
-                                Text("Run this command in a root shell to move all files:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-                                Spacer(Modifier.height(8.dp))
-                                Button(
-                                    onClick = {
-                                        clipboardManager.setText(AnnotatedString(it))
-                                        Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
-                                    }
-                                ) {
-                                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Copy Command")
-                                }
-                                Spacer(Modifier.height(8.dp))
-                                SelectionContainer {
-                                    Text(
-                                        text = it,
-                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                        modifier = Modifier
-                                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                                            .padding(12.dp)
-                                            .fillMaxWidth()
-                                    )
                                 }
                             }
                         }
