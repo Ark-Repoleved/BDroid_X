@@ -301,6 +301,12 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         
         // 計算總耗時
         val elapsedTimeMs = System.currentTimeMillis() - batchStartTimeMs
+        
+        // 收集失敗任務的詳細資訊
+        val failedJobDetails = failedJobs.map { job ->
+            val error = (job.status as JobStatus.Failed).error
+            FailedJobInfo(hashedName = job.job.hashedName, error = error)
+        }
 
         val command = if (successfulJobs.isNotEmpty()) {
             "mv -f /storage/emulated/0/Download/Shared /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/"
@@ -310,7 +316,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             successfulJobs = successfulJobs.size,
             failedJobs = failedJobs.size,
             command = command,
-            elapsedTimeMs = elapsedTimeMs
+            elapsedTimeMs = elapsedTimeMs,
+            failedJobDetails = failedJobDetails
         )
     }
 
