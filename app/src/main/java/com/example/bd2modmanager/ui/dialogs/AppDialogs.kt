@@ -159,6 +159,42 @@ fun ParallelInstallDialog(
                                 )
                             }
                             
+                            // 顯示失敗任務的詳細資訊
+                            if (finalResult.failedJobDetails.isNotEmpty()) {
+                                Spacer(Modifier.height(16.dp))
+                                Text(
+                                    "Failed Groups:",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                finalResult.failedJobDetails.forEach { failedJob ->
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp)
+                                            .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(8.dp))
+                                            .padding(12.dp)
+                                    ) {
+                                        Text(
+                                            text = "Group: ${failedJob.hashedName.take(16)}...",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onErrorContainer
+                                        )
+                                        Spacer(Modifier.height(4.dp))
+                                        SelectionContainer {
+                                            Text(
+                                                text = failedJob.error,
+                                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                                modifier = Modifier
+                                                    .horizontalScroll(rememberScrollState())
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            
                             finalResult.command?.let {
                                 Spacer(Modifier.height(16.dp))
                                 Text("Run this command in a root shell to move all files:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
