@@ -35,7 +35,7 @@ sealed class JobStatus {
     data class Downloading(val progressMessage: String = "Waiting...") : JobStatus()
     data class Installing(val progressMessage: String = "Initializing...") : JobStatus()
     data class Finished(val relativePath: String) : JobStatus()
-    data class Failed(val error: String) : JobStatus()
+    data class Failed(val displayMessage: String, val detailedLog: String) : JobStatus()
 }
 
 data class InstallJob(
