@@ -58,7 +58,7 @@ fun InstallJobRow(installJob: InstallJob) {
                 val progressMessage = when (val status = installJob.status) {
                     is JobStatus.Downloading -> status.progressMessage
                     is JobStatus.Installing -> status.progressMessage
-                    is JobStatus.Failed -> status.error
+                    is JobStatus.Failed -> status.displayMessage
                     is JobStatus.Finished -> "Finished successfully!"
                     is JobStatus.Pending -> "Waiting in queue..."
                 }
