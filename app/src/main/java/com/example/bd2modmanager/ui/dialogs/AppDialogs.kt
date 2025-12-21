@@ -4,6 +4,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -174,6 +175,10 @@ fun ParallelInstallDialog(
                                             .fillMaxWidth()
                                             .padding(vertical = 4.dp)
                                             .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(8.dp))
+                                            .clickable {
+                                                clipboardManager.setText(AnnotatedString(failedJob.error))
+                                                Toast.makeText(context, "Error log copied!", Toast.LENGTH_SHORT).show()
+                                            }
                                             .padding(12.dp)
                                     ) {
                                         Text(
