@@ -290,7 +290,13 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
         } catch (e: Exception) {
             e.printStackTrace()
-            updateJobStatus(hashedName, JobStatus.Failed(e.message ?: "An unknown error occurred."))
+            val fullError = e.message ?: "An unknown error occurred."
+            val displayError = if (fullError.startsWith("Repack failed:")) {
+                "Repack failed: Repack process failed without an exception."
+            } else {
+                fullError
+            }
+            updateJobStatus(hashedName, JobStatus.Failed(displayMessage = displayError, detailedLog = fullError))
         }
     }
 
@@ -304,8 +310,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         
         // 收集失敗任務的詳細資訊
         val failedJobDetails = failedJobs.map { job ->
-            val error = (job.status as JobStatus.Failed).error
-            FailedJobInfo(hashedName = job.job.hashedName, error = error)
+            val failedStatus = job.status as JobStatus.Failed
+            FailedJobInfo(hashedName = job.job.hashedName, error = failedStatus.detailedLog)
         }
 
         val command = if (successfulJobs.isNotEmpty()) {
