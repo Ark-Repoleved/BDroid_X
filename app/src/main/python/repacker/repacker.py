@@ -270,6 +270,10 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
 
 
 def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_path: str, use_astc: bool, progress_callback=None):
+    """
+    Repack a unity bundle with modded assets.
+    Returns a tuple: (success: bool, message: str)
+    """
     def report_progress(message):
         if progress_callback:
             progress_callback(message)
@@ -457,19 +461,21 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                 with open(output_path, "wb") as f:
                     env.file.save(f, packer="lz4")
                 report_progress("Saved successfully!")
-                return True
+                return True, "Repack completed successfully."
             except Exception as e:
-                report_progress(f"Error saving bundle: {e}")
-                return False
+                error_msg = f"Error saving bundle: {e}"
+                report_progress(error_msg)
+                return False, error_msg
         else:
-            report_progress("No modifications were made.")
-            return False
+            error_msg = "No modifications were made. Check if your mod files match any assets in the bundle."
+            report_progress(error_msg)
+            return False, error_msg
 
     except Exception as e:
         import traceback
-        message = f"Error processing bundle: {traceback.format_exc()}"
-        report_progress(message)
-        return False
+        error_message = traceback.format_exc()
+        report_progress(f"Error processing bundle: {error_message}")
+        return False, error_message
     finally:
         if env is not None:
             del env
