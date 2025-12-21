@@ -43,11 +43,17 @@ data class InstallJob(
     val status: JobStatus = JobStatus.Pending
 )
 
+data class FailedJobInfo(
+    val hashedName: String,
+    val error: String
+)
+
 data class FinalInstallResult(
     val successfulJobs: Int,
     val failedJobs: Int,
     val command: String?,
-    val elapsedTimeMs: Long = 0L  // 總耗時（毫秒）
+    val elapsedTimeMs: Long = 0L,  // 總耗時（毫秒）
+    val failedJobDetails: List<FailedJobInfo> = emptyList()  // 失敗任務的詳細資訊
 )
 
 sealed class UninstallState {
