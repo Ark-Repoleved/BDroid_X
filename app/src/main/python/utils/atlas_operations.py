@@ -36,7 +36,7 @@ def parse_atlas_file(atlas_path: str) -> Tuple[Optional[Dict], Optional[str]]:
         lines = block_text.split('\n')
         block_name = lines[0]
         
-        data = {'sprites': []}
+        data = {'sprites': [], 'filter_line': ' filter: Linear, Linear'}
         sprite_lines = []
         
         for line in lines[1:]:
