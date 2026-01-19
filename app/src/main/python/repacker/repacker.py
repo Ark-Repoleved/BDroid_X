@@ -514,124 +514,130 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                 import traceback
                 report_progress(f"Error processing {mod_filename}: {traceback.format_exc()}")
         
-        # ========== 階段三：分批平行處理 ASTC 紋理壓縮 ==========
-        # 採用分批處理策略：每批處理完立即寫入並清理記憶體，降低記憶體峰值
+        # ========== 階段三：平行處理 ASTC 紋理壓縮 ==========
+        # 優化策略：單一 Executor + 完成一個就立即寫入，控制記憶體峰值
         if png_astc_files:
             executor_type = "Thread" if IS_ANDROID else "Process"
-            # 批次大小 = worker 數量，確保每批都能充分利用所有 worker
-            batch_size = MAX_PARALLEL_TEXTURES
             total_textures = len(png_astc_files)
-            total_batches = (total_textures + batch_size - 1) // batch_size
             
-            report_progress(f"Phase 3: Batch parallel ASTC compression ({total_textures} textures, {total_batches} batches, {MAX_PARALLEL_TEXTURES} {executor_type} workers)...")
+            report_progress(f"Phase 3: Parallel ASTC compression ({total_textures} textures, {MAX_PARALLEL_TEXTURES} {executor_type} workers)...")
             
             block_x, block_y = 4, 4
             total_success = 0
             total_failed = 0
             completed_count = 0
             
+            # 準備所有 worker 參數
+            worker_args = [
+                (mod_filepath, target_asset_name, block_x, block_y)
+                for mod_filepath, target_asset_name in png_astc_files
+            ]
+            
             # 根據環境選擇 Executor
             ExecutorClass = ThreadPoolExecutor if IS_ANDROID else ProcessPoolExecutor
             
-            # 分批處理
-            for batch_idx in range(total_batches):
-                batch_start = batch_idx * batch_size
-                batch_end = min(batch_start + batch_size, total_textures)
-                batch_files = png_astc_files[batch_start:batch_end]
-                
-                report_progress(f"  Batch {batch_idx + 1}/{total_batches}: Processing {len(batch_files)} textures...")
-                
-                # 準備這一批的 worker 參數
-                worker_args = [
-                    (mod_filepath, target_asset_name, block_x, block_y)
-                    for mod_filepath, target_asset_name in batch_files
-                ]
-                
-                batch_results = []
-                
-                try:
-                    with ExecutorClass(max_workers=MAX_PARALLEL_TEXTURES) as executor:
-                        # 提交這一批的任務
-                        future_to_args = {
-                            executor.submit(_compress_texture_worker, args): args 
-                            for args in worker_args
-                        }
-                        
-                        # 收集這一批的結果
-                        for future in as_completed(future_to_args):
-                            completed_count += 1
-                            args = future_to_args[future]
-                            mod_filename = os.path.basename(args[0])
-                            
-                            try:
-                                result = future.result()
-                                batch_results.append(result)
-                                
-                                if not result['success']:
-                                    report_progress(f"    FAILED: {mod_filename} - {result['error']}")
-                                    
-                            except Exception as e:
-                                report_progress(f"    ERROR: {mod_filename} - {str(e)}")
-                                batch_results.append({
-                                    'success': False,
-                                    'target_asset_name': args[1],
-                                    'mod_filepath': args[0],
-                                    'error': str(e)
-                                })
-                                
-                except Exception as e:
-                    report_progress(f"    Executor failed, falling back to sequential: {e}")
-                    # 回退到序列處理這一批
-                    for args in worker_args:
+            try:
+                with ExecutorClass(max_workers=MAX_PARALLEL_TEXTURES) as executor:
+                    # 一次提交所有任務
+                    future_to_args = {
+                        executor.submit(_compress_texture_worker, args): args 
+                        for args in worker_args
+                    }
+                    
+                    # 完成一個就立即處理（寫入 + 清理）
+                    for future in as_completed(future_to_args):
                         completed_count += 1
-                        result = _compress_texture_worker(args)
-                        batch_results.append(result)
-                        if not result['success']:
-                            mod_filename = os.path.basename(args[0])
-                            report_progress(f"    FAILED (seq): {mod_filename} - {result['error']}")
-                
-                # 立即將這一批的結果寫入 Bundle（不等到全部壓縮完）
-                batch_success = 0
-                for result in batch_results:
-                    if not result['success']:
-                        total_failed += 1
-                        continue
+                        args = future_to_args[future]
+                        mod_filename = os.path.basename(args[0])
+                        
+                        try:
+                            result = future.result()
+                            
+                            if result['success']:
+                                # 立即寫入 Bundle
+                                target_asset_name = result['target_asset_name']
+                                try:
+                                    obj = asset_map[target_asset_name]
+                                    data = obj.read()
+                                    
+                                    data.m_TextureFormat = 48  # ASTC_RGB_4x4
+                                    data.image_data = result['compressed_data']
+                                    data.m_CompleteImageSize = len(result['compressed_data'])
+                                    data.m_Width = result['width']
+                                    data.m_Height = result['height']
+                                    data.m_MipCount = 1
+                                    
+                                    if hasattr(data, 'm_StreamData'):
+                                        data.m_StreamData.offset = 0
+                                        data.m_StreamData.size = 0
+                                        data.m_StreamData.path = ""
+                                    
+                                    data.save()
+                                    edited = True
+                                    total_success += 1
+                                    
+                                except Exception as e:
+                                    total_failed += 1
+                                    report_progress(f"  Write error {mod_filename}: {e}")
+                            else:
+                                total_failed += 1
+                                report_progress(f"  FAILED: {mod_filename} - {result['error']}")
+                            
+                            # 立即清理這個結果的記憶體
+                            del result
+                                
+                        except Exception as e:
+                            total_failed += 1
+                            report_progress(f"  ERROR: {mod_filename} - {str(e)}")
+                        
+                        # 定期報告進度（每 25% 或每 10 個）
+                        if total_textures <= 10 or completed_count == total_textures or completed_count % max(1, total_textures // 4) == 0:
+                            report_progress(f"  Progress: {completed_count}/{total_textures} ({100*completed_count//total_textures}%)")
+                        
+                        # 定期執行 gc（每處理 10 個紋理）
+                        if completed_count % 10 == 0:
+                            gc.collect()
+                            
+            except Exception as e:
+                report_progress(f"Executor failed, falling back to sequential: {e}")
+                # 回退到序列處理
+                for args in worker_args:
+                    completed_count += 1
+                    result = _compress_texture_worker(args)
                     
-                    target_asset_name = result['target_asset_name']
-                    mod_filename = os.path.basename(result['mod_filepath'])
-                    
-                    try:
-                        obj = asset_map[target_asset_name]
-                        data = obj.read()
-                        
-                        data.m_TextureFormat = 48  # ASTC_RGB_4x4
-                        data.image_data = result['compressed_data']
-                        data.m_CompleteImageSize = len(result['compressed_data'])
-                        data.m_Width = result['width']
-                        data.m_Height = result['height']
-                        data.m_MipCount = 1
-                        
-                        if hasattr(data, 'm_StreamData'):
-                            data.m_StreamData.offset = 0
-                            data.m_StreamData.size = 0
-                            data.m_StreamData.path = ""
-                        
-                        data.save()
-                        edited = True
-                        batch_success += 1
-                        total_success += 1
-                        
-                    except Exception as e:
+                    if result['success']:
+                        target_asset_name = result['target_asset_name']
+                        mod_filename = os.path.basename(result['mod_filepath'])
+                        try:
+                            obj = asset_map[target_asset_name]
+                            data = obj.read()
+                            data.m_TextureFormat = 48
+                            data.image_data = result['compressed_data']
+                            data.m_CompleteImageSize = len(result['compressed_data'])
+                            data.m_Width = result['width']
+                            data.m_Height = result['height']
+                            data.m_MipCount = 1
+                            if hasattr(data, 'm_StreamData'):
+                                data.m_StreamData.offset = 0
+                                data.m_StreamData.size = 0
+                                data.m_StreamData.path = ""
+                            data.save()
+                            edited = True
+                            total_success += 1
+                        except Exception as e:
+                            total_failed += 1
+                    else:
                         total_failed += 1
-                        report_progress(f"    Write error {mod_filename}: {e}")
-                
-                # 清理這一批的記憶體（關鍵優化！）
-                del batch_results
-                del worker_args
-                gc.collect()
-                
-                # 報告這一批的進度
-                report_progress(f"    Batch {batch_idx + 1} done: {batch_success}/{len(batch_files)} success, progress: {completed_count}/{total_textures} ({100*completed_count//total_textures}%)")
+                        mod_filename = os.path.basename(args[0])
+                        report_progress(f"  FAILED (seq): {mod_filename} - {result['error']}")
+                    
+                    del result
+                    if completed_count % 10 == 0:
+                        gc.collect()
+            
+            # 最終清理
+            del worker_args
+            gc.collect()
             
             # 最終報告
             report_progress(f"  ASTC compression complete: {total_success} success, {total_failed} failed")
