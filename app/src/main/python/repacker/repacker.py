@@ -659,9 +659,8 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                     pil_img = Image.open(mod_filepath).convert("RGBA")
                     
                     data.m_TextureFormat = 4  # RGBA32
-                    data.image_data = pil_img.tobytes()
-                    data.m_CompleteImageSize = len(data.image_data)
-                    data.m_Width, data.m_Height = pil_img.size
+                    data.image = pil_img
+                    
                     data.m_MipCount = 1
                     
                     if hasattr(data, 'm_StreamData'):
