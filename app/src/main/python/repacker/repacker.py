@@ -8,6 +8,16 @@ import gc
 import re
 import shutil
 import glob
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+import sys
+
+# 平行處理設定
+# 限制同時處理的紋理數量，避免記憶體過載
+MAX_PARALLEL_TEXTURES = min(4, max(1, (os.cpu_count() or 4) // 2))
+
+# 檢測是否在 Android 環境 (Chaquopy)
+# Android 上 ProcessPoolExecutor 可能無法正常工作，改用 ThreadPoolExecutor
+IS_ANDROID = hasattr(sys, 'getandroidapilevel') or 'ANDROID_ROOT' in os.environ
 
 from UnityPy.helpers import TypeTreeHelper
 TypeTreeHelper.read_typetree_boost = False
@@ -269,6 +279,65 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
     return bytes(comp_buf), None
 
 
+def _compress_texture_worker(args):
+    """
+    Worker 函數，用於在子進程中執行 ASTC 壓縮。
+    
+    Args:
+        args: tuple of (mod_filepath, target_asset_name, block_x, block_y)
+    
+    Returns:
+        dict with keys: 'success', 'target_asset_name', 'mod_filepath', 
+                       'compressed_data', 'width', 'height', 'error'
+    """
+    mod_filepath, target_asset_name, block_x, block_y = args
+    result = {
+        'success': False,
+        'target_asset_name': target_asset_name,
+        'mod_filepath': mod_filepath,
+        'compressed_data': None,
+        'width': 0,
+        'height': 0,
+        'error': None
+    }
+    
+    pil_img = None
+    flipped_img = None
+    try:
+        pil_img = Image.open(mod_filepath).convert("RGBA")
+        result['width'] = pil_img.width
+        result['height'] = pil_img.height
+        
+        flipped_img = pil_img.transpose(Image.FLIP_TOP_BOTTOM)
+        
+        compressed_data, err = compress_image_astc(
+            flipped_img.tobytes(), 
+            pil_img.width, 
+            pil_img.height, 
+            block_x, 
+            block_y
+        )
+        
+        if err:
+            result['error'] = err
+        else:
+            result['success'] = True
+            result['compressed_data'] = compressed_data
+            
+    except Exception as e:
+        result['error'] = str(e)
+    finally:
+        if flipped_img:
+            flipped_img.close()
+            del flipped_img
+        if pil_img:
+            pil_img.close()
+            del pil_img
+        gc.collect()
+    
+    return result
+
+
 def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_path: str, use_astc: bool, progress_callback=None):
     """
     Repack a unity bundle with modded assets.
@@ -355,100 +424,250 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                 mod_files.append(os.path.join(root, f))
 
         total_assets = len(mod_files)
-        for i, mod_filepath in enumerate(mod_files):
+        
+        # ========== 階段一：分類所有 mod 檔案 ==========
+        report_progress("Phase 1: Categorizing mod files...")
+        
+        json_files = []      # JSON -> SKEL 轉換
+        png_astc_files = []  # PNG -> ASTC 壓縮 (需平行處理)
+        png_rgba_files = []  # PNG -> RGBA32 (不需壓縮)
+        text_files = []      # TextAsset 替換
+        
+        for mod_filepath in mod_files:
             mod_filename = os.path.basename(mod_filepath)
-            current_progress = f"({i+1}/{total_assets}) "
-
-            try:
-                if mod_filename.lower().endswith('.json'):
-                    base_name, _ = os.path.splitext(mod_filename)
-                    target_asset_name = (base_name + ".skel").lower()
+            
+            if mod_filename.lower().endswith('.json'):
+                base_name, _ = os.path.splitext(mod_filename)
+                target_asset_name = (base_name + ".skel").lower()
+                if target_asset_name in asset_map:
+                    json_files.append((mod_filepath, target_asset_name))
                     
-                    if target_asset_name in asset_map:
-                        report_progress(f"{current_progress}Converting and replacing animation: {mod_filename}")
-                        obj = asset_map[target_asset_name]
-                        data = obj.read()
-
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".skel") as tmp_skel_file:
-                            temp_skel_path = tmp_skel_file.name
-                        
-                        try:
-                            json_to_skel(mod_filepath, temp_skel_path)
-                            with open(temp_skel_path, 'rb') as f:
-                                skel_binary_data = f.read()
-                            
-                            data.m_Script = skel_binary_data.decode("utf-8", "surrogateescape")
-                            data.save()
-                            edited = True
-                            report_progress(f"{current_progress}Successfully replaced animation for {mod_filename}")
-                        finally:
-                            if os.path.exists(temp_skel_path):
-                                os.remove(temp_skel_path)
-                    continue
-
-                if mod_filename.lower().endswith('.png'):
-                    target_asset_name = os.path.splitext(mod_filename)[0].lower()
-                    if target_asset_name in asset_map:
-                        obj = asset_map[target_asset_name]
-                        if obj.type.name == "Texture2D":
-                            report_progress(f"{current_progress}Replacing texture: {mod_filename}")
-                            data = obj.read()
-                            
-                            # Use context manager equivalent for PIL Image
-                            pil_img = None
-                            try:
-                                pil_img = Image.open(mod_filepath).convert("RGBA")
-
-                                if use_astc:
-                                    flipped_img = pil_img.transpose(Image.FLIP_TOP_BOTTOM)
-                                    report_progress(f"{current_progress}Compressing texture to ASTC: {mod_filename}")
-                                    block_x, block_y = 4, 4
-                                    compressed_data, err = compress_image_astc(flipped_img.tobytes(), pil_img.width, pil_img.height, block_x, block_y)
-                                    
-                                    flipped_img.close()
-                                    del flipped_img
-                                    gc.collect()
-
-                                    if err:
-                                        report_progress(f"ERROR: ASTC compression failed for {mod_filename}: {err}")
-                                        continue
-
-                                    data.m_TextureFormat = 48
-                                    data.image_data = compressed_data
-                                    data.m_CompleteImageSize = len(compressed_data)
-                                else:
-                                    report_progress(f"{current_progress}Using uncompressed RGBA32 for texture: {mod_filename}")
-                                    data.m_TextureFormat = 4
-                                    data.image = pil_img
-
-                                data.m_Width, data.m_Height = pil_img.size
-                                data.m_MipCount = 1
-                                data.m_StreamData.offset = 0
-                                data.m_StreamData.size = 0
-                                data.m_StreamData.path = ""
-                                data.save()
-                                edited = True
-                            finally:
-                                if pil_img:
-                                    pil_img.close()
-                                    del pil_img
-
-                    continue
-
+            elif mod_filename.lower().endswith('.png'):
+                target_asset_name = os.path.splitext(mod_filename)[0].lower()
+                if target_asset_name in asset_map:
+                    obj = asset_map[target_asset_name]
+                    if obj.type.name == "Texture2D":
+                        if use_astc:
+                            png_astc_files.append((mod_filepath, target_asset_name))
+                        else:
+                            png_rgba_files.append((mod_filepath, target_asset_name))
+            else:
                 target_asset_name = mod_filename.lower()
                 if target_asset_name in asset_map:
                     obj = asset_map[target_asset_name]
                     if obj.type.name == "TextAsset":
-                        report_progress(f"{current_progress}Replacing asset: {mod_filename}")
-                        data = obj.read()
-                        with open(mod_filepath, "rb") as f:
-                            data.m_Script = f.read().decode("utf-8", "surrogateescape")
-                        data.save()
-                        edited = True
+                        text_files.append((mod_filepath, target_asset_name))
+        
+        report_progress(f"  - JSON animations: {len(json_files)}")
+        report_progress(f"  - ASTC textures: {len(png_astc_files)}")
+        report_progress(f"  - RGBA32 textures: {len(png_rgba_files)}")
+        report_progress(f"  - Text assets: {len(text_files)}")
+        
+        # ========== 階段二：處理 JSON 和 TextAsset (序列) ==========
+        report_progress("Phase 2: Processing JSON and TextAsset files...")
+        
+        # 處理 JSON -> SKEL
+        for i, (mod_filepath, target_asset_name) in enumerate(json_files):
+            mod_filename = os.path.basename(mod_filepath)
+            current_progress = f"(JSON {i+1}/{len(json_files)}) "
+            
+            try:
+                report_progress(f"{current_progress}Converting animation: {mod_filename}")
+                obj = asset_map[target_asset_name]
+                data = obj.read()
 
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".skel") as tmp_skel_file:
+                    temp_skel_path = tmp_skel_file.name
+                
+                try:
+                    json_to_skel(mod_filepath, temp_skel_path)
+                    with open(temp_skel_path, 'rb') as f:
+                        skel_binary_data = f.read()
+                    
+                    data.m_Script = skel_binary_data.decode("utf-8", "surrogateescape")
+                    data.save()
+                    edited = True
+                    report_progress(f"{current_progress}Successfully replaced: {mod_filename}")
+                finally:
+                    if os.path.exists(temp_skel_path):
+                        os.remove(temp_skel_path)
+                        
             except Exception as e:
                 import traceback
-                report_progress(f"Error processing asset {mod_filename}: {traceback.format_exc()}")
+                report_progress(f"Error processing {mod_filename}: {traceback.format_exc()}")
+        
+        # 處理 TextAsset
+        for i, (mod_filepath, target_asset_name) in enumerate(text_files):
+            mod_filename = os.path.basename(mod_filepath)
+            current_progress = f"(Text {i+1}/{len(text_files)}) "
+            
+            try:
+                report_progress(f"{current_progress}Replacing asset: {mod_filename}")
+                obj = asset_map[target_asset_name]
+                data = obj.read()
+                with open(mod_filepath, "rb") as f:
+                    data.m_Script = f.read().decode("utf-8", "surrogateescape")
+                data.save()
+                edited = True
+                
+            except Exception as e:
+                import traceback
+                report_progress(f"Error processing {mod_filename}: {traceback.format_exc()}")
+        
+        # ========== 階段三：平行處理 ASTC 紋理壓縮 ==========
+        if png_astc_files:
+            executor_type = "Thread" if IS_ANDROID else "Process"
+            report_progress(f"Phase 3: Parallel ASTC compression ({len(png_astc_files)} textures, {MAX_PARALLEL_TEXTURES} {executor_type} workers)...")
+            
+            # 準備 worker 參數
+            block_x, block_y = 4, 4
+            worker_args = [
+                (mod_filepath, target_asset_name, block_x, block_y)
+                for mod_filepath, target_asset_name in png_astc_files
+            ]
+            
+            compression_results = []
+            completed_count = 0
+            
+            # 根據環境選擇 Executor
+            # Android 上使用 ThreadPoolExecutor（ProcessPoolExecutor 不支援）
+            # 其他環境使用 ProcessPoolExecutor（能繞過 GIL，效能更好）
+            ExecutorClass = ThreadPoolExecutor if IS_ANDROID else ProcessPoolExecutor
+            
+            try:
+                with ExecutorClass(max_workers=MAX_PARALLEL_TEXTURES) as executor:
+                    # 提交所有任務
+                    future_to_args = {
+                        executor.submit(_compress_texture_worker, args): args 
+                        for args in worker_args
+                    }
+                    
+                    # 收集結果
+                    for future in as_completed(future_to_args):
+                        completed_count += 1
+                        args = future_to_args[future]
+                        mod_filename = os.path.basename(args[0])
+                        
+                        try:
+                            result = future.result()
+                            compression_results.append(result)
+                            
+                            if result['success']:
+                                # 減少進度訊息刷屏：數量多時只在 25% 進度點報告
+                                total = len(png_astc_files)
+                                if total <= 10 or completed_count == total or completed_count % max(1, total // 4) == 0:
+                                    report_progress(f"  Compression progress: {completed_count}/{total} ({100*completed_count//total}%)")
+                            else:
+                                # 錯誤一律即時報告
+                                report_progress(f"  ({completed_count}/{len(png_astc_files)}) FAILED: {mod_filename} - {result['error']}")
+                                
+                        except Exception as e:
+                            report_progress(f"  ({completed_count}/{len(png_astc_files)}) ERROR: {mod_filename} - {str(e)}")
+                            compression_results.append({
+                                'success': False,
+                                'target_asset_name': args[1],
+                                'mod_filepath': args[0],
+                                'error': str(e)
+                            })
+                            
+            except Exception as e:
+                report_progress(f"Executor failed, falling back to sequential processing: {e}")
+                # 回退到序列處理
+                completed_count = 0
+                for args in worker_args:
+                    completed_count += 1
+                    result = _compress_texture_worker(args)
+                    compression_results.append(result)
+                    mod_filename = os.path.basename(args[0])
+                    if not result['success']:
+                        report_progress(f"  FAILED (sequential): {mod_filename} - {result['error']}")
+                report_progress(f"  Sequential compression completed: {completed_count} textures")
+            
+            # ========== 階段四：將壓縮結果寫入 Bundle ==========
+            report_progress("Phase 4: Writing compressed textures to bundle...")
+            
+            success_count = 0
+            write_errors = []
+            total_to_write = sum(1 for r in compression_results if r['success'])
+            
+            for i, result in enumerate(compression_results):
+                if not result['success']:
+                    continue
+                    
+                target_asset_name = result['target_asset_name']
+                mod_filename = os.path.basename(result['mod_filepath'])
+                
+                try:
+                    obj = asset_map[target_asset_name]
+                    data = obj.read()
+                    
+                    data.m_TextureFormat = 48  # ASTC_RGB_4x4
+                    data.image_data = result['compressed_data']
+                    data.m_CompleteImageSize = len(result['compressed_data'])
+                    data.m_Width = result['width']
+                    data.m_Height = result['height']
+                    data.m_MipCount = 1
+                    
+                    if hasattr(data, 'm_StreamData'):
+                        data.m_StreamData.offset = 0
+                        data.m_StreamData.size = 0
+                        data.m_StreamData.path = ""
+                    
+                    data.save()
+                    edited = True
+                    success_count += 1
+                    
+                except Exception as e:
+                    error_msg = f"{mod_filename}: {e}"
+                    write_errors.append(error_msg)
+                    report_progress(f"  ERROR writing {mod_filename}: {e}")
+            
+            # 報告寫入結果
+            if write_errors:
+                report_progress(f"  Completed with {len(write_errors)} write error(s)")
+            report_progress(f"  Successfully wrote {success_count}/{len(png_astc_files)} ASTC textures")
+            
+            # 清理壓縮結果
+            del compression_results
+            gc.collect()
+        
+        # ========== 處理 RGBA32 紋理 (不需壓縮，序列處理) ==========
+        if png_rgba_files:
+            report_progress(f"Processing RGBA32 textures ({len(png_rgba_files)})...")
+            
+            for i, (mod_filepath, target_asset_name) in enumerate(png_rgba_files):
+                mod_filename = os.path.basename(mod_filepath)
+                current_progress = f"(RGBA {i+1}/{len(png_rgba_files)}) "
+                
+                pil_img = None
+                try:
+                    report_progress(f"{current_progress}Processing: {mod_filename}")
+                    obj = asset_map[target_asset_name]
+                    data = obj.read()
+                    
+                    pil_img = Image.open(mod_filepath).convert("RGBA")
+                    
+                    data.m_TextureFormat = 4  # RGBA32
+                    data.image_data = pil_img.tobytes()
+                    data.m_CompleteImageSize = len(data.image_data)
+                    data.m_Width, data.m_Height = pil_img.size
+                    data.m_MipCount = 1
+                    
+                    if hasattr(data, 'm_StreamData'):
+                        data.m_StreamData.offset = 0
+                        data.m_StreamData.size = 0
+                        data.m_StreamData.path = ""
+                    
+                    data.save()
+                    edited = True
+                    
+                except Exception as e:
+                    import traceback
+                    report_progress(f"Error processing {mod_filename}: {traceback.format_exc()}")
+                finally:
+                    if pil_img:
+                        pil_img.close()
+                        del pil_img
         
         del asset_map
         del mod_files
