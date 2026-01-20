@@ -486,23 +486,31 @@ void main() {
     vec4 texels[BLOCK_SIZE];
     uvec2 blockPos = uvec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y);
     
+    // Calculate the flipped block Y position for reading source pixels
+    // This flips at the block level, not pixel level, to maintain correct texel order within blocks
+    int sourceBlockY;
+    if (u_flipY == 1) {
+        // Flip: block 0 reads from bottom of texture, last block reads from top
+        sourceBlockY = int(blockNumY) - 1 - int(blockPos.y);
+    } else {
+        sourceBlockY = int(blockPos.y);
+    }
+    
     for (int k = 0; k < BLOCK_SIZE; ++k) {
-        uint y = uint(k) / uint(DIM);
-        uint x = uint(k) - y * uint(DIM);
+        int y = k / DIM;        // 0-3 within block
+        int x = k - y * DIM;    // 0-3 within block
         
-        ivec2 pixelPos = ivec2(blockPos) * DIM + ivec2(x, y);
+        // Calculate pixel position in source texture
+        int pixelX = int(blockPos.x) * DIM + x;
+        int pixelY = sourceBlockY * DIM + y;
         
         // Clamp to texture bounds
-        pixelPos.x = min(pixelPos.x, u_texelWidth - 1);
-        pixelPos.y = min(pixelPos.y, u_texelHeight - 1);
-        
-        // Apply Y-axis flip if needed (for Unity/OpenGL coordinate system)
-        if (u_flipY == 1) {
-            pixelPos.y = u_texelHeight - 1 - pixelPos.y;
-        }
+        pixelX = min(pixelX, u_texelWidth - 1);
+        pixelY = min(pixelY, u_texelHeight - 1);
+        pixelY = max(pixelY, 0);
         
         // Sample texture (already in 0-1 range, convert to 0-255)
-        vec4 texel = texelFetch(u_inputTexture, pixelPos, 0);
+        vec4 texel = texelFetch(u_inputTexture, ivec2(pixelX, pixelY), 0);
         texels[k] = texel * 255.0;
     }
     
