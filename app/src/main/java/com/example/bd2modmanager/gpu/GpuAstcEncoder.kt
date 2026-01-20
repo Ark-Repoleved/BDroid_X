@@ -146,7 +146,7 @@ class GpuAstcEncoder(private val shaderSource: String) : AutoCloseable {
             GLES31.glBindBuffer(GLES31.GL_SHADER_STORAGE_BUFFER, outputBuffer)
             GLES31.glBufferData(
                 GLES31.GL_SHADER_STORAGE_BUFFER,
-                outputSize.toLong(),
+                outputSize,
                 null,
                 GLES31.GL_DYNAMIC_READ
             )
@@ -188,7 +188,7 @@ class GpuAstcEncoder(private val shaderSource: String) : AutoCloseable {
             // Map buffer for reading
             val mapped = GLES31.glMapBufferRange(
                 GLES31.GL_SHADER_STORAGE_BUFFER,
-                0, outputSize.toLong(),
+                0, outputSize,
                 GLES31.GL_MAP_READ_BIT
             ) as? ByteBuffer
             
