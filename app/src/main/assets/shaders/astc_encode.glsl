@@ -377,7 +377,7 @@ void calculate_quantized_weights(vec4 texels[BLOCK_SIZE], uint weight_range, vec
 // ============================================================================
 // Block encoding
 // ============================================================================
-void encode_color(float4 e0, float4 e1, out uint endpoint_quantized[8]) {
+void encode_color(vec4 e0, vec4 e1, out uint endpoint_quantized[8]) {
     uvec4 e0q = uvec4(round(e0));
     uvec4 e1q = uvec4(round(e1));
     endpoint_quantized[0] = e0q.r;
