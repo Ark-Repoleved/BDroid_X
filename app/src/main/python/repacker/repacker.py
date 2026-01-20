@@ -19,6 +19,27 @@ MAX_PARALLEL_TEXTURES = min(4, max(1, (os.cpu_count() or 4) // 2))
 # Android 上 ProcessPoolExecutor 可能無法正常工作，改用 ThreadPoolExecutor
 IS_ANDROID = hasattr(sys, 'getandroidapilevel') or 'ANDROID_ROOT' in os.environ
 
+# GPU ASTC 壓縮支援
+_gpu_astc_checked = False
+_gpu_astc_available = False
+
+def _check_gpu_astc():
+    """檢查 GPU ASTC 壓縮是否可用"""
+    global _gpu_astc_checked, _gpu_astc_available
+    if _gpu_astc_checked:
+        return _gpu_astc_available
+    
+    _gpu_astc_checked = True
+    try:
+        from .gpu_astc import is_gpu_available
+        _gpu_astc_available = is_gpu_available()
+        print(f"[Repacker] GPU ASTC compression available: {_gpu_astc_available}")
+    except Exception as e:
+        print(f"[Repacker] GPU ASTC check failed: {e}")
+        _gpu_astc_available = False
+    
+    return _gpu_astc_available
+
 from UnityPy.helpers import TypeTreeHelper
 TypeTreeHelper.read_typetree_boost = False
 import UnityPy
@@ -27,6 +48,7 @@ UnityPy.config.FALLBACK_UNITY_VERSION = '2022.3.22f1'
 
 _astcenc_lib = None
 _astcenc_structures = {}
+
 
 def _load_astcenc_library():
     global _astcenc_lib
@@ -279,16 +301,16 @@ def compress_image_astc(image_bytes, width, height, block_x, block_y):
     return bytes(comp_buf), None
 
 
-def _compress_texture_worker(args):
+def _compress_texture_worker_gpu(args):
     """
-    Worker 函數，用於在子進程中執行 ASTC 壓縮。
+    Worker 函數，用於使用 GPU 執行 ASTC 壓縮。
     
     Args:
         args: tuple of (mod_filepath, target_asset_name, block_x, block_y)
     
     Returns:
         dict with keys: 'success', 'target_asset_name', 'mod_filepath', 
-                       'compressed_data', 'width', 'height', 'error'
+                       'compressed_data', 'width', 'height', 'error', 'used_gpu'
     """
     mod_filepath, target_asset_name, block_x, block_y = args
     result = {
@@ -298,7 +320,75 @@ def _compress_texture_worker(args):
         'compressed_data': None,
         'width': 0,
         'height': 0,
-        'error': None
+        'error': None,
+        'used_gpu': True
+    }
+    
+    pil_img = None
+    try:
+        # 先開啟圖片獲取尺寸
+        pil_img = Image.open(mod_filepath)
+        result['width'] = pil_img.width
+        result['height'] = pil_img.height
+        pil_img.close()
+        pil_img = None
+        
+        # 使用 GPU 壓縮（不需要預翻轉，shader 會處理）
+        from .gpu_astc import compress_with_gpu
+        import tempfile
+        
+        # 創建臨時輸出檔案
+        with tempfile.NamedTemporaryFile(suffix='.astc', delete=False) as tmp_out:
+            tmp_output_path = tmp_out.name
+        
+        try:
+            # GPU 壓縮（flipY=True 讓 shader 處理翻轉）
+            success = compress_with_gpu(mod_filepath, tmp_output_path, flip_y=True)
+            
+            if success:
+                with open(tmp_output_path, 'rb') as f:
+                    result['compressed_data'] = f.read()
+                result['success'] = True
+            else:
+                result['error'] = "GPU compression returned false"
+        finally:
+            if os.path.exists(tmp_output_path):
+                os.remove(tmp_output_path)
+                
+    except Exception as e:
+        import traceback
+        result['error'] = f"GPU compression exception: {str(e)}"
+        print(f"[GPU ASTC] Exception: {traceback.format_exc()}")
+    finally:
+        if pil_img:
+            pil_img.close()
+            del pil_img
+        gc.collect()
+    
+    return result
+
+
+def _compress_texture_worker_cpu(args):
+    """
+    Worker 函數，用於使用 CPU (libastcenc) 執行 ASTC 壓縮。
+    
+    Args:
+        args: tuple of (mod_filepath, target_asset_name, block_x, block_y)
+    
+    Returns:
+        dict with keys: 'success', 'target_asset_name', 'mod_filepath', 
+                       'compressed_data', 'width', 'height', 'error', 'used_gpu'
+    """
+    mod_filepath, target_asset_name, block_x, block_y = args
+    result = {
+        'success': False,
+        'target_asset_name': target_asset_name,
+        'mod_filepath': mod_filepath,
+        'compressed_data': None,
+        'width': 0,
+        'height': 0,
+        'error': None,
+        'used_gpu': False
     }
     
     pil_img = None
@@ -336,6 +426,32 @@ def _compress_texture_worker(args):
         gc.collect()
     
     return result
+
+
+def _compress_texture_worker(args):
+    """
+    Worker 函數，自動選擇 GPU 或 CPU 執行 ASTC 壓縮。
+    優先使用 GPU，失敗時自動 fallback 到 CPU。
+    
+    Args:
+        args: tuple of (mod_filepath, target_asset_name, block_x, block_y)
+    
+    Returns:
+        dict with keys: 'success', 'target_asset_name', 'mod_filepath', 
+                       'compressed_data', 'width', 'height', 'error', 'used_gpu'
+    """
+    # 檢查 GPU 是否可用
+    if _check_gpu_astc():
+        # 嘗試 GPU 壓縮
+        result = _compress_texture_worker_gpu(args)
+        if result['success']:
+            return result
+        
+        # GPU 失敗，fallback 到 CPU
+        print(f"[Repacker] GPU compression failed for {os.path.basename(args[0])}, falling back to CPU")
+    
+    # 使用 CPU 壓縮
+    return _compress_texture_worker_cpu(args)
 
 
 def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_path: str, use_astc: bool, progress_callback=None):
@@ -514,18 +630,17 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                 import traceback
                 report_progress(f"Error processing {mod_filename}: {traceback.format_exc()}")
         
-        # ========== 階段三：平行處理 ASTC 紋理壓縮 ==========
-        # 優化策略：單一 Executor + 完成一個就立即寫入，控制記憶體峰值
+        # ========== 階段三：ASTC 紋理壓縮 ==========
+        # 策略：
+        # - GPU 可用：序列處理（OpenGL context 是單執行緒的，但 GPU 本身很快）
+        # - GPU 不可用或失敗：CPU 並行處理
         if png_astc_files:
-            executor_type = "Thread" if IS_ANDROID else "Process"
             total_textures = len(png_astc_files)
-            
-            report_progress(f"Phase 3: Parallel ASTC compression ({total_textures} textures, {MAX_PARALLEL_TEXTURES} {executor_type} workers)...")
-            
             block_x, block_y = 4, 4
             total_success = 0
             total_failed = 0
-            completed_count = 0
+            gpu_success_count = 0
+            cpu_success_count = 0
             
             # 準備所有 worker 參數
             worker_args = [
@@ -533,114 +648,185 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                 for mod_filepath, target_asset_name in png_astc_files
             ]
             
-            # 根據環境選擇 Executor
-            ExecutorClass = ThreadPoolExecutor if IS_ANDROID else ProcessPoolExecutor
+            # 檢查 GPU 是否可用
+            use_gpu = _check_gpu_astc()
             
-            try:
-                with ExecutorClass(max_workers=MAX_PARALLEL_TEXTURES) as executor:
-                    # 一次提交所有任務
-                    future_to_args = {
-                        executor.submit(_compress_texture_worker, args): args 
-                        for args in worker_args
-                    }
+            if use_gpu:
+                # ========== GPU 序列處理模式 ==========
+                # OpenGL ES context 是單執行緒的，所以必須序列處理
+                # 但 GPU 壓縮非常快，所以這不是問題
+                report_progress(f"Phase 3: GPU ASTC compression ({total_textures} textures, sequential mode)...")
+                
+                gpu_failed_args = []  # 收集 GPU 失敗的紋理，稍後用 CPU 處理
+                
+                for i, args in enumerate(worker_args):
+                    mod_filepath, target_asset_name, bx, by = args
+                    mod_filename = os.path.basename(mod_filepath)
                     
-                    # 完成一個就立即處理（寫入 + 清理）
-                    for future in as_completed(future_to_args):
-                        completed_count += 1
-                        args = future_to_args[future]
-                        mod_filename = os.path.basename(args[0])
+                    try:
+                        result = _compress_texture_worker_gpu(args)
                         
-                        try:
-                            result = future.result()
-                            
-                            if result['success']:
-                                # 立即寫入 Bundle
-                                target_asset_name = result['target_asset_name']
-                                try:
-                                    obj = asset_map[target_asset_name]
-                                    data = obj.read()
-                                    
-                                    data.m_TextureFormat = 48  # ASTC_RGB_4x4
-                                    data.image_data = result['compressed_data']
-                                    data.m_CompleteImageSize = len(result['compressed_data'])
-                                    data.m_Width = result['width']
-                                    data.m_Height = result['height']
-                                    data.m_MipCount = 1
-                                    
-                                    if hasattr(data, 'm_StreamData'):
-                                        data.m_StreamData.offset = 0
-                                        data.m_StreamData.size = 0
-                                        data.m_StreamData.path = ""
-                                    
-                                    data.save()
-                                    edited = True
-                                    total_success += 1
-                                    
-                                except Exception as e:
-                                    total_failed += 1
-                                    report_progress(f"  Write error {mod_filename}: {e}")
-                            else:
-                                total_failed += 1
-                                report_progress(f"  FAILED: {mod_filename} - {result['error']}")
-                            
-                            # 立即清理這個結果的記憶體
-                            del result
-                                
-                        except Exception as e:
-                            total_failed += 1
-                            report_progress(f"  ERROR: {mod_filename} - {str(e)}")
-                        
-                        # 定期報告進度（每 25% 或每 10 個）
-                        if total_textures <= 10 or completed_count == total_textures or completed_count % max(1, total_textures // 4) == 0:
-                            report_progress(f"  Progress: {completed_count}/{total_textures} ({100*completed_count//total_textures}%)")
-                        
-                        # 定期執行 gc（每處理 10 個紋理）
-                        if completed_count % 10 == 0:
-                            gc.collect()
-                            
-            except Exception as e:
-                report_progress(f"Executor failed, falling back to sequential: {e}")
-                # 回退到序列處理
-                for args in worker_args:
-                    completed_count += 1
-                    result = _compress_texture_worker(args)
-                    
-                    if result['success']:
-                        target_asset_name = result['target_asset_name']
-                        mod_filename = os.path.basename(result['mod_filepath'])
-                        try:
+                        if result['success']:
+                            # 寫入 Bundle
                             obj = asset_map[target_asset_name]
                             data = obj.read()
-                            data.m_TextureFormat = 48
+                            
+                            data.m_TextureFormat = 48  # ASTC_RGB_4x4
                             data.image_data = result['compressed_data']
                             data.m_CompleteImageSize = len(result['compressed_data'])
                             data.m_Width = result['width']
                             data.m_Height = result['height']
                             data.m_MipCount = 1
+                            
                             if hasattr(data, 'm_StreamData'):
                                 data.m_StreamData.offset = 0
                                 data.m_StreamData.size = 0
                                 data.m_StreamData.path = ""
+                            
                             data.save()
                             edited = True
                             total_success += 1
-                        except Exception as e:
-                            total_failed += 1
-                    else:
-                        total_failed += 1
-                        mod_filename = os.path.basename(args[0])
-                        report_progress(f"  FAILED (seq): {mod_filename} - {result['error']}")
+                            gpu_success_count += 1
+                        else:
+                            # GPU 失敗，加入待處理列表
+                            gpu_failed_args.append(args)
+                        
+                        del result
+                        
+                    except Exception as e:
+                        gpu_failed_args.append(args)
                     
-                    del result
-                    if completed_count % 10 == 0:
+                    # 定期報告進度
+                    if (i + 1) % max(1, total_textures // 4) == 0 or i == total_textures - 1:
+                        report_progress(f"  GPU Progress: {i+1}/{total_textures}")
+                    
+                    # 定期 GC
+                    if (i + 1) % 20 == 0:
+                        gc.collect()
+                
+                # 如果有 GPU 失敗的，用 CPU 並行處理
+                if gpu_failed_args:
+                    report_progress(f"  {len(gpu_failed_args)} textures failed on GPU, falling back to CPU parallel processing...")
+                    worker_args = gpu_failed_args
+                    use_gpu = False  # 切換到 CPU 模式處理剩餘的
+                else:
+                    worker_args = []  # 全部完成
+                
+                report_progress(f"  GPU completed: {gpu_success_count} success")
+            
+            # ========== CPU 並行處理模式 ==========
+            # 用於 GPU 不可用，或 GPU 失敗的紋理
+            if worker_args:
+                executor_type = "Thread" if IS_ANDROID else "Process"
+                cpu_textures = len(worker_args)
+                
+                if use_gpu:
+                    # 這是 fallback 情況
+                    report_progress(f"Phase 3 (CPU fallback): Processing remaining {cpu_textures} textures with {MAX_PARALLEL_TEXTURES} {executor_type} workers...")
+                else:
+                    report_progress(f"Phase 3: CPU ASTC compression ({cpu_textures} textures, {MAX_PARALLEL_TEXTURES} {executor_type} workers)...")
+                
+                completed_count = 0
+                ExecutorClass = ThreadPoolExecutor if IS_ANDROID else ProcessPoolExecutor
+                
+                try:
+                    with ExecutorClass(max_workers=MAX_PARALLEL_TEXTURES) as executor:
+                        future_to_args = {
+                            executor.submit(_compress_texture_worker_cpu, args): args 
+                            for args in worker_args
+                        }
+                        
+                        for future in as_completed(future_to_args):
+                            completed_count += 1
+                            args = future_to_args[future]
+                            mod_filename = os.path.basename(args[0])
+                            
+                            try:
+                                result = future.result()
+                                
+                                if result['success']:
+                                    target_asset_name = result['target_asset_name']
+                                    try:
+                                        obj = asset_map[target_asset_name]
+                                        data = obj.read()
+                                        
+                                        data.m_TextureFormat = 48
+                                        data.image_data = result['compressed_data']
+                                        data.m_CompleteImageSize = len(result['compressed_data'])
+                                        data.m_Width = result['width']
+                                        data.m_Height = result['height']
+                                        data.m_MipCount = 1
+                                        
+                                        if hasattr(data, 'm_StreamData'):
+                                            data.m_StreamData.offset = 0
+                                            data.m_StreamData.size = 0
+                                            data.m_StreamData.path = ""
+                                        
+                                        data.save()
+                                        edited = True
+                                        total_success += 1
+                                        cpu_success_count += 1
+                                        
+                                    except Exception as e:
+                                        total_failed += 1
+                                        report_progress(f"  Write error {mod_filename}: {e}")
+                                else:
+                                    total_failed += 1
+                                    report_progress(f"  FAILED: {mod_filename} - {result['error']}")
+                                
+                                del result
+                                    
+                            except Exception as e:
+                                total_failed += 1
+                                report_progress(f"  ERROR: {mod_filename} - {str(e)}")
+                            
+                            # 定期報告進度
+                            if cpu_textures <= 10 or completed_count == cpu_textures or completed_count % max(1, cpu_textures // 4) == 0:
+                                report_progress(f"  CPU Progress: {completed_count}/{cpu_textures}")
+                            
+                            if completed_count % 10 == 0:
+                                gc.collect()
+                                
+                except Exception as e:
+                    report_progress(f"Executor failed, falling back to sequential: {e}")
+                    for args in worker_args:
+                        result = _compress_texture_worker_cpu(args)
+                        
+                        if result['success']:
+                            target_asset_name = result['target_asset_name']
+                            try:
+                                obj = asset_map[target_asset_name]
+                                data = obj.read()
+                                data.m_TextureFormat = 48
+                                data.image_data = result['compressed_data']
+                                data.m_CompleteImageSize = len(result['compressed_data'])
+                                data.m_Width = result['width']
+                                data.m_Height = result['height']
+                                data.m_MipCount = 1
+                                if hasattr(data, 'm_StreamData'):
+                                    data.m_StreamData.offset = 0
+                                    data.m_StreamData.size = 0
+                                    data.m_StreamData.path = ""
+                                data.save()
+                                edited = True
+                                total_success += 1
+                                cpu_success_count += 1
+                            except Exception as e:
+                                total_failed += 1
+                        else:
+                            total_failed += 1
+                        
+                        del result
                         gc.collect()
             
-            # 最終清理
+            # 清理和最終報告
             del worker_args
             gc.collect()
             
-            # 最終報告
-            report_progress(f"  ASTC compression complete: {total_success} success, {total_failed} failed")
+            compression_method = "GPU" if gpu_success_count > 0 else "CPU"
+            if gpu_success_count > 0 and cpu_success_count > 0:
+                compression_method = f"GPU({gpu_success_count})+CPU({cpu_success_count})"
+            report_progress(f"  ASTC compression complete ({compression_method}): {total_success} success, {total_failed} failed")
         
         # ========== 處理 RGBA32 紋理 (不需壓縮，序列處理) ==========
         if png_rgba_files:

@@ -17,6 +17,8 @@ import com.example.bd2modmanager.ui.theme.BD2ModManagerTheme
 import com.example.bd2modmanager.ui.viewmodel.MainViewModel
 import com.example.bd2modmanager.utils.SafManager
 
+import com.example.bd2modmanager.gpu.AstcCompressorBridge
+
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
@@ -25,6 +27,9 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         viewModel.initialize(applicationContext)
+        
+        // Initialize GPU ASTC compression bridge
+        AstcCompressorBridge.initialize(applicationContext)
 
         setContent {
             BD2ModManagerTheme {
