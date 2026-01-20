@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.locks.ReentrantLock
 
 /**
  * Bridge class for Python/Chaquopy to access GPU ASTC compression.
@@ -23,6 +24,13 @@ object AstcCompressorBridge {
     
     @Volatile
     private var isGpuAvailable: Boolean? = null
+    
+    // GPU 鎖，用於控制 GPU 訪問
+    private val gpuLock = ReentrantLock()
+    
+    // 追蹤哪個線程持有鎖（用於調試）
+    @Volatile
+    private var lockHolderThread: String? = null
     
     /**
      * Initialize the bridge with application context.
@@ -54,7 +62,50 @@ object AstcCompressorBridge {
     }
     
     /**
+     * Try to acquire the GPU lock without blocking.
+     * If the lock is available, acquire it and return true.
+     * If the lock is held by another thread, return false immediately.
+     * 
+     * @return true if lock was acquired, false if GPU is busy
+     */
+    @JvmStatic
+    fun tryAcquireGpu(): Boolean {
+        val acquired = gpuLock.tryLock()
+        if (acquired) {
+            lockHolderThread = Thread.currentThread().name
+            Log.d(TAG, "GPU lock acquired by ${lockHolderThread}")
+        } else {
+            Log.d(TAG, "GPU lock busy, held by ${lockHolderThread}")
+        }
+        return acquired
+    }
+    
+    /**
+     * Release the GPU lock.
+     * Must be called after compression is complete.
+     */
+    @JvmStatic
+    fun releaseGpuLock() {
+        if (gpuLock.isHeldByCurrentThread) {
+            Log.d(TAG, "GPU lock released by ${Thread.currentThread().name}")
+            lockHolderThread = null
+            gpuLock.unlock()
+        } else {
+            Log.w(TAG, "Attempted to release GPU lock not held by current thread")
+        }
+    }
+    
+    /**
+     * Check if GPU is currently busy (locked by another thread).
+     */
+    @JvmStatic
+    fun isGpuBusy(): Boolean {
+        return gpuLock.isLocked && !gpuLock.isHeldByCurrentThread
+    }
+    
+    /**
      * Compress an image file to ASTC format using GPU.
+     * This method requires the caller to already hold the GPU lock via tryAcquireGpu().
      * 
      * @param inputPath Path to input PNG file
      * @param outputPath Path to write compressed ASTC data
@@ -62,8 +113,37 @@ object AstcCompressorBridge {
      * @return true if compression succeeded, false otherwise
      */
     @JvmStatic
-    @Synchronized
+    fun compressWithGpuLocked(inputPath: String, outputPath: String, flipY: Boolean = true): Boolean {
+        if (!gpuLock.isHeldByCurrentThread) {
+            Log.e(TAG, "compressWithGpuLocked called without holding GPU lock!")
+            return false
+        }
+        return doCompressWithGpu(inputPath, outputPath, flipY)
+    }
+    
+    /**
+     * Compress an image file to ASTC format using GPU.
+     * This method will block until the GPU lock is available.
+     * For non-blocking behavior, use tryAcquireGpu() + compressWithGpuLocked() + releaseGpuLock().
+     * 
+     * @param inputPath Path to input PNG file
+     * @param outputPath Path to write compressed ASTC data
+     * @param flipY Whether to flip Y axis (default: true for Unity textures)
+     * @return true if compression succeeded, false otherwise
+     */
+    @JvmStatic
     fun compressWithGpu(inputPath: String, outputPath: String, flipY: Boolean = true): Boolean {
+        gpuLock.lock()
+        try {
+            lockHolderThread = Thread.currentThread().name
+            return doCompressWithGpu(inputPath, outputPath, flipY)
+        } finally {
+            lockHolderThread = null
+            gpuLock.unlock()
+        }
+    }
+    
+    private fun doCompressWithGpu(inputPath: String, outputPath: String, flipY: Boolean): Boolean {
         val context = applicationContext
         if (context == null) {
             Log.e(TAG, "Context not initialized")

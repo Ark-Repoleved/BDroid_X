@@ -334,7 +334,8 @@ def _compress_texture_worker_gpu(args):
         pil_img = None
         
         # 使用 GPU 壓縮（不需要預翻轉，shader 會處理）
-        from .gpu_astc import compress_with_gpu
+        # 注意：調用者必須已經持有 GPU 鎖
+        from .gpu_astc import compress_with_gpu_locked
         import tempfile
         
         # 創建臨時輸出檔案
@@ -343,7 +344,8 @@ def _compress_texture_worker_gpu(args):
         
         try:
             # GPU 壓縮（flipY=True 讓 shader 處理翻轉）
-            success = compress_with_gpu(mod_filepath, tmp_output_path, flip_y=True)
+            # 使用 locked 版本，因為調用者已經持有 GPU 鎖
+            success = compress_with_gpu_locked(mod_filepath, tmp_output_path, flip_y=True)
             
             if success:
                 with open(tmp_output_path, 'rb') as f:
@@ -632,8 +634,9 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
         
         # ========== 階段三：ASTC 紋理壓縮 ==========
         # 策略：
-        # - GPU 可用：序列處理（OpenGL context 是單執行緒的，但 GPU 本身很快）
-        # - GPU 不可用或失敗：CPU 並行處理
+        # - 嘗試取得 GPU 鎖，成功則使用 GPU 序列處理
+        # - 取得失敗（GPU 被其他 job 佔用）則使用 CPU 並行處理
+        # - 這樣可以讓 GPU 和 CPU 同時工作
         if png_astc_files:
             total_textures = len(png_astc_files)
             block_x, block_y = 4, 4
@@ -648,71 +651,86 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                 for mod_filepath, target_asset_name in png_astc_files
             ]
             
-            # 檢查 GPU 是否可用
-            use_gpu = _check_gpu_astc()
+            # 檢查 GPU 硬體是否支援
+            gpu_supported = _check_gpu_astc()
+            use_gpu = False
+            gpu_lock_acquired = False
             
-            if use_gpu:
-                # ========== GPU 序列處理模式 ==========
-                # OpenGL ES context 是單執行緒的，所以必須序列處理
-                # 但 GPU 壓縮非常快，所以這不是問題
-                report_progress(f"Phase 3: GPU ASTC compression ({total_textures} textures, sequential mode)...")
+            if gpu_supported:
+                # 嘗試取得 GPU 鎖（非阻塞）
+                from .gpu_astc import try_acquire_gpu, release_gpu_lock
+                gpu_lock_acquired = try_acquire_gpu()
+                use_gpu = gpu_lock_acquired
                 
+                if not gpu_lock_acquired:
+                    report_progress(f"Phase 3: CPU ASTC compression ({total_textures} textures, GPU busy - using parallel CPU)...")
+            else:
+                report_progress(f"Phase 3: CPU ASTC compression ({total_textures} textures, GPU not supported)...")
+            
+            # ========== GPU 處理模式（已取得鎖） ==========
+            if gpu_lock_acquired:
+                report_progress(f"Phase 3: GPU ASTC compression ({total_textures} textures, GPU lock acquired)...")
                 gpu_failed_args = []  # 收集 GPU 失敗的紋理，稍後用 CPU 處理
                 
-                for i, args in enumerate(worker_args):
-                    mod_filepath, target_asset_name, bx, by = args
-                    mod_filename = os.path.basename(mod_filepath)
-                    
-                    try:
-                        result = _compress_texture_worker_gpu(args)
+                try:
+                    for i, args in enumerate(worker_args):
+                        mod_filepath, target_asset_name, bx, by = args
+                        mod_filename = os.path.basename(mod_filepath)
                         
-                        if result['success']:
-                            # 寫入 Bundle
-                            obj = asset_map[target_asset_name]
-                            data = obj.read()
+                        try:
+                            result = _compress_texture_worker_gpu(args)
                             
-                            data.m_TextureFormat = 48  # ASTC_RGB_4x4
-                            data.image_data = result['compressed_data']
-                            data.m_CompleteImageSize = len(result['compressed_data'])
-                            data.m_Width = result['width']
-                            data.m_Height = result['height']
-                            data.m_MipCount = 1
+                            if result['success']:
+                                # 寫入 Bundle
+                                obj = asset_map[target_asset_name]
+                                data = obj.read()
+                                
+                                data.m_TextureFormat = 48  # ASTC_RGB_4x4
+                                data.image_data = result['compressed_data']
+                                data.m_CompleteImageSize = len(result['compressed_data'])
+                                data.m_Width = result['width']
+                                data.m_Height = result['height']
+                                data.m_MipCount = 1
+                                
+                                if hasattr(data, 'm_StreamData'):
+                                    data.m_StreamData.offset = 0
+                                    data.m_StreamData.size = 0
+                                    data.m_StreamData.path = ""
+                                
+                                data.save()
+                                edited = True
+                                total_success += 1
+                                gpu_success_count += 1
+                            else:
+                                # GPU 失敗，加入待處理列表
+                                gpu_failed_args.append(args)
                             
-                            if hasattr(data, 'm_StreamData'):
-                                data.m_StreamData.offset = 0
-                                data.m_StreamData.size = 0
-                                data.m_StreamData.path = ""
+                            del result
                             
-                            data.save()
-                            edited = True
-                            total_success += 1
-                            gpu_success_count += 1
-                        else:
-                            # GPU 失敗，加入待處理列表
+                        except Exception as e:
                             gpu_failed_args.append(args)
                         
-                        del result
+                        # 定期報告進度
+                        if (i + 1) % max(1, total_textures // 4) == 0 or i == total_textures - 1:
+                            report_progress(f"  GPU Progress: {i+1}/{total_textures}")
                         
-                    except Exception as e:
-                        gpu_failed_args.append(args)
+                        # 定期 GC
+                        if (i + 1) % 20 == 0:
+                            gc.collect()
                     
-                    # 定期報告進度
-                    if (i + 1) % max(1, total_textures // 4) == 0 or i == total_textures - 1:
-                        report_progress(f"  GPU Progress: {i+1}/{total_textures}")
+                    # 如果有 GPU 失敗的，用 CPU 並行處理
+                    if gpu_failed_args:
+                        report_progress(f"  {len(gpu_failed_args)} textures failed on GPU, falling back to CPU parallel processing...")
+                        worker_args = gpu_failed_args
+                    else:
+                        worker_args = []  # 全部完成
                     
-                    # 定期 GC
-                    if (i + 1) % 20 == 0:
-                        gc.collect()
-                
-                # 如果有 GPU 失敗的，用 CPU 並行處理
-                if gpu_failed_args:
-                    report_progress(f"  {len(gpu_failed_args)} textures failed on GPU, falling back to CPU parallel processing...")
-                    worker_args = gpu_failed_args
-                    use_gpu = False  # 切換到 CPU 模式處理剩餘的
-                else:
-                    worker_args = []  # 全部完成
-                
-                report_progress(f"  GPU completed: {gpu_success_count} success")
+                    report_progress(f"  GPU completed: {gpu_success_count} success")
+                    
+                finally:
+                    # 釋放 GPU 鎖，讓其他 job 可以使用（確保即使異常也釋放）
+                    release_gpu_lock()
+                    report_progress("  GPU lock released")
             
             # ========== CPU 並行處理模式 ==========
             # 用於 GPU 不可用，或 GPU 失敗的紋理

@@ -66,6 +66,7 @@ def is_gpu_available():
 def compress_with_gpu(input_path, output_path, flip_y=True):
     """
     Compress an image to ASTC format using GPU.
+    This will BLOCK until GPU is available.
     
     Args:
         input_path: Path to input PNG file
@@ -83,6 +84,81 @@ def compress_with_gpu(input_path, output_path, flip_y=True):
         return bridge.compressWithGpu(input_path, output_path, flip_y)
     except Exception as e:
         print(f"[GPU ASTC] Compression failed: {e}")
+        return False
+
+
+def try_acquire_gpu():
+    """
+    Try to acquire the GPU lock without blocking.
+    
+    Returns:
+        bool: True if lock was acquired, False if GPU is busy
+    """
+    bridge = _get_bridge()
+    if bridge is None:
+        return False
+    
+    try:
+        return bridge.tryAcquireGpu()
+    except Exception as e:
+        print(f"[GPU ASTC] Error acquiring GPU: {e}")
+        return False
+
+
+def release_gpu_lock():
+    """
+    Release the GPU lock.
+    Must be called after compression is complete if you used try_acquire_gpu().
+    """
+    bridge = _get_bridge()
+    if bridge is None:
+        return
+    
+    try:
+        bridge.releaseGpuLock()
+    except Exception as e:
+        print(f"[GPU ASTC] Error releasing GPU lock: {e}")
+
+
+def is_gpu_busy():
+    """
+    Check if GPU is currently busy (locked by another thread).
+    
+    Returns:
+        bool: True if GPU is busy, False if available
+    """
+    bridge = _get_bridge()
+    if bridge is None:
+        return True  # Assume busy if we can't check
+    
+    try:
+        return bridge.isGpuBusy()
+    except Exception as e:
+        print(f"[GPU ASTC] Error checking GPU busy: {e}")
+        return True
+
+
+def compress_with_gpu_locked(input_path, output_path, flip_y=True):
+    """
+    Compress using GPU when you already hold the lock.
+    Must call try_acquire_gpu() first!
+    
+    Args:
+        input_path: Path to input PNG file
+        output_path: Path to write compressed ASTC data
+        flip_y: Whether to flip Y axis
+    
+    Returns:
+        bool: True if compression succeeded, False otherwise
+    """
+    bridge = _get_bridge()
+    if bridge is None:
+        return False
+    
+    try:
+        return bridge.compressWithGpuLocked(input_path, output_path, flip_y)
+    except Exception as e:
+        print(f"[GPU ASTC] Locked compression failed: {e}")
         return False
 
 
