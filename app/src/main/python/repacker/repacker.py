@@ -118,6 +118,38 @@ def _load_astcenc_library():
 def get_error_string(astcenc_lib, status):
     return astcenc_lib.astcenc_get_error_string(status).decode('utf-8')
 
+
+def _build_file_index(working_dir: str) -> dict:
+    """
+    一次遍歷建立完整的檔案索引，避免重複 os.walk 操作。
+    
+    Returns:
+        dict with keys:
+        - 'skel_json': {base_name: (type, filepath, directory)}
+        - 'all_files': [filepath, ...]
+    """
+    index = {
+        'skel_json': {},   # base_name -> (type, path, directory)
+        'all_files': []    # [path]
+    }
+    
+    for root, _, files in os.walk(working_dir):
+        if '.old' in root:
+            continue
+        for f in files:
+            filepath = os.path.join(root, f)
+            index['all_files'].append(filepath)
+            f_lower = f.lower()
+            
+            if f_lower.endswith(('.skel', '.json')):
+                base_name = os.path.splitext(f)[0]
+                file_type = 'skel' if f_lower.endswith('.skel') else 'json'
+                if base_name not in index['skel_json']:
+                    index['skel_json'][base_name] = (file_type, filepath, root)
+    
+    return index
+
+
 from utils.atlas_operations import parse_atlas_file
 
 def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
@@ -467,27 +499,24 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
         print(message)
         
     env = None
-    temp_dir_obj = None
     try:
-        temp_dir_obj = tempfile.TemporaryDirectory()
-        working_dir = os.path.join(temp_dir_obj.name, "mod")
-        report_progress(f"Using temporary directory: {working_dir}")
-        shutil.copytree(modded_assets_folder, working_dir)
+        # 直接使用 Kotlin 層已準備好的 mod 目錄，避免重複複製
+        working_dir = modded_assets_folder
+        report_progress(f"Using mod directory: {working_dir}")
 
         report_progress("Loading original game file...")
         env = UnityPy.load(original_bundle_path)
         edited = False
 
-        # --- Pre-processing Step: Scan for all unique spine mods and their paths ---
-        spine_mods_to_process = {}  # base_name -> directory_path
-        for root, _, files in os.walk(working_dir):
-            if '.old' in root:
-                continue
-            for f in files:
-                if f.lower().endswith(('.skel', '.json')):
-                    base_name = os.path.splitext(f)[0]
-                    if base_name not in spine_mods_to_process:
-                        spine_mods_to_process[base_name] = root
+        # --- 建立檔案索引，一次遍歷取代多次 os.walk ---
+        report_progress("Building file index...")
+        file_index = _build_file_index(working_dir)
+        
+        # 從索引中取得 spine mods
+        spine_mods_to_process = {
+            base_name: directory 
+            for base_name, (file_type, filepath, directory) in file_index['skel_json'].items()
+        }
 
         if spine_mods_to_process:
             report_progress(f"Detected {len(spine_mods_to_process)} unique Spine mods for pre-processing: {list(spine_mods_to_process.keys())}")
@@ -518,6 +547,8 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                         report_progress(f"ERROR during merge for {spine_base_name}: {merge_error}.")
                     else:
                         report_progress(f"Merge successful for {spine_base_name}.")
+                        # 合併後需要重新建立索引以包含新檔案
+                        file_index = _build_file_index(working_dir)
                 else:
                     report_progress("Texture count matches or is lower, no merge needed.")
 
@@ -534,13 +565,8 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
             except Exception:
                 pass  # Skip objects that can't be read
 
-        mod_files = []
-        for root, _, files in os.walk(working_dir):
-            if '.old' in root:
-                continue
-            for f in files:
-                mod_files.append(os.path.join(root, f))
-
+        # 直接使用索引中的檔案列表
+        mod_files = file_index['all_files']
         total_assets = len(mod_files)
         
         # ========== 階段一：分類所有 mod 檔案 ==========
@@ -912,6 +938,4 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
     finally:
         if env is not None:
             del env
-        if temp_dir_obj:
-            temp_dir_obj.cleanup()
         gc.collect()
