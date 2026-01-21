@@ -316,6 +316,7 @@ void find_min_max(vec4 texels[BLOCK_SIZE], vec4 pt_mean, vec4 vec_k, out vec4 e0
 }
 
 void principal_component_analysis(vec4 texels[BLOCK_SIZE], out vec4 e0, out vec4 e1) {
+    // 注意：輸入的 texels 應該已經在 encode_block 中預處理過
     vec4 pt_mean = vec4(0.0);
     for (int i = 0; i < BLOCK_SIZE; ++i) {
         pt_mean += texels[i];
@@ -439,8 +440,36 @@ uvec4 assemble_block(uint blockmode, uint color_endpoint_mode, uvec4 ep_ise, uve
 }
 
 uvec4 encode_block(vec4 texels[BLOCK_SIZE]) {
+    // === 預處理：處理透明像素的 RGB 值 ===
+    // 問題：透明像素（alpha ≈ 0）的 RGB 通常是黑色 (0,0,0)
+    // 這會導致 block 邊界出現黑色條紋
+    // 解決方案：將透明像素的 RGB 替換為不透明像素的平均色
+    
+    vec3 opaqueSum = vec3(0.0);
+    float opaqueCount = 0.0;
+    float alphaThreshold = 10.0;
+    
+    for (int i = 0; i < BLOCK_SIZE; ++i) {
+        if (texels[i].a >= alphaThreshold) {
+            opaqueSum += texels[i].rgb;
+            opaqueCount += 1.0;
+        }
+    }
+    
+    vec3 opaqueAvg = (opaqueCount > 0.0) ? (opaqueSum / opaqueCount) : vec3(128.0);
+    
+    vec4 processedTexels[BLOCK_SIZE];
+    for (int i = 0; i < BLOCK_SIZE; ++i) {
+        if (texels[i].a < alphaThreshold) {
+            processedTexels[i] = vec4(opaqueAvg, texels[i].a);
+        } else {
+            processedTexels[i] = texels[i];
+        }
+    }
+    
+    // === 使用處理後的像素進行壓縮 ===
     vec4 ep0, ep1;
-    principal_component_analysis(texels, ep0, ep1);
+    principal_component_analysis(processedTexels, ep0, ep1);
 
     // HAS_ALPHA = 1: use QUANT_6 for weights
     uint weight_quantmethod = uint(QUANT_6);
@@ -456,9 +485,9 @@ uvec4 encode_block(vec4 texels[BLOCK_SIZE]) {
     uvec4 ep_ise = uvec4(0u);
     bise_endpoints(ep_quantized, int(endpoint_quantmethod), ep_ise);
 
-    // Encode weights
+    // Encode weights - 使用處理後的像素
     uint wt_quantized[16];
-    calculate_quantized_weights(texels, weight_range - 1u, ep0, ep1, wt_quantized);
+    calculate_quantized_weights(processedTexels, weight_range - 1u, ep0, ep1, wt_quantized);
     for (int i = 0; i < 16; ++i) {
         int w = int(weight_quantmethod) * WEIGHT_QUANTIZE_NUM + int(wt_quantized[i]);
         wt_quantized[i] = uint(scramble_table[w]);
@@ -492,13 +521,14 @@ void main() {
         
         ivec2 pixelPos = ivec2(blockPos) * DIM + ivec2(x, y);
         
-        // Apply Y-axis flip FIRST (before clamping)
+        // Clamp to texture bounds
+        pixelPos.x = min(pixelPos.x, u_texelWidth - 1);
+        pixelPos.y = min(pixelPos.y, u_texelHeight - 1);
+        
+        // Apply Y-axis flip if needed (for Unity/OpenGL coordinate system)
         if (u_flipY == 1) {
             pixelPos.y = u_texelHeight - 1 - pixelPos.y;
         }
-        
-        // Then clamp to texture bounds (handles edge blocks correctly)
-        pixelPos = clamp(pixelPos, ivec2(0), ivec2(u_texelWidth - 1, u_texelHeight - 1));
         
         // Sample texture (already in 0-1 range, convert to 0-255)
         vec4 texel = texelFetch(u_inputTexture, pixelPos, 0);
