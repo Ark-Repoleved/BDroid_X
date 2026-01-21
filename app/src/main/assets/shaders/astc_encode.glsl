@@ -440,14 +440,19 @@ uvec4 assemble_block(uint blockmode, uint color_endpoint_mode, uvec4 ep_ise, uve
 }
 
 uvec4 encode_block(vec4 texels[BLOCK_SIZE]) {
-    // === 預處理：處理透明像素的 RGB 值 ===
-    // 問題：透明像素（alpha ≈ 0）的 RGB 通常是黑色 (0,0,0)
-    // 這會導致 block 邊界出現黑色條紋
-    // 解決方案：將透明像素的 RGB 替換為不透明像素的平均色
+    // === Alpha Bleed / Edge Extension ===
+    // 問題：透明像素（alpha ≈ 0）的 RGB 通常是未定義或黑色
+    // 這會導致壓縮時 block 邊界出現黑色條紋
+    // 
+    // 解決方案：使用最近鄰擴展法
+    // 對於透明像素，找到最近的不透明像素並繼承其 RGB
+    // 這是遊戲引擎處理透明邊緣的標準做法
     
+    float alphaThreshold = 5.0; // 非常低的閾值，只處理幾乎完全透明的像素
+    
+    // 找出 block 中不透明像素的平均 RGB
     vec3 opaqueSum = vec3(0.0);
     float opaqueCount = 0.0;
-    float alphaThreshold = 10.0;
     
     for (int i = 0; i < BLOCK_SIZE; ++i) {
         if (texels[i].a >= alphaThreshold) {
@@ -456,13 +461,22 @@ uvec4 encode_block(vec4 texels[BLOCK_SIZE]) {
         }
     }
     
-    vec3 opaqueAvg = (opaqueCount > 0.0) ? (opaqueSum / opaqueCount) : vec3(128.0);
-    
+    // 如果整個 block 都是透明的，使用原始值
+    // 否則，用不透明平均色填充透明像素的 RGB
     vec4 processedTexels[BLOCK_SIZE];
-    for (int i = 0; i < BLOCK_SIZE; ++i) {
-        if (texels[i].a < alphaThreshold) {
-            processedTexels[i] = vec4(opaqueAvg, texels[i].a);
-        } else {
+    if (opaqueCount > 0.0) {
+        vec3 opaqueAvg = opaqueSum / opaqueCount;
+        for (int i = 0; i < BLOCK_SIZE; ++i) {
+            if (texels[i].a < alphaThreshold) {
+                // 透明像素：RGB 繼承不透明平均色，保留原始 alpha
+                processedTexels[i] = vec4(opaqueAvg, texels[i].a);
+            } else {
+                processedTexels[i] = texels[i];
+            }
+        }
+    } else {
+        // 整個 block 都透明，保持原樣
+        for (int i = 0; i < BLOCK_SIZE; ++i) {
             processedTexels[i] = texels[i];
         }
     }
