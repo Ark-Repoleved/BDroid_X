@@ -316,23 +316,34 @@ void find_min_max(vec4 texels[BLOCK_SIZE], vec4 pt_mean, vec4 vec_k, out vec4 e0
 }
 
 void principal_component_analysis(vec4 texels[BLOCK_SIZE], out vec4 e0, out vec4 e1) {
-    // 注意：輸入的 texels 應該已經在 encode_block 中預處理過
+    // === ARM astc-encoder 風格的 Alpha Weighting ===
+    // 根據 alpha 值加權每個像素對 PCA 的貢獻
+    // 透明像素對 RGB 誤差的貢獻較小
+    
+    // 計算 alpha 加權平均值
     vec4 pt_mean = vec4(0.0);
+    float totalWeight = 0.0;
+    
     for (int i = 0; i < BLOCK_SIZE; ++i) {
-        pt_mean += texels[i];
+        // 使用 alpha 作為權重，但確保最小權重為 0.01 避免除零
+        float weight = max(texels[i].a / 255.0, 0.01);
+        pt_mean += texels[i] * weight;
+        totalWeight += weight;
     }
-    pt_mean /= float(BLOCK_SIZE);
+    pt_mean /= max(totalWeight, 0.01);
 
+    // 計算 alpha 加權協方差矩陣
     mat4 cov = mat4(0.0);
     for (int k = 0; k < BLOCK_SIZE; ++k) {
+        float weight = max(texels[k].a / 255.0, 0.01);
         vec4 texel = texels[k] - pt_mean;
         for (int i = 0; i < 4; ++i) {
             for (int j = 0; j < 4; ++j) {
-                cov[i][j] += texel[i] * texel[j];
+                cov[i][j] += texel[i] * texel[j] * weight;
             }
         }
     }
-    cov /= float(BLOCK_SIZE - 1);
+    cov /= max(totalWeight, 0.01);
 
     vec4 vec_k = eigen_vector(cov);
     find_min_max(texels, pt_mean, vec_k, e0, e1);
@@ -440,50 +451,12 @@ uvec4 assemble_block(uint blockmode, uint color_endpoint_mode, uvec4 ep_ise, uve
 }
 
 uvec4 encode_block(vec4 texels[BLOCK_SIZE]) {
-    // === Alpha Bleed / Edge Extension ===
-    // 問題：透明像素（alpha ≈ 0）的 RGB 通常是未定義或黑色
-    // 這會導致壓縮時 block 邊界出現黑色條紋
-    // 
-    // 解決方案：使用最近鄰擴展法
-    // 對於透明像素，找到最近的不透明像素並繼承其 RGB
-    // 這是遊戲引擎處理透明邊緣的標準做法
+    // === ARM astc-encoder 風格的處理 ===
+    // Alpha weighting 已在 principal_component_analysis 中實作
+    // 這裡直接使用原始像素
     
-    float alphaThreshold = 5.0; // 非常低的閾值，只處理幾乎完全透明的像素
-    
-    // 找出 block 中不透明像素的平均 RGB
-    vec3 opaqueSum = vec3(0.0);
-    float opaqueCount = 0.0;
-    
-    for (int i = 0; i < BLOCK_SIZE; ++i) {
-        if (texels[i].a >= alphaThreshold) {
-            opaqueSum += texels[i].rgb;
-            opaqueCount += 1.0;
-        }
-    }
-    
-    // 如果整個 block 都是透明的，使用原始值
-    // 否則，用不透明平均色填充透明像素的 RGB
-    vec4 processedTexels[BLOCK_SIZE];
-    if (opaqueCount > 0.0) {
-        vec3 opaqueAvg = opaqueSum / opaqueCount;
-        for (int i = 0; i < BLOCK_SIZE; ++i) {
-            if (texels[i].a < alphaThreshold) {
-                // 透明像素：RGB 繼承不透明平均色，保留原始 alpha
-                processedTexels[i] = vec4(opaqueAvg, texels[i].a);
-            } else {
-                processedTexels[i] = texels[i];
-            }
-        }
-    } else {
-        // 整個 block 都透明，保持原樣
-        for (int i = 0; i < BLOCK_SIZE; ++i) {
-            processedTexels[i] = texels[i];
-        }
-    }
-    
-    // === 使用處理後的像素進行壓縮 ===
     vec4 ep0, ep1;
-    principal_component_analysis(processedTexels, ep0, ep1);
+    principal_component_analysis(texels, ep0, ep1);
 
     // HAS_ALPHA = 1: use QUANT_6 for weights
     uint weight_quantmethod = uint(QUANT_6);
@@ -499,9 +472,9 @@ uvec4 encode_block(vec4 texels[BLOCK_SIZE]) {
     uvec4 ep_ise = uvec4(0u);
     bise_endpoints(ep_quantized, int(endpoint_quantmethod), ep_ise);
 
-    // Encode weights - 使用處理後的像素
+    // Encode weights
     uint wt_quantized[16];
-    calculate_quantized_weights(processedTexels, weight_range - 1u, ep0, ep1, wt_quantized);
+    calculate_quantized_weights(texels, weight_range - 1u, ep0, ep1, wt_quantized);
     for (int i = 0; i < 16; ++i) {
         int w = int(weight_quantmethod) * WEIGHT_QUANTIZE_NUM + int(wt_quantized[i]);
         wt_quantized[i] = uint(scramble_table[w]);
