@@ -438,15 +438,124 @@ uvec4 assemble_block(uint blockmode, uint color_endpoint_mode, uvec4 ep_ise, uve
     return phy_blk;
 }
 
-uvec4 encode_block(vec4 texels[BLOCK_SIZE]) {
-    vec4 ep0, ep1;
-    principal_component_analysis(texels, ep0, ep1);
+// Calculate error for a given endpoint pair
+float calculate_block_error(vec4 texels[BLOCK_SIZE], vec4 ep0, vec4 ep1, uint weight_range) {
+    vec4 vec_k = ep1 - ep0;
+    float error = 0.0;
+    
+    if (length(vec_k) < SMALL_VALUE) {
+        // Both endpoints same, error is distance from mean
+        for (int i = 0; i < BLOCK_SIZE; ++i) {
+            vec4 diff = texels[i] - ep0;
+            error += dot(diff, diff);
+        }
+        return error;
+    }
+    
+    vec_k = normalize(vec_k);
+    float len = length(ep1 - ep0);
+    
+    for (int i = 0; i < BLOCK_SIZE; ++i) {
+        // Project texel onto line
+        float t = dot(texels[i] - ep0, vec_k);
+        t = clamp(t, 0.0, len);
+        
+        // Quantize weight
+        float w = t / max(len, SMALL_VALUE);
+        uint qw = uint(round(w * float(weight_range)));
+        qw = min(qw, weight_range);
+        
+        // Reconstruct color
+        float dw = float(qw) / float(weight_range);
+        vec4 reconstructed = mix(ep0, ep1, dw);
+        
+        // Calculate error
+        vec4 diff = texels[i] - reconstructed;
+        error += dot(diff, diff);
+    }
+    
+    return error;
+}
 
-    // HAS_ALPHA = 1: use QUANT_6 for weights
-    uint weight_quantmethod = uint(QUANT_6);
+// Find min/max endpoints (alternative to PCA)
+void find_minmax_endpoints(vec4 texels[BLOCK_SIZE], out vec4 e0, out vec4 e1) {
+    vec4 minVal = vec4(255.0);
+    vec4 maxVal = vec4(0.0);
+    
+    for (int i = 0; i < BLOCK_SIZE; ++i) {
+        minVal = min(minVal, texels[i]);
+        maxVal = max(maxVal, texels[i]);
+    }
+    
+    e0 = minVal;
+    e1 = maxVal;
+}
+
+// Find luminance-based endpoints
+void find_luma_endpoints(vec4 texels[BLOCK_SIZE], out vec4 e0, out vec4 e1) {
+    float minLuma = 1e31;
+    float maxLuma = -1e31;
+    int minIdx = 0;
+    int maxIdx = 0;
+    
+    for (int i = 0; i < BLOCK_SIZE; ++i) {
+        float luma = dot(texels[i].rgb, vec3(0.299, 0.587, 0.114));
+        if (luma < minLuma) {
+            minLuma = luma;
+            minIdx = i;
+        }
+        if (luma > maxLuma) {
+            maxLuma = luma;
+            maxIdx = i;
+        }
+    }
+    
+    e0 = texels[minIdx];
+    e1 = texels[maxIdx];
+}
+
+uvec4 encode_block(vec4 texels[BLOCK_SIZE]) {
+    // Try multiple endpoint strategies and pick the best one
+    vec4 ep0_pca, ep1_pca;
+    vec4 ep0_minmax, ep1_minmax;
+    vec4 ep0_luma, ep1_luma;
+    
+    principal_component_analysis(texels, ep0_pca, ep1_pca);
+    find_minmax_endpoints(texels, ep0_minmax, ep1_minmax);
+    find_luma_endpoints(texels, ep0_luma, ep1_luma);
+    
+    // Use higher weight quantization for better quality
+    // QUANT_12 = 12 levels (0-11), much better than QUANT_6
+    uint weight_quantmethod = uint(QUANT_12);
     uint endpoint_quantmethod = uint(QUANT_256);
-    uint weight_range = 6u;
-    uint colorquant_index = 7u;
+    uint weight_range = 12u;
+    
+    // Calculate error for each strategy
+    float error_pca = calculate_block_error(texels, ep0_pca, ep1_pca, weight_range - 1u);
+    float error_minmax = calculate_block_error(texels, ep0_minmax, ep1_minmax, weight_range - 1u);
+    float error_luma = calculate_block_error(texels, ep0_luma, ep1_luma, weight_range - 1u);
+    
+    // Pick best endpoints
+    vec4 ep0, ep1;
+    if (error_pca <= error_minmax && error_pca <= error_luma) {
+        ep0 = ep0_pca;
+        ep1 = ep1_pca;
+    } else if (error_minmax <= error_luma) {
+        ep0 = ep0_minmax;
+        ep1 = ep1_minmax;
+    } else {
+        ep0 = ep0_luma;
+        ep1 = ep1_luma;
+    }
+    
+    // Ensure first endpoint is darkest (for consistency)
+    vec4 e0u = round(ep0);
+    vec4 e1u = round(ep1);
+    if (e0u.x + e0u.y + e0u.z > e1u.x + e1u.y + e1u.z) {
+        vec4 tmp = ep0;
+        ep0 = ep1;
+        ep1 = tmp;
+    }
 
     uint blockmode = assemble_blockmode(weight_quantmethod);
 
@@ -456,7 +565,7 @@ uvec4 encode_block(vec4 texels[BLOCK_SIZE]) {
     uvec4 ep_ise = uvec4(0u);
     bise_endpoints(ep_quantized, int(endpoint_quantmethod), ep_ise);
 
-    // Encode weights
+    // Encode weights with higher precision
     uint wt_quantized[16];
     calculate_quantized_weights(texels, weight_range - 1u, ep0, ep1, wt_quantized);
     for (int i = 0; i < 16; ++i) {
