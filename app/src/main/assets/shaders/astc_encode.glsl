@@ -316,34 +316,22 @@ void find_min_max(vec4 texels[BLOCK_SIZE], vec4 pt_mean, vec4 vec_k, out vec4 e0
 }
 
 void principal_component_analysis(vec4 texels[BLOCK_SIZE], out vec4 e0, out vec4 e1) {
-    // === ARM astc-encoder 風格的 Alpha Weighting ===
-    // 根據 alpha 值加權每個像素對 PCA 的貢獻
-    // 透明像素對 RGB 誤差的貢獻較小
-    
-    // 計算 alpha 加權平均值
     vec4 pt_mean = vec4(0.0);
-    float totalWeight = 0.0;
-    
     for (int i = 0; i < BLOCK_SIZE; ++i) {
-        // 使用 alpha 作為權重，但確保最小權重為 0.01 避免除零
-        float weight = max(texels[i].a / 255.0, 0.01);
-        pt_mean += texels[i] * weight;
-        totalWeight += weight;
+        pt_mean += texels[i];
     }
-    pt_mean /= max(totalWeight, 0.01);
+    pt_mean /= float(BLOCK_SIZE);
 
-    // 計算 alpha 加權協方差矩陣
     mat4 cov = mat4(0.0);
     for (int k = 0; k < BLOCK_SIZE; ++k) {
-        float weight = max(texels[k].a / 255.0, 0.01);
         vec4 texel = texels[k] - pt_mean;
         for (int i = 0; i < 4; ++i) {
             for (int j = 0; j < 4; ++j) {
-                cov[i][j] += texel[i] * texel[j] * weight;
+                cov[i][j] += texel[i] * texel[j];
             }
         }
     }
-    cov /= max(totalWeight, 0.01);
+    cov /= float(BLOCK_SIZE - 1);
 
     vec4 vec_k = eigen_vector(cov);
     find_min_max(texels, pt_mean, vec_k, e0, e1);
@@ -451,10 +439,6 @@ uvec4 assemble_block(uint blockmode, uint color_endpoint_mode, uvec4 ep_ise, uve
 }
 
 uvec4 encode_block(vec4 texels[BLOCK_SIZE]) {
-    // === ARM astc-encoder 風格的處理 ===
-    // Alpha weighting 已在 principal_component_analysis 中實作
-    // 這裡直接使用原始像素
-    
     vec4 ep0, ep1;
     principal_component_analysis(texels, ep0, ep1);
 
@@ -521,6 +505,38 @@ void main() {
         vec4 texel = texelFetch(u_inputTexture, pixelPos, 0);
         texels[k] = texel * 255.0;
     }
+    
+    // ===========================================
+    // Fix: Dark Halo / Black Fringes Artifacts
+    // ===========================================
+    // Dillemma: Transparent pixels often have (0,0,0) RGB.
+    // When compressed, these black values pull the block endpoints towards black,
+    // causing dark fringes at the seams of sprites.
+    // Solution: For fully transparent pixels, replace their RGB with the 
+    // average RGB of non-transparent pixels in this block.
+    
+    vec3 avgRGB = vec3(0.0);
+    float count = 0.0;
+    
+    // 1. Calculate average RGB of visible pixels
+    for (int k = 0; k < BLOCK_SIZE; ++k) {
+        if (texels[k].a > 10.0) { // Threshold ~4/255
+            avgRGB += texels[k].rgb;
+            count += 1.0;
+        }
+    }
+    
+    // 2. Apply average to transparent pixels
+    if (count > 0.0) {
+        avgRGB /= count;
+        
+        for (int k = 0; k < BLOCK_SIZE; ++k) {
+            if (texels[k].a <= 10.0) {
+                texels[k].rgb = avgRGB;
+            }
+        }
+    }
+    // If block is fully transparent, we leave it as is (optimized later)
     
     u_output.blocks[blockID] = encode_block(texels);
 }
