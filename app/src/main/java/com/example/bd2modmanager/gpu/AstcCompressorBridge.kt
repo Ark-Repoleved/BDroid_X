@@ -163,7 +163,11 @@ object AstcCompressorBridge {
                 return false
             }
             
-            val bitmap = BitmapFactory.decodeFile(inputPath)
+            val options = BitmapFactory.Options()
+            options.inPremultiplied = false
+            options.inPreferredConfig = Bitmap.Config.ARGB_8888
+            
+            val bitmap = BitmapFactory.decodeFile(inputPath, options)
             if (bitmap == null) {
                 Log.e(TAG, "Failed to decode image: $inputPath")
                 return false
