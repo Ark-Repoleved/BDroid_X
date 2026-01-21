@@ -174,21 +174,23 @@ object AstcCompressorBridge {
             }
             
             try {
-                // Initialize encoder if needed
-                if (encoder == null) {
-                    val shaderSource = loadShaderSource(context)
-                    if (shaderSource == null) {
-                        Log.e(TAG, "Failed to load shader source")
-                        return false
-                    }
-                    
-                    encoder = GpuAstcEncoder(shaderSource)
-                    if (!encoder!!.initialize()) {
-                        Log.e(TAG, "Failed to initialize GPU encoder")
-                        encoder?.close()
-                        encoder = null
-                        return false
-                    }
+                // 每次都創建新的 encoder，因為 EGL context 是線程綁定的
+                // 不同的線程需要各自的 EGL context
+                encoder?.close()
+                encoder = null
+                
+                val shaderSource = loadShaderSource(context)
+                if (shaderSource == null) {
+                    Log.e(TAG, "Failed to load shader source")
+                    return false
+                }
+                
+                encoder = GpuAstcEncoder(shaderSource)
+                if (!encoder!!.initialize()) {
+                    Log.e(TAG, "Failed to initialize GPU encoder")
+                    encoder?.close()
+                    encoder = null
+                    return false
                 }
                 
                 // Compress
