@@ -506,37 +506,5 @@ void main() {
         texels[k] = texel * 255.0;
     }
     
-    // ===========================================
-    // Fix: Dark Halo / Black Fringes Artifacts
-    // ===========================================
-    // Dillemma: Transparent pixels often have (0,0,0) RGB.
-    // When compressed, these black values pull the block endpoints towards black,
-    // causing dark fringes at the seams of sprites.
-    // Solution: For fully transparent pixels, replace their RGB with the 
-    // average RGB of non-transparent pixels in this block.
-    
-    vec3 avgRGB = vec3(0.0);
-    float count = 0.0;
-    
-    // 1. Calculate average RGB of visible pixels
-    for (int k = 0; k < BLOCK_SIZE; ++k) {
-        if (texels[k].a > 10.0) { // Threshold ~4/255
-            avgRGB += texels[k].rgb;
-            count += 1.0;
-        }
-    }
-    
-    // 2. Apply average to transparent pixels
-    if (count > 0.0) {
-        avgRGB /= count;
-        
-        for (int k = 0; k < BLOCK_SIZE; ++k) {
-            if (texels[k].a <= 10.0) {
-                texels[k].rgb = avgRGB;
-            }
-        }
-    }
-    // If block is fully transparent, we leave it as is (optimized later)
-    
     u_output.blocks[blockID] = encode_block(texels);
 }
