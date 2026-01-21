@@ -220,6 +220,8 @@ class GpuAstcEncoder(private val shaderSource: String) : AutoCloseable {
             if (outputBuffer != 0) {
                 GLES31.glDeleteBuffers(1, intArrayOf(outputBuffer), 0)
             }
+            // 解除 EGL context 綁定，讓其他線程可以使用
+            EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
         }
     }
     
