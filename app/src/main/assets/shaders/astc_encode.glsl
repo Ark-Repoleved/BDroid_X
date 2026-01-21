@@ -524,11 +524,11 @@ uvec4 encode_block(vec4 texels[BLOCK_SIZE]) {
     find_minmax_endpoints(texels, ep0_minmax, ep1_minmax);
     find_luma_endpoints(texels, ep0_luma, ep1_luma);
     
-    // Use higher weight quantization for better quality
-    // QUANT_12 = 12 levels (0-11), much better than QUANT_6
-    uint weight_quantmethod = uint(QUANT_12);
+    // QUANT_6 = 6 levels (0-5), compatible with blockmode encoding
+    // Note: QUANT_12 causes blockmode encoding issues
+    uint weight_quantmethod = uint(QUANT_6);
     uint endpoint_quantmethod = uint(QUANT_256);
-    uint weight_range = 12u;
+    uint weight_range = 6u;
     
     // Calculate error for each strategy
     float error_pca = calculate_block_error(texels, ep0_pca, ep1_pca, weight_range - 1u);
