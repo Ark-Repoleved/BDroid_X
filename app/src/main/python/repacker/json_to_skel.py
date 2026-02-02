@@ -78,8 +78,11 @@ def write_skeleton_data_to_binary(skeleton_data, output_file):
     paths = skeleton_data.get('path', [])
     paths_name_to_index = {path['name']: index for index, path in enumerate(paths)}
     
-    skins = skeleton_data.get('skins', [])    
-    skins_name_to_index = {skin['name']: index for index, skin in enumerate(skins)}
+    skins = skeleton_data.get('skins', [])
+    default_skin = next((s for s in skins if s.get('name') == 'default'), None)
+    other_skins = [s for s in skins if s.get('name') != 'default']
+    skins_in_order = ([default_skin] if default_skin else []) + other_skins
+    skins_name_to_index = {skin.get('name'): index for index, skin in enumerate(skins_in_order) if skin.get('name') is not None}
     
     animations = skeleton_data.get('animations', {})
 
@@ -111,7 +114,12 @@ def write_skeleton_data_to_binary(skeleton_data, output_file):
         # Using just the list of attachments in the skin works for BD2 since they don't have events and such so far
         temp = []
 
-        # From skins: attachment names and paths
+        # From skins: skin names, attachment names and paths
+        for skin in skins:
+            skin_name = skin.get('name')
+            if skin_name:
+                temp.append(skin_name)
+
         for skin in skins:
             for attachment in skin.get('attachments', {}).values():
                 for name, slot in attachment.items():
@@ -286,7 +294,6 @@ def write_skeleton_data_to_binary(skeleton_data, output_file):
             write_float(binary_file, path.get('mixY', path.get('mixX', 1.0)))
             
         # Skins
-        default_skin = next((s for s in skins if s.get('name') == 'default'), None)
         if default_skin == None:
             write_varint(binary_file, 0)
         else:
@@ -299,8 +306,39 @@ def write_skeleton_data_to_binary(skeleton_data, output_file):
                     write_string_ref(binary_file, name)
                     write_attachment(binary_file, attachment, name)
                     
-        # No other skin, at least with BD2   
-        write_varint(binary_file, 0)
+        # Other skins
+        write_varint(binary_file, len(other_skins))
+        for skin in other_skins:
+            write_string_ref(binary_file, skin.get('name'))
+
+            skin_bones = skin.get('bones') or []
+            write_varint(binary_file, len(skin_bones))
+            for bone_name in skin_bones:
+                write_varint(binary_file, bones_name_to_index.get(bone_name, 0))
+
+            skin_ik = skin.get('ik') or []
+            write_varint(binary_file, len(skin_ik))
+            for constraint_name in skin_ik:
+                write_varint(binary_file, iks_name_to_index.get(constraint_name, 0))
+
+            skin_transform = skin.get('transform') or []
+            write_varint(binary_file, len(skin_transform))
+            for constraint_name in skin_transform:
+                write_varint(binary_file, transforms_name_to_index.get(constraint_name, 0))
+
+            skin_path = skin.get('path') or []
+            write_varint(binary_file, len(skin_path))
+            for constraint_name in skin_path:
+                write_varint(binary_file, paths_name_to_index.get(constraint_name, 0))
+
+            skin_attachments = skin.get('attachments', {})
+            write_varint(binary_file, len(skin_attachments))
+            for key, entry in skin_attachments.items():
+                write_varint(binary_file, slots_name_to_index.get(key, 0))
+                write_varint(binary_file, len(entry))
+                for name, attachment in entry.items():
+                    write_string_ref(binary_file, name)
+                    write_attachment(binary_file, attachment, name)
         
         # Events
         # o = skeletonData.events.Resize(n = input.ReadInt(true)).Items;
@@ -676,7 +714,7 @@ def write_animation(binary_file, name, animation):
     attachments = animation.get('attachments', {})
     write_varint(binary_file, len(attachments))
     for skin_name, skin in attachments.items():
-        skin_index = skins_name_to_index.get(skin_name)
+        skin_index = skins_name_to_index.get(skin_name, 0)
         write_varint(binary_file, skin_index)
         write_varint(binary_file, len(skin))
         for slot_name, slot in skin.items():

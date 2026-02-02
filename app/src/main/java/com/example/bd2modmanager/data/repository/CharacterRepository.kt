@@ -121,6 +121,16 @@ class CharacterRepository(private val context: Context) {
     }
 
     fun extractFileId(entryName: String): String? {
-        return "(char\\d{6}|illust_dating\\d+|illust_special\\d+|illust_talk\\d+|npc\\d+|specialillust\\w+|storypack\\w+|\\bRhythmHitAnim\\b)".toRegex(RegexOption.IGNORE_CASE).find(entryName)?.value?.lowercase()
+        // 1. Try known patterns first (character assets)
+        val knownPattern = "(char\\d{6}|illust_dating\\d+|illust_special\\d+|illust_talk\\d+|npc\\d+|specialillust\\w+|storypack\\w+|\\bRhythmHitAnim\\b)"
+            .toRegex(RegexOption.IGNORE_CASE)
+            .find(entryName)?.value?.lowercase()
+        if (knownPattern != null) return knownPattern
+        
+        // 2. Fallback: use filename without extension as file_id
+        val baseName = entryName.substringBeforeLast(".")
+            .lowercase()
+            .replace(Regex("_\\d+$"), "")  // Remove _2, _3 etc. suffixes
+        return if (baseName.isNotEmpty() && baseName.length >= 2) baseName else null
     }
 }

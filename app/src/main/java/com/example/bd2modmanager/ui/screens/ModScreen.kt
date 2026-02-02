@@ -447,6 +447,7 @@ fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit
                     val icon = when(modInfo.type.lowercase()) {
                         "idle" -> Icons.Default.Person
                         "cutscene" -> Icons.Default.Movie
+                        "misc" -> Icons.Default.Image
                         else -> Icons.Default.Category
                     }
                     Icon(icon, contentDescription = modInfo.type, Modifier.size(14.dp))
