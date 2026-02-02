@@ -6,7 +6,12 @@ import re
 import requests
 import struct
 from pathlib import Path
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ImportError:
+    # Dummy tqdm if not available
+    def tqdm(iterable=None, *args, **kwargs):
+        return iterable
 
 import maintenance_info_pb2
 
@@ -221,6 +226,8 @@ def parse_catalog_for_bundle_names(catalog_content):
 
         # Try to match known patterns first (character assets)
         match = KNOWN_PATTERNS.search(asset_key)
+        matched_as_character = False
+        
         if match:
             matched_string = match.group(1).lower()
             
@@ -235,13 +242,14 @@ def parse_catalog_for_bundle_names(catalog_content):
 
             # For 'idle' and 'cutscene' animations, only accept the .skel.bytes file to ensure
             # we get the correct bundle hash, not the hash for the atlas or png.
-            if not asset_key.lower().endswith('.skel.bytes'):
-                continue
+            if asset_key.lower().endswith('.skel.bytes'):
+                if file_id not in asset_map:
+                    asset_map[file_id] = {}
+                asset_map[file_id][asset_type] = bundle_name
+                matched_as_character = True
             
-            if file_id not in asset_map:
-                asset_map[file_id] = {}
-            asset_map[file_id][asset_type] = bundle_name
-        else:
+        # If not matched as a character specific asset (Spine), try generic matching
+        if not matched_as_character:
             # --- Fallback: Generic matching for misc assets ---
             # Use filename (without extension) as file_id, type = "misc"
             # Only process files that look like actual assets (have a file extension)
