@@ -121,16 +121,25 @@ class CharacterRepository(private val context: Context) {
     }
 
     fun extractFileId(entryName: String): String? {
-        // 1. Try known patterns first (character assets)
-        val knownPattern = "(char\\d{6}|illust_dating\\d+|illust_special\\d+|illust_talk\\d+|npc\\d+|specialillust\\w+|storypack\\w+|\\bRhythmHitAnim\\b)"
-            .toRegex(RegexOption.IGNORE_CASE)
-            .find(entryName)?.value?.lowercase()
-        if (knownPattern != null) return knownPattern
+        // First, get the base filename without extension
+        val baseName = entryName.substringBeforeLast(".").lowercase()
         
-        // 2. Fallback: use filename without extension as file_id
-        val baseName = entryName.substringBeforeLast(".")
-            .lowercase()
-            .replace(Regex("_\\d+$"), "")  // Remove _2, _3 etc. suffixes
-        return if (baseName.isNotEmpty() && baseName.length >= 2) baseName else null
+        // 1. Check if the entire basename matches known patterns (for known character assets)
+        // This ensures we don't partially match e.g., "char067004" from "char067004_back2"
+        val knownPattern = "^(char\\d{6}|illust_dating\\d+|illust_special\\d+|illust_talk\\d+|npc\\d+|specialillust\\w+|storypack\\w+|rhythmhitanim)$"
+            .toRegex(RegexOption.IGNORE_CASE)
+        
+        if (knownPattern.matches(baseName)) {
+            return baseName
+        }
+        
+        // 2. Fallback: use the full basename as file_id (for misc assets)
+        // Remove _digits suffix only for texture variants (e.g., texture_2 -> texture)
+        val withoutTextureSuffix = baseName.replace(Regex("_\\d+$"), "")
+        return if (withoutTextureSuffix.isNotEmpty() && withoutTextureSuffix.length >= 2) {
+            withoutTextureSuffix
+        } else {
+            null
+        }
     }
 }
