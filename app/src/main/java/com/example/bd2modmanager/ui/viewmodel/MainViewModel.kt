@@ -196,6 +196,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             .map { (hash, mods) -> RepackJob(hash, mods) }
 
         if (jobs.isNotEmpty()) {
+            _moveState.value = MoveState.Idle
             batchStartTimeMs = System.currentTimeMillis()  // 記錄開始時間
             _installJobs.value = jobs.map { InstallJob(it) }
             _finalInstallResult.value = null
@@ -371,6 +372,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     fun initiateUninstall(context: Context, hashedName: String) {
+        _moveState.value = MoveState.Idle
         if (_uninstallState.value !is UninstallState.Idle) return
 
         viewModelScope.launch {
