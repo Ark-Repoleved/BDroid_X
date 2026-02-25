@@ -315,7 +315,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         }
 
         val command = if (successfulJobs.isNotEmpty()) {
-            "cp -rf /storage/emulated/0/Download/Shared /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/ && sync && sleep 1 && rm -rf /storage/emulated/0/Download/Shared"
+            "mv -f /storage/emulated/0/Download/Shared /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/"
         } else null
 
         _finalInstallResult.value = FinalInstallResult(
@@ -370,7 +370,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 downloadedFile.delete()
 
                 if (publicUri != null) {
-                    val command = "cp -rf /storage/emulated/0/Download/Shared /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/ && sync && sleep 1 && rm -rf /storage/emulated/0/Download/Shared"
+                    val command = "mv -f /storage/emulated/0/Download/Shared /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/"
                     _uninstallState.value = UninstallState.Finished(command)
                 } else {
                     _uninstallState.value = UninstallState.Failed("Failed to save original file to Downloads folder.")
