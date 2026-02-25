@@ -41,6 +41,10 @@ class MainActivity : ComponentActivity() {
 
         try {
             Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
+            // 自動請求 Shizuku 權限
+            if (Shizuku.pingBinder() && Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+                Shizuku.requestPermission(SHIZUKU_PERMISSION_REQUEST_CODE)
+            }
         } catch (_: Exception) {
             // Shizuku not available
         }

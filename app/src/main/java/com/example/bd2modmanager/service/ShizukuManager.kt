@@ -120,8 +120,15 @@ object ShizukuManager {
      */
     suspend fun moveDownloadToGame(): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         try {
-            if (!isAvailable()) {
-                return@withContext Pair(false, "Shizuku is not available or not authorized.")
+            if (!isRunning()) {
+                return@withContext Pair(false, "Shizuku is not running. Please start Shizuku first.")
+            }
+
+            if (!hasPermission()) {
+                withContext(Dispatchers.Main) {
+                    requestPermission(1001)
+                }
+                return@withContext Pair(false, "Shizuku permission requested. Please grant permission and try again.")
             }
 
             val service = ensureServiceBound()

@@ -318,7 +318,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             FailedJobInfo(hashedName = job.job.hashedName, error = failedStatus.detailedLog)
         }
 
-        val shizukuAvailable = ShizukuManager.isAvailable()
+        val shizukuAvailable = ShizukuManager.isRunning()
 
         val command = if (successfulJobs.isNotEmpty()) {
             "mv -f /storage/emulated/0/Download/Shared /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/"
@@ -394,7 +394,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 downloadedFile.delete()
 
                 if (publicUri != null) {
-                    val shizukuAvailable = ShizukuManager.isAvailable()
+                    val shizukuAvailable = ShizukuManager.isRunning()
                     val command = "mv -f /storage/emulated/0/Download/Shared /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/"
                     _uninstallState.value = UninstallState.Finished(command, shizukuAvailable)
                 } else {
