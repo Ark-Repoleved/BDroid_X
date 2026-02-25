@@ -29,6 +29,7 @@ import com.example.bd2modmanager.data.model.*
 import com.example.bd2modmanager.ui.components.InstallJobRow
 import com.example.bd2modmanager.ui.components.SelectionRow
 import android.net.Uri
+import com.example.bd2modmanager.data.model.MoveState
 
 
 @Composable
@@ -120,6 +121,8 @@ fun UnpackDialog(
 fun ParallelInstallDialog(
     installJobs: List<InstallJob>,
     finalResult: FinalInstallResult?,
+    moveState: MoveState,
+    onMoveToGame: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val clipboardManager = LocalClipboardManager.current
@@ -162,28 +165,72 @@ fun ParallelInstallDialog(
                             
                             finalResult.command?.let {
                                 Spacer(Modifier.height(16.dp))
-                                Text("Run this command in a root shell to move all files:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-                                Spacer(Modifier.height(8.dp))
-                                Button(
-                                    onClick = {
-                                        clipboardManager.setText(AnnotatedString(it))
-                                        Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                                
+                                when (moveState) {
+                                    is MoveState.Success -> {
+                                        Icon(Icons.Default.CheckCircle, contentDescription = "Success", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(moveState.message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
                                     }
-                                ) {
-                                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Copy Command")
-                                }
-                                Spacer(Modifier.height(8.dp))
-                                SelectionContainer {
-                                    Text(
-                                        text = it,
-                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                        modifier = Modifier
-                                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                                            .padding(12.dp)
-                                            .fillMaxWidth()
-                                    )
+                                    is MoveState.Failed -> {
+                                        Icon(Icons.Default.Error, contentDescription = "Failed", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(36.dp))
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(moveState.error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                                        Spacer(Modifier.height(8.dp))
+                                        // Fallback to manual command
+                                        Text("You can also run this command manually:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                                        Spacer(Modifier.height(4.dp))
+                                        SelectionContainer {
+                                            Text(
+                                                text = it,
+                                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                                modifier = Modifier
+                                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                                    .padding(12.dp)
+                                                    .fillMaxWidth()
+                                            )
+                                        }
+                                    }
+                                    is MoveState.Moving -> {
+                                        Text("Moving files to game directory...", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+                                        Spacer(Modifier.height(8.dp))
+                                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                                    }
+                                    is MoveState.Idle -> {
+                                        if (finalResult.shizukuAvailable) {
+                                            Button(onClick = onMoveToGame) {
+                                                Icon(Icons.Default.DriveFileMove, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                Spacer(Modifier.width(8.dp))
+                                                Text("Move to Game Directory")
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                            Text("Or run this command manually in a root shell:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                                        } else {
+                                            Text("Run this command in a root shell to move all files:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                                        }
+                                        Spacer(Modifier.height(8.dp))
+                                        Button(
+                                            onClick = {
+                                                clipboardManager.setText(AnnotatedString(it))
+                                                Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                                            }
+                                        ) {
+                                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("Copy Command")
+                                        }
+                                        Spacer(Modifier.height(8.dp))
+                                        SelectionContainer {
+                                            Text(
+                                                text = it,
+                                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                                modifier = Modifier
+                                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                                    .padding(12.dp)
+                                                    .fillMaxWidth()
+                                            )
+                                        }
+                                    }
                                 }
                             }
                             
@@ -281,7 +328,12 @@ fun UninstallConfirmationDialog(
 }
 
 @Composable
-fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
+fun UninstallDialog(
+    state: UninstallState,
+    moveState: MoveState,
+    onMoveToGame: () -> Unit,
+    onDismiss: () -> Unit
+) {
     if (state is UninstallState.Idle) return
 
     val clipboardManager = LocalClipboardManager.current
@@ -326,29 +378,73 @@ fun UninstallDialog(state: UninstallState, onDismiss: () -> Unit) {
                     is UninstallState.Finished -> {
                         Text("Original file saved to your Downloads folder.", textAlign = TextAlign.Center)
                         Spacer(Modifier.height(16.dp))
-                        Text("For advanced users, run this command in a root shell to move the file:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-                        Spacer(Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                clipboardManager.setText(AnnotatedString(state.command))
-                                Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                        
+                        when (moveState) {
+                            is MoveState.Success -> {
+                                Icon(Icons.Default.CheckCircle, contentDescription = "Success", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
+                                Spacer(Modifier.height(8.dp))
+                                Text(moveState.message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
                             }
-                        ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Copy Command")
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        SelectionContainer {
-                            Text(
-                                text = state.command,
-                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                                modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                                    .padding(12.dp)
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState())
-                            )
+                            is MoveState.Failed -> {
+                                Icon(Icons.Default.Error, contentDescription = "Failed", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(36.dp))
+                                Spacer(Modifier.height(8.dp))
+                                Text(moveState.error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                                Spacer(Modifier.height(8.dp))
+                                Text("You can also run this command manually:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                                Spacer(Modifier.height(4.dp))
+                                SelectionContainer {
+                                    Text(
+                                        text = state.command,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                        modifier = Modifier
+                                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                            .padding(12.dp)
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState())
+                                    )
+                                }
+                            }
+                            is MoveState.Moving -> {
+                                Text("Moving files to game directory...", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+                                Spacer(Modifier.height(8.dp))
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            }
+                            is MoveState.Idle -> {
+                                if (state.shizukuAvailable) {
+                                    Button(onClick = onMoveToGame) {
+                                        Icon(Icons.Default.DriveFileMove, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Move to Game Directory")
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    Text("Or run this command manually in a root shell:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                                } else {
+                                    Text("For advanced users, run this command in a root shell to move the file:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(state.command))
+                                        Toast.makeText(context, "Command copied!", Toast.LENGTH_SHORT).show()
+                                    }
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Copy Command")
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                SelectionContainer {
+                                    Text(
+                                        text = state.command,
+                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                        modifier = Modifier
+                                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                            .padding(12.dp)
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState())
+                                    )
+                                }
+                            }
                         }
                     }
                     is UninstallState.Failed -> Text(state.error, textAlign = TextAlign.Center)
