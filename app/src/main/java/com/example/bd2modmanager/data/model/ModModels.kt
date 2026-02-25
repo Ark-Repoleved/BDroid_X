@@ -52,15 +52,23 @@ data class FinalInstallResult(
     val successfulJobs: Int,
     val failedJobs: Int,
     val command: String?,
-    val elapsedTimeMs: Long = 0L,  // 總耗時（毫秒）
-    val failedJobDetails: List<FailedJobInfo> = emptyList()  // 失敗任務的詳細資訊
+    val elapsedTimeMs: Long = 0L,
+    val failedJobDetails: List<FailedJobInfo> = emptyList(),
+    val shizukuAvailable: Boolean = false
 )
 
 sealed class UninstallState {
     object Idle : UninstallState()
     data class Downloading(val hashedName: String, val progressMessage: String = "Initializing...") : UninstallState()
-    data class Finished(val command: String) : UninstallState()
+    data class Finished(val command: String, val shizukuAvailable: Boolean = false) : UninstallState()
     data class Failed(val error: String) : UninstallState()
+}
+
+sealed class MoveState {
+    object Idle : MoveState()
+    object Moving : MoveState()
+    data class Success(val message: String) : MoveState()
+    data class Failed(val error: String) : MoveState()
 }
 
 sealed class UnpackState {

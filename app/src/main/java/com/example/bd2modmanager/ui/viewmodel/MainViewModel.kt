@@ -17,6 +17,7 @@ import com.example.bd2modmanager.data.model.*
 import com.example.bd2modmanager.data.repository.CharacterRepository
 import com.example.bd2modmanager.data.repository.ModRepository
 import com.example.bd2modmanager.service.ModdingService
+import com.example.bd2modmanager.service.ShizukuManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -106,6 +107,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     private val _showMergeDialog = MutableStateFlow(false)
     val showMergeDialog: StateFlow<Boolean> = _showMergeDialog.asStateFlow()
+
+    private val _moveState = MutableStateFlow<MoveState>(MoveState.Idle)
+    val moveState: StateFlow<MoveState> = _moveState.asStateFlow()
 
 
     fun initialize(context: Context) {
@@ -314,6 +318,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             FailedJobInfo(hashedName = job.job.hashedName, error = failedStatus.detailedLog)
         }
 
+        val shizukuAvailable = ShizukuManager.isAvailable()
+
         val command = if (successfulJobs.isNotEmpty()) {
             "mv -f /storage/emulated/0/Download/Shared /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/"
         } else null
@@ -323,7 +329,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             failedJobs = failedJobs.size,
             command = command,
             elapsedTimeMs = elapsedTimeMs,
-            failedJobDetails = failedJobDetails
+            failedJobDetails = failedJobDetails,
+            shizukuAvailable = shizukuAvailable
         )
     }
 
@@ -344,6 +351,23 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         _installJobs.value = emptyList()
         _finalInstallResult.value = null
         _selectedMods.value = emptySet()
+        _moveState.value = MoveState.Idle
+    }
+
+    fun moveFilesToGame() {
+        viewModelScope.launch {
+            _moveState.value = MoveState.Moving
+            val (success, message) = ShizukuManager.moveDownloadToGame()
+            _moveState.value = if (success) {
+                MoveState.Success(message)
+            } else {
+                MoveState.Failed(message)
+            }
+        }
+    }
+
+    fun resetMoveState() {
+        _moveState.value = MoveState.Idle
     }
 
     fun initiateUninstall(context: Context, hashedName: String) {
@@ -370,8 +394,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 downloadedFile.delete()
 
                 if (publicUri != null) {
+                    val shizukuAvailable = ShizukuManager.isAvailable()
                     val command = "mv -f /storage/emulated/0/Download/Shared /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/"
-                    _uninstallState.value = UninstallState.Finished(command)
+                    _uninstallState.value = UninstallState.Finished(command, shizukuAvailable)
                 } else {
                     _uninstallState.value = UninstallState.Failed("Failed to save original file to Downloads folder.")
                 }
