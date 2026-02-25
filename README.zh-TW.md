@@ -26,7 +26,7 @@
 ### 系統需求
 *   Android 8 或更高版本。
 *   已安裝最新版的《棕色塵埃2》官方遊戲。
-*   [Shizuku](https://shizuku.rikka.app/)：一鍵將檔案搬到遊戲目錄（推薦 Android 16+ 使用者安裝）。
+*   [Shizuku](https://shizuku.rikka.app/)：一鍵將檔案搬到遊戲目錄。
 
 ### 安裝與設定
 
