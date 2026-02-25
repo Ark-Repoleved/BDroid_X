@@ -10,7 +10,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import rikka.shizuku.Shizuku
+import android.util.Log
 
 object ShizukuManager {
 
@@ -94,20 +96,30 @@ object ShizukuManager {
         if (fileService != null) return fileService
 
         return bindMutex.withLock {
-            // Double-check after acquiring lock
             if (fileService != null) return@withLock fileService
 
             val deferred = CompletableDeferred<Boolean>()
             pendingBind = deferred
 
             try {
+                Log.d("ShizukuManager", "Binding user service...")
                 Shizuku.bindUserService(userServiceArgs, serviceConnection)
-                withContext(Dispatchers.IO) {
+                
+                // Add 5 second timeout to prevent hanging forever
+                val bound = withTimeoutOrNull(5000) {
                     deferred.await()
                 }
-                fileService
+                
+                if (bound == true) {
+                    Log.d("ShizukuManager", "User service bound successfully")
+                    fileService
+                } else {
+                    Log.d("ShizukuManager", "Timeout waiting for service bind")
+                    pendingBind = null
+                    null
+                }
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("ShizukuManager", "Failed to bind service", e)
                 pendingBind = null
                 null
             }
@@ -139,17 +151,19 @@ object ShizukuManager {
                 return@withContext Pair(false, "Download/Shared directory not found.")
             }
 
+            Log.d("ShizukuManager", "Starting to copy using Shizuku")
             val success = service.copyDirectory(DOWNLOAD_SHARED_PATH, GAME_UNITY_CACHE_PATH + "Shared")
 
             if (success) {
-                // 複製成功後刪除來源
+                Log.d("ShizukuManager", "Copy successful, cleaning up source")
                 sourceDir.deleteRecursively()
                 Pair(true, "Files moved to game directory successfully!")
             } else {
+                Log.e("ShizukuManager", "Copy failed in ShizukuFileService")
                 Pair(false, "Failed to copy files to game directory.")
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("ShizukuManager", "Error during Shizuku file operation", e)
             Pair(false, "Error: ${e.message}")
         }
     }

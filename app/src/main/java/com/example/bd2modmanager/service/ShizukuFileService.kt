@@ -2,6 +2,7 @@ package com.example.bd2modmanager.service
 
 import com.example.bd2modmanager.IFileService
 import java.io.File
+import android.util.Log
 
 class ShizukuFileService : IFileService.Stub() {
 
@@ -15,9 +16,10 @@ class ShizukuFileService : IFileService.Stub() {
                     input.copyTo(output)
                 }
             }
+            Log.d("ShizukuFileService", "Successfully copied $sourcePath to $destPath")
             true
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("ShizukuFileService", "Error copying $sourcePath to $destPath", e)
             false
         }
     }
@@ -27,9 +29,10 @@ class ShizukuFileService : IFileService.Stub() {
             val sourceDir = File(sourceDirPath)
             val destDir = File(destDirPath)
             copyDirRecursive(sourceDir, destDir)
+            Log.d("ShizukuFileService", "Successfully copied directory $sourceDirPath to $destDirPath")
             true
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("ShizukuFileService", "Error copying directory $sourceDirPath to $destDirPath", e)
             false
         }
     }
@@ -41,10 +44,15 @@ class ShizukuFileService : IFileService.Stub() {
             if (file.isDirectory) {
                 copyDirRecursive(file, target)
             } else {
-                file.inputStream().use { input ->
-                    target.outputStream().use { output ->
-                        input.copyTo(output)
+                try {
+                    file.inputStream().use { input ->
+                        target.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
                     }
+                } catch (e: Exception) {
+                    Log.e("ShizukuFileService", "Failed to copy individual file: ${file.absolutePath} to ${target.absolutePath}", e)
+                    throw e // Re-throw to be caught by the outer catch block
                 }
             }
         }
