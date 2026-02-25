@@ -1,10 +1,11 @@
 package com.example.bd2modmanager.service
 
+import android.content.Context
 import com.example.bd2modmanager.IFileService
 import java.io.File
 import android.util.Log
 
-class ShizukuFileService : IFileService.Stub() {
+class ShizukuFileService(context: Context? = null) : IFileService.Stub() {
 
     override fun copyFile(sourcePath: String, destPath: String): Boolean {
         return try {
