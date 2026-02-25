@@ -15,6 +15,7 @@
 *   **📱 PC-Free Operation**: Unpacks, converts textures (ASTC), and repacks mods entirely on your Android device.
 *   **🧠 Smart Mod Grouping**: Automatically scans your mod folder and groups mods by the game files they modify, preventing conflicts.
 *   **⚡ Batch Processing**: Select and install multiple mods from different groups in a single operation.
+*   **🔀 Shizuku Integration**: Move repacked files to the game directory with a single tap.
 *   **👀 Live Animation Preview**: Long-press any mod to preview its Spine animation before you install it.
 *   **🔧 Built-in Utilities**: Includes tools to merge texture atlases and unpack game bundles.
 
@@ -23,8 +24,9 @@
 ## 🚀 Getting Started
 
 ### Requirements
-*   Android 8 or higher (Android 16+ may have permission problem while using shizutools).
+*   Android 8 or higher.
 *   The latest official version of BrownDust 2 installed.
+*   [Shizuku](https://shizuku.rikka.app/) for one-tap file transfer to the game directory.
 
 ### Installation & Setup
 
@@ -66,11 +68,11 @@ For the app to recognize your mods, they must follow a specific structure. Each 
 1.  **Select Mods**: In the app, check the boxes for the mods you want to install.
 2.  **Start Repacking**: Tap the floating **Repack (✓)** button at the bottom right.
 3.  **Wait for Processing**: The app will automatically download the necessary original game files and repack your selected mods. A dialog will show the live progress.
-4.  **Manually Replace Files**:
+4.  **Move Files to Game Directory**:
     *   Once complete, a new **`Shared`** folder containing all your modded game files will be saved to your phone's **`Download`** folder.
-    *   You must **manually move** this new `Shared` folder into the game's cache directory, overwriting any existing files.
+    *   **With Shizuku (Recommended):** If [Shizuku](https://shizuku.rikka.app/) is running, a **"Move to Game Directory"** button will appear. Tap it to automatically move the files — this works even on Android 16+.
+    *   **Without Shizuku:** You can manually move the `Shared` folder into the game's cache directory using a third-party file manager, or copy the provided ADB command.
     *   The destination path is: `/Android/data/com.neowizgames.game.browndust2/files/UnityCache/`.
-    > **Note:** You will need a third-party file manager that can access `Android/data` folders. For easier access, the app provides a one-click ADB command that can be used with tools like [ShizuTools](https://github.com/legendsayantan/ShizuTools).
 
 ---
 
