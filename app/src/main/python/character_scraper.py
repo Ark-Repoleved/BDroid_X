@@ -118,6 +118,17 @@ def scrape_and_save(output_dir, version):
             cutscene_entry["hashed_name"] = bundles["cutscene"]
             all_characters_data.append(cutscene_entry)
 
+        # Create misc entry if it exists in the catalog.
+        if "misc" in bundles and bundles["misc"]:
+            misc_entry = {
+                "character": "Other",
+                "file_id": file_id,
+                "costume": file_id,  # Use file_id as costume name for misc
+                "type": "misc",
+                "hashed_name": bundles["misc"]
+            }
+            all_characters_data.append(misc_entry)
+
     if not all_characters_data:
         print("[Python] Warning: No character data could be generated from the catalog.", file=sys.stderr)
     
