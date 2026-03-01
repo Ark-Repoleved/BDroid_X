@@ -122,7 +122,18 @@ class CharacterRepository(private val context: Context) {
 
     fun extractFileId(entryName: String): String? {
         // First, get the base filename without extension
-        val baseName = entryName.substringBeforeLast(".").lowercase()
+        var baseName = entryName.lowercase()
+        // Handle multi-part extensions
+        for (ext in listOf(".skel.bytes", ".atlas.txt")) {
+            if (baseName.endsWith(ext)) {
+                baseName = baseName.dropLast(ext.length)
+                break
+            }
+        }
+        // Fallback: strip single extension
+        if (baseName.contains('.')) {
+            baseName = baseName.substringBeforeLast(".")
+        }
         
         // 1. Check if the entire basename matches known patterns (for known character assets)
         // This ensures we don't partially match e.g., "char067004" from "char067004_back2"
@@ -133,11 +144,16 @@ class CharacterRepository(private val context: Context) {
             return baseName
         }
         
-        // 2. Fallback: use the full basename as file_id (for misc assets)
-        // Remove _digits suffix only for texture variants (e.g., texture_2 -> texture)
-        val withoutTextureSuffix = baseName.replace(Regex("_\\d+$"), "")
-        return if (withoutTextureSuffix.isNotEmpty() && withoutTextureSuffix.length >= 2) {
-            withoutTextureSuffix
+        // 2. Handle sactx naming format: sactx-{index}-{dimensions}-{format}-{name}-{hash}
+        val sactxPattern = "^sactx-\\d+-[\\dx]+-[^-]+-(.+)-[a-f0-9]+$".toRegex(RegexOption.IGNORE_CASE)
+        val sactxMatch = sactxPattern.find(baseName)
+        if (sactxMatch != null) {
+            return sactxMatch.groupValues[1].lowercase()
+        }
+
+        // 3. Fallback: use the full basename as file_id (for misc assets)
+        return if (baseName.isNotEmpty() && baseName.length >= 2) {
+            baseName
         } else {
             null
         }

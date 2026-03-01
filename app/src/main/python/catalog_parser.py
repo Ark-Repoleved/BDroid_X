@@ -207,10 +207,31 @@ def parse_catalog_for_bundle_names(catalog_content):
         return None
 
     # --- Known patterns for character-related assets (whitelist) ---
+    # These are matched with fullmatch against the basename to prevent partial matching
+    # e.g., 'char067004' must NOT match inside 'char067004_back2'
     KNOWN_PATTERNS = re.compile(
-        r'(cutscene_char\d{6}|char\d{6}|illust_dating\d+|illust_special\d+|illust_talk\d+|npc\d+|specialillust\w+|storypack\w+|\bRhythmHitAnim\b)',
+        r'(cutscene_char\d{6}|char\d{6}|illust_dating\d+|illust_special\d+|illust_talk\d+|npc\d+|specialillust\w+|storypack\w+|RhythmHitAnim)',
         re.IGNORECASE
     )
+
+    # sactx format: sactx-{index}-{dimensions}-{format}-{name}-{hash}
+    SACTX_PATTERN = re.compile(
+        r'sactx-\d+-[\dx]+-[^-]+-(.+)-[a-f0-9]+$',
+        re.IGNORECASE
+    )
+
+    def _extract_basename(asset_key):
+        """Extract basename without extensions from an asset key path.
+        Handles multi-part extensions like .skel.bytes and .atlas.txt"""
+        filename = asset_key.split('/')[-1] if '/' in asset_key else asset_key
+        # Strip known multi-part extensions first
+        for ext in ('.skel.bytes', '.atlas.txt'):
+            if filename.lower().endswith(ext):
+                return filename[:-len(ext)]
+        # Fallback: strip single extension
+        if '.' in filename:
+            return filename.rsplit('.', 1)[0]
+        return filename
 
     # --- Map asset keys to bundle names ---
     for i in range(len(entries)):
@@ -224,19 +245,21 @@ def parse_catalog_for_bundle_names(catalog_content):
             continue
         bundle_name = bundle_info['bundle_name']
 
-        # Try to match known patterns first (character assets)
-        match = KNOWN_PATTERNS.search(asset_key)
+        # Extract basename for matching (e.g., 'char067004' from '.../char067004.skel.bytes')
+        basename = _extract_basename(asset_key)
         matched_as_character = False
-        
+
+        # Try to fullmatch known patterns against basename (prevents partial matching)
+        match = KNOWN_PATTERNS.fullmatch(basename)
+
         if match:
             matched_string = match.group(1).lower()
-            
+
             # Determine asset type from the matched key itself
             if matched_string.startswith('cutscene_'):
                 asset_type = "cutscene"
                 file_id = matched_string.replace('cutscene_', '')
             else:
-                # If it doesn't have the cutscene_ prefix, it's for the 'idle' slot.
                 asset_type = "idle"
                 file_id = matched_string
 
@@ -247,36 +270,29 @@ def parse_catalog_for_bundle_names(catalog_content):
                     asset_map[file_id] = {}
                 asset_map[file_id][asset_type] = bundle_name
                 matched_as_character = True
-            
+
         # If not matched as a character specific asset (Spine), try generic matching
         if not matched_as_character:
-            # --- Fallback: Generic matching for misc assets ---
-            # Use filename (without extension) as file_id, type = "misc"
-            # Only process files that look like actual assets (have a file extension)
-            asset_key_lower = asset_key.lower()
+            # Only process entries that look like actual asset paths
             if '/' not in asset_key and '.' not in asset_key:
                 continue
-            
-            # Extract filename from the asset key path
-            filename = asset_key.split('/')[-1] if '/' in asset_key else asset_key
-            if '.' not in filename:
-                continue
-            
-            # Remove extension to get file_id
-            file_id = filename.rsplit('.', 1)[0].lower()
-            
+
+            file_id = basename.lower()
+
             # Skip if file_id is empty or too short
             if not file_id or len(file_id) < 2:
                 continue
-            
-            # Remove _digits suffix for grouping (e.g., texture_2 -> texture)
-            base_file_id = re.sub(r'_\d+$', '', file_id)
-            
-            if base_file_id not in asset_map:
-                asset_map[base_file_id] = {}
-            
+
+            # Handle sactx naming: extract the meaningful name portion
+            sactx_match = SACTX_PATTERN.match(file_id)
+            if sactx_match:
+                file_id = sactx_match.group(1).lower()
+
+            if file_id not in asset_map:
+                asset_map[file_id] = {}
+
             # Only store if we don't already have a misc entry (avoid duplicates)
-            if "misc" not in asset_map[base_file_id]:
-                asset_map[base_file_id]["misc"] = bundle_name
+            if "misc" not in asset_map[file_id]:
+                asset_map[file_id]["misc"] = bundle_name
 
     return asset_map
