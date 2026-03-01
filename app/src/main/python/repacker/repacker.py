@@ -401,22 +401,44 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
         }
 
         if spine_mods_to_process:
+            # 預先掃描 Atlas MonoBehaviour 取得 materials 數量（與 ReDustX 相同方式）
+            atlas_material_counts = {}
+            report_progress("Scanning Atlas MonoBehaviour for material counts...")
+            for path, obj in env.container.items():
+                if obj.type.name == "MonoBehaviour" and path.lower().endswith("_atlas.asset"):
+                    key = re.sub(r"_atlas\.asset$", "", os.path.basename(path), flags=re.IGNORECASE).lower()
+                    try:
+                        atlas_data = obj.read_typetree()
+                        materials = atlas_data.get("materials", [])
+                        if isinstance(materials, list):
+                            atlas_material_counts[key] = max(atlas_material_counts.get(key, 0), len(materials))
+                    except Exception as e:
+                        report_progress(f"Could not read atlas MonoBehaviour for {key}: {e}")
+            if atlas_material_counts:
+                report_progress(f"Found atlas material counts: {atlas_material_counts}")
+
             report_progress(f"Detected {len(spine_mods_to_process)} unique Spine mods for pre-processing: {list(spine_mods_to_process.keys())}")
             for spine_base_name, mod_dir_path in spine_mods_to_process.items():
                 report_progress(f"--- Processing: {spine_base_name} ---")
-                pattern = re.compile(f"^{re.escape(spine_base_name)}(_\\d+)?$", re.IGNORECASE)
 
-                original_texture_count = 0
-                for obj in env.objects:
-                    if obj.type.name == "Texture2D":
-                        try:
-                            asset_name = obj.read().m_Name
-                            if pattern.match(asset_name):
-                                original_texture_count += 1
-                        except Exception as e:
-                            report_progress(f"Couldn't read asset name, skipping. Error: {e}")
+                # 優先使用 Atlas MonoBehaviour 的 materials 數量
+                original_texture_count = atlas_material_counts.get(spine_base_name.lower(), 0)
 
-                report_progress(f"Found {original_texture_count} matching textures in the original game file for {spine_base_name}.")
+                if original_texture_count > 0:
+                    report_progress(f"Found {original_texture_count} textures from Atlas MonoBehaviour for {spine_base_name}.")
+                else:
+                    # Fallback: 直接數 Texture2D 物件
+                    report_progress(f"No Atlas MonoBehaviour found for {spine_base_name}, falling back to Texture2D counting.")
+                    pattern = re.compile(f"^{re.escape(spine_base_name)}(_\\d+)?$", re.IGNORECASE)
+                    for obj in env.objects:
+                        if obj.type.name == "Texture2D":
+                            try:
+                                asset_name = obj.read().m_Name
+                                if pattern.match(asset_name):
+                                    original_texture_count += 1
+                            except Exception as e:
+                                report_progress(f"Couldn't read asset name, skipping. Error: {e}")
+                    report_progress(f"Found {original_texture_count} matching textures via fallback for {spine_base_name}.")
 
                 mod_texture_count = len(glob.glob(os.path.join(mod_dir_path, f'{spine_base_name}*.png')))
                 report_progress(f"Mod has {mod_texture_count} textures for {spine_base_name}.")
