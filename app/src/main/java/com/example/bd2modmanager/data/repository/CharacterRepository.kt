@@ -137,11 +137,16 @@ class CharacterRepository(private val context: Context) {
         
         // 1. Check if the entire basename matches known patterns (for known character assets)
         // This ensures we don't partially match e.g., "char067004" from "char067004_back2"
-        val knownPattern = "^(char\\d{6}|illust_dating\\d+|illust_special\\d+|illust_talk\\d+|npc\\d+|specialillust\\w+|storypack\\w+|rhythmhitanim)$"
+        val knownPattern = "^(cutscene_char\\d{6}|char\\d{6}|illust_dating\\d+|illust_special\\d+|illust_talk\\d+|npc\\d+|specialillust\\w+|storypack\\w+|rhythmhitanim)$"
             .toRegex(RegexOption.IGNORE_CASE)
         
         if (knownPattern.matches(baseName)) {
-            return baseName
+            // Strip 'cutscene_' prefix to match catalog's file_id (e.g., cutscene_char000104 -> char000104)
+            return if (baseName.startsWith("cutscene_", ignoreCase = true)) {
+                baseName.substringAfter("_").lowercase()
+            } else {
+                baseName
+            }
         }
         
         // 2. Handle sactx naming format: sactx-{index}-{dimensions}-{format}-{name}-{hash}
