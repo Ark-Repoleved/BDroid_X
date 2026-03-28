@@ -201,6 +201,25 @@ def parse_catalog_for_bundle_names(catalog_content):
                 return info
         return None
 
+    KNOWN_PATTERNS = re.compile(
+        r'(cutscene_char\d{6}|char\d{6}|illust_dating\d+|illust_special\d+|illust_talk\d+|npc\d+|specialillust\w+|storypack\w+|RhythmHitAnim)',
+        re.IGNORECASE
+    )
+
+    SACTX_PATTERN = re.compile(
+        r'sactx-\d+-[\dx]+-[^-]+-(.+)-[a-f0-9]+$',
+        re.IGNORECASE
+    )
+
+    def _extract_basename(asset_key):
+        filename = asset_key.split('/')[-1] if '/' in asset_key else asset_key
+        for ext in ('.skel.bytes', '.atlas.txt'):
+            if filename.lower().endswith(ext):
+                return filename[:-len(ext)]
+        if '.' in filename:
+            return filename.rsplit('.', 1)[0]
+        return filename
+
     # --- Map asset keys to bundle names ---
     for i in range(len(entries)):
         primary_key_index = entries[i]['primary_key_index']
@@ -208,35 +227,47 @@ def parse_catalog_for_bundle_names(catalog_content):
         if not isinstance(asset_key, str):
             continue
 
-        # Extract file_id like 'char000104' from asset_key like 'assets/asset/character/char000104/char000104.skel.bytes'
-        match = re.search(r'(cutscene_char\d{6}|char\d{6}|illust_dating\d+|illust_special\d+|illust_talk\d+|npc\d+|specialillust\w+|storypack\w+|\bRhythmHitAnim\b)', asset_key, re.IGNORECASE)
-        if not match:
-            continue
-        
-        matched_string = match.group(1).lower()
-        
-        # Determine asset type from the matched key itself
-        if matched_string.startswith('cutscene_'):
-            asset_type = "cutscene"
-            file_id = matched_string.replace('cutscene_', '')
-        else:
-            # If it doesn't have the cutscene_ prefix, it's for the 'idle' slot.
-            asset_type = "idle"
-            file_id = matched_string
-
-        # For 'idle' and 'cutscene' animations, only accept the .skel.bytes file to ensure
-        # we get the correct bundle hash, not the hash for the atlas or png.
-        if (asset_type == "idle" or asset_type == "cutscene") and not asset_key.lower().endswith('.skel.bytes'):
-            continue
-        
         bundle_info = resolve_bundle_info(i)
-        if bundle_info and 'bundle_name' in bundle_info:
-            bundle_name = bundle_info['bundle_name']
-            
+        if not bundle_info or 'bundle_name' not in bundle_info:
+            continue
+        bundle_name = bundle_info['bundle_name']
+
+        basename = _extract_basename(asset_key)
+        matched_as_character = False
+
+        match = KNOWN_PATTERNS.fullmatch(basename)
+        if match:
+            matched_string = match.group(1).lower()
+
+            if matched_string.startswith('cutscene_'):
+                asset_type = "cutscene"
+                file_id = matched_string.replace('cutscene_', '')
+            else:
+                asset_type = "idle"
+                file_id = matched_string
+
+            if asset_key.lower().endswith('.skel.bytes'):
+                if file_id not in asset_map:
+                    asset_map[file_id] = {}
+                asset_map[file_id][asset_type] = bundle_name
+                matched_as_character = True
+
+        if not matched_as_character:
+            if '/' not in asset_key and '.' not in asset_key:
+                continue
+
+            file_id = basename.lower()
+            if not file_id or len(file_id) < 2:
+                continue
+
+            sactx_match = SACTX_PATTERN.match(file_id)
+            if sactx_match:
+                file_id = sactx_match.group(1).lower()
+
             if file_id not in asset_map:
                 asset_map[file_id] = {}
-            
-            # Store the bundle name based on the asset_type derived from the asset key
-            asset_map[file_id][asset_type] = bundle_name
+
+            if "misc" not in asset_map[file_id]:
+                asset_map[file_id]["misc"] = bundle_name
 
     return asset_map
