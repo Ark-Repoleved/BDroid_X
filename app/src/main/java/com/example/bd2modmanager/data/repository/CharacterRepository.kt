@@ -5,6 +5,7 @@ import com.chaquo.python.Python
 import com.example.bd2modmanager.data.model.CharacterInfo
 import com.example.bd2modmanager.data.model.FileCandidate
 import com.example.bd2modmanager.data.model.FileCandidateKind
+import com.example.bd2modmanager.data.model.FileCandidateTier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -25,7 +26,7 @@ class CharacterRepository(private val context: Context) {
         )
 
         private val KNOWN_PATTERN =
-            "^(cutscene_char\\d{6}(?:_[a-z0-9]+)?|char\\d{6}(?:_[a-z0-9]+)?|illust_dating\\d+|illust_special\\d+|illust_talk\\d+|npc\\d+|specialillust[\\w-]+|storypack\\w+|rhythmhitanim)$"
+            "^(cutscene_char\\d{6}(?:_[a-z0-9]+)?|char\\d{6}(?:_[a-z0-9]+)?|illust_dating\\d+|illust_special\\d+|illust_talk\\d+|npc\\d+|specialillust[\\w-]+|storypack\\w+|rhythmhitanim|bg_idcard_bg_cutscene_\\d+(?:_\\d+)?)$"
                 .toRegex(RegexOption.IGNORE_CASE)
 
         private val SACTX_PATTERN =
@@ -115,12 +116,19 @@ class CharacterRepository(private val context: Context) {
     fun findBestMatch(candidates: List<FileCandidate>, fileNames: List<String>): CharacterInfo? {
         if (candidates.isEmpty()) return null
 
+        val prioritizedCandidates = candidates.prioritizeCandidates()
+        val exactPreferredFileIds = findExactPreferredFileIds(prioritizedCandidates)
         val scoreByFileId = linkedMapOf<String, Int>()
-        for (candidate in candidates) {
+        for (candidate in prioritizedCandidates) {
             scoreByFileId[candidate.fileId] = (scoreByFileId[candidate.fileId] ?: 0) + candidate.confidence
         }
 
-        val rankedFileIds = scoreByFileId.entries.sortedByDescending { it.value }.map { it.key }
+        val rankedFileIds = scoreByFileId.entries
+            .sortedWith(
+                compareByDescending<Map.Entry<String, Int>> { exactPreferredFileIds.contains(it.key) }
+                    .thenByDescending { it.value }
+            )
+            .map { it.key }
         val hasCutsceneKeyword = fileNames.any { it.contains("cutscene", ignoreCase = true) }
 
         for (fileId in rankedFileIds) {
@@ -184,7 +192,16 @@ class CharacterRepository(private val context: Context) {
                 }
             }
 
-            return FileCandidate(normalizedFileId, entryName, kind, confidence)
+            return FileCandidate(
+                fileId = normalizedFileId,
+                sourceName = entryName,
+                kind = kind,
+                confidence = confidence,
+                tier = when {
+                    normalizedBaseName == baseName -> FileCandidateTier.EXACT
+                    else -> FileCandidateTier.NORMALIZED
+                }
+            )
         }
 
         val sactxMatch = SACTX_PATTERN.matchEntire(baseName)
@@ -204,7 +221,7 @@ class CharacterRepository(private val context: Context) {
             else -> 45
         }
 
-        return FileCandidate(baseName, entryName, FileCandidateKind.GENERIC, genericConfidence)
+        return FileCandidate(baseName, entryName, FileCandidateKind.GENERIC, genericConfidence, FileCandidateTier.FALLBACK)
     }
 
     private fun shouldIgnoreFile(loweredFileName: String): Boolean {
@@ -232,17 +249,55 @@ class CharacterRepository(private val context: Context) {
         return extension in setOf("png", "jpg", "jpeg", "webp")
     }
 
-    private fun normalizeMatchingBaseName(baseName: String): String {
-        var normalized = baseName.lowercase()
+    private fun prioritizeCandidates(candidates: List<FileCandidate>): List<FileCandidate> {
+        val tiersInOrder = listOf(
+            FileCandidateTier.EXACT,
+            FileCandidateTier.NORMALIZED,
+            FileCandidateTier.FALLBACK
+        )
 
-        if (normalized.startsWith("specialillust")) {
-            normalized = normalized.replaceFirst("specialillust", "specialillust")
+        for (tier in tiersInOrder) {
+            val tierCandidates = candidates.filter { it.tier == tier }
+            if (tierCandidates.isEmpty()) continue
+
+            return tierCandidates
+                .groupBy { Pair(it.fileId, it.kind) }
+                .map { (_, grouped) -> grouped.maxByOrNull { it.confidence }!! }
+                .sortedByDescending { it.confidence }
         }
+
+        return candidates.sortedByDescending { it.confidence }
+    }
+
+    private fun findExactPreferredFileIds(candidates: List<FileCandidate>): Set<String> {
+        val exactGenericCandidates = candidates.filter {
+            it.tier == FileCandidateTier.EXACT &&
+                (it.kind == FileCandidateKind.GENERIC || it.kind == FileCandidateKind.TEXTURE)
+        }
+
+        val suffixedExactCandidates = exactGenericCandidates.filter { it.fileId.hasVariantSuffix() }
+        if (suffixedExactCandidates.isEmpty()) return emptySet()
+
+        return suffixedExactCandidates.mapTo(linkedSetOf()) { it.fileId }
+    }
+
+    private fun normalizeMatchingBaseName(baseName: String): String {
+        val normalized = baseName.lowercase()
 
         if (normalized.startsWith("cutscene_char") || normalized.startsWith("char")) {
             return normalized
         }
 
         return normalized
+    }
+
+    private fun String.hasVariantSuffix(): Boolean {
+        return when {
+            startsWith("bg_idcard_bg_cutscene_") -> Regex("^bg_idcard_bg_cutscene_\\d+_.+$", RegexOption.IGNORE_CASE).matches(this)
+            startsWith("cutscene_char") -> Regex("^cutscene_char\\d+_.+$", RegexOption.IGNORE_CASE).matches(this)
+            startsWith("char") -> Regex("^char\\d+_.+$", RegexOption.IGNORE_CASE).matches(this)
+            startsWith("specialillust") -> Regex("^specialillust.+(?:_|-).+$", RegexOption.IGNORE_CASE).matches(this)
+            else -> Regex("(?:_|-)[a-z0-9]+$", RegexOption.IGNORE_CASE).containsMatchIn(this)
+        }
     }
 }

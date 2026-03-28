@@ -202,7 +202,7 @@ def parse_catalog_for_bundle_names(catalog_content):
         return None
 
     KNOWN_PATTERNS = re.compile(
-        r'(cutscene_char\d{6}(?:_[a-z0-9]+)?|char\d{6}(?:_[a-z0-9]+)?|illust_dating\d+|illust_special\d+|illust_talk\d+|npc\d+|specialillust[\w-]+|storypack\w+|RhythmHitAnim)',
+        r'(cutscene_char\d{6}(?:_[a-z0-9]+)?|char\d{6}(?:_[a-z0-9]+)?|illust_dating\d+|illust_special\d+|illust_talk\d+|npc\d+|specialillust[\w-]+|storypack\w+|RhythmHitAnim|bg_idcard_bg_cutscene_\d+(?:_\d+)?)',
         re.IGNORECASE
     )
 
@@ -246,6 +246,9 @@ def parse_catalog_for_bundle_names(catalog_content):
                 asset_type = "cutscene"
                 file_id = matched_string.replace('cutscene_', '')
             elif matched_string.startswith('char') and '_' in matched_string:
+                asset_type = "cutscene"
+                file_id = matched_string
+            elif matched_string.startswith('bg_idcard_bg_cutscene_'):
                 asset_type = "cutscene"
                 file_id = matched_string
             else:

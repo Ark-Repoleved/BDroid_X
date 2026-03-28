@@ -1,0 +1,20 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Android / Gradle
+.gradle/
+local.properties
+
+# Build outputs
+build/
+*/build/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS junk
+.DS_Store
+Thumbs.db

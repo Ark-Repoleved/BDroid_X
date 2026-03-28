@@ -35,11 +35,18 @@ enum class FileCandidateKind {
     GENERIC
 }
 
+enum class FileCandidateTier {
+    EXACT,
+    NORMALIZED,
+    FALLBACK
+}
+
 data class FileCandidate(
     val fileId: String,
     val sourceName: String,
     val kind: FileCandidateKind,
-    val confidence: Int
+    val confidence: Int,
+    val tier: FileCandidateTier = FileCandidateTier.EXACT
 )
 
 data class ModDetails(
