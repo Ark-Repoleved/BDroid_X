@@ -26,7 +26,26 @@ data class ModCacheInfo(
 
 data class CharacterInfo(val character: String, val costume: String, val type: String, val hashedName: String)
 
-data class ModDetails(val fileId: String?, val fileNames: List<String>)
+enum class FileCandidateKind {
+    SPINE_SKEL,
+    SPINE_ATLAS,
+    SPINE_JSON,
+    SACTX,
+    TEXTURE,
+    GENERIC
+}
+
+data class FileCandidate(
+    val fileId: String,
+    val sourceName: String,
+    val kind: FileCandidateKind,
+    val confidence: Int
+)
+
+data class ModDetails(
+    val candidates: List<FileCandidate>,
+    val fileNames: List<String>
+)
 
 data class RepackJob(val hashedName: String, val modsToInstall: List<ModInfo>)
 

@@ -3,6 +3,7 @@ package com.example.bd2modmanager.data.repository
 import android.content.Context
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
+import com.example.bd2modmanager.data.model.FileCandidate
 import com.example.bd2modmanager.data.model.ModCacheInfo
 import com.example.bd2modmanager.data.model.ModDetails
 import com.example.bd2modmanager.data.model.ModInfo
@@ -57,7 +58,7 @@ class ModRepository(
                         } else {
                             extractModDetailsFromUri(file.uri)
                         }
-                        val bestMatch = characterRepository.findBestMatch(modDetails.fileId, modDetails.fileNames)
+                        val bestMatch = characterRepository.findBestMatch(modDetails.candidates, modDetails.fileNames)
 
                         val newCacheInfo = ModCacheInfo(
                             uriString = uriString,
@@ -116,14 +117,16 @@ class ModRepository(
 
     private fun extractModDetailsFromUri(zipUri: Uri): ModDetails {
         val fileNames = mutableListOf<String>()
-        var fileId: String? = null
+        val candidates = mutableListOf<FileCandidate>()
         try {
             context.contentResolver.openInputStream(zipUri)?.use {
                 ZipInputStream(it).use { zis ->
                     var entry = zis.nextEntry
                     while (entry != null) {
-                        fileNames.add(entry.name)
-                        if (fileId == null) fileId = characterRepository.extractFileId(entry.name)
+                        if (!entry.isDirectory) {
+                            fileNames.add(entry.name)
+                            characterRepository.extractFileCandidate(entry.name)?.let { candidates.add(it) }
+                        }
                         entry = zis.nextEntry
                     }
                 }
@@ -131,23 +134,30 @@ class ModRepository(
         } catch (e: Exception) {
             e.printStackTrace()
         }
-        return ModDetails(fileId, fileNames)
+        return ModDetails(candidates = dedupeCandidates(candidates), fileNames = fileNames)
     }
 
     private fun extractModDetailsFromDirectory(dirUri: Uri): ModDetails {
         val fileNames = mutableListOf<String>()
-        var fileId: String? = null
+        val candidates = mutableListOf<FileCandidate>()
         try {
             DocumentFile.fromTreeUri(context, dirUri)?.listFiles()?.forEach { file ->
-                val entryName = file.name ?: ""
-                fileNames.add(entryName)
                 if (file.isFile) {
-                    if (fileId == null) fileId = characterRepository.extractFileId(entryName)
+                    val entryName = file.name ?: ""
+                    fileNames.add(entryName)
+                    characterRepository.extractFileCandidate(entryName)?.let { candidates.add(it) }
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
-        return ModDetails(fileId, fileNames)
+        return ModDetails(candidates = dedupeCandidates(candidates), fileNames = fileNames)
+    }
+
+    private fun dedupeCandidates(candidates: List<FileCandidate>): List<FileCandidate> {
+        return candidates
+            .groupBy { Triple(it.fileId, it.kind, it.sourceName) }
+            .map { (_, grouped) -> grouped.maxByOrNull { it.confidence }!! }
+            .sortedByDescending { it.confidence }
     }
 }
