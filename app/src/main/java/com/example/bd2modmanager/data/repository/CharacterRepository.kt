@@ -193,7 +193,14 @@ class CharacterRepository(private val context: Context) {
             return FileCandidate(baseName, entryName, FileCandidateKind.TEXTURE, 35)
         }
 
-        return null
+        val genericConfidence = when {
+            loweredFileName.endsWith(".skel.bytes") || loweredFileName.endsWith(".skel") -> 75
+            loweredFileName.endsWith(".atlas.txt") || loweredFileName.endsWith(".atlas") -> 70
+            extension == "json" -> 65
+            else -> 45
+        }
+
+        return FileCandidate(baseName, entryName, FileCandidateKind.GENERIC, genericConfidence)
     }
 
     private fun shouldIgnoreFile(loweredFileName: String): Boolean {
