@@ -25,7 +25,7 @@ class CharacterRepository(private val context: Context) {
         )
 
         private val KNOWN_PATTERN =
-            "^(cutscene_char\\d{6}|char\\d{6}|illust_dating\\d+|illust_special\\d+|illust_talk\\d+|npc\\d+|specialillust\\w+|storypack\\w+|rhythmhitanim)$"
+            "^(cutscene_char\\d{6}(?:_[a-z0-9]+)?|char\\d{6}(?:_[a-z0-9]+)?|illust_dating\\d+|illust_special\\d+|illust_talk\\d+|npc\\d+|specialillust[\\w-]+|storypack\\w+|rhythmhitanim)$"
                 .toRegex(RegexOption.IGNORE_CASE)
 
         private val SACTX_PATTERN =
@@ -157,7 +157,8 @@ class CharacterRepository(private val context: Context) {
         if (baseName.length < 2) return null
 
         val extension = loweredFileName.substringAfterLast('.', "")
-        val knownMatch = KNOWN_PATTERN.matchEntire(baseName)
+        val normalizedBaseName = normalizeMatchingBaseName(baseName)
+        val knownMatch = KNOWN_PATTERN.matchEntire(normalizedBaseName)
         if (knownMatch != null) {
             val matched = knownMatch.groupValues[1].lowercase()
             val normalizedFileId = if (matched.startsWith("cutscene_")) {
@@ -177,7 +178,10 @@ class CharacterRepository(private val context: Context) {
                 FileCandidateKind.SPINE_SKEL -> 120
                 FileCandidateKind.SPINE_ATLAS -> 100
                 FileCandidateKind.SPINE_JSON -> 95
-                else -> 70
+                else -> when {
+                    baseName != normalizedBaseName -> 72
+                    else -> 70
+                }
             }
 
             return FileCandidate(normalizedFileId, entryName, kind, confidence)
@@ -226,5 +230,19 @@ class CharacterRepository(private val context: Context) {
 
     private fun isTextureExtension(extension: String): Boolean {
         return extension in setOf("png", "jpg", "jpeg", "webp")
+    }
+
+    private fun normalizeMatchingBaseName(baseName: String): String {
+        var normalized = baseName.lowercase()
+
+        if (normalized.startsWith("specialillust")) {
+            normalized = normalized.replaceFirst("specialillust", "specialillust")
+        }
+
+        if (normalized.startsWith("cutscene_char") || normalized.startsWith("char")) {
+            return normalized
+        }
+
+        return normalized
     }
 }

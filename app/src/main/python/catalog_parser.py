@@ -202,7 +202,7 @@ def parse_catalog_for_bundle_names(catalog_content):
         return None
 
     KNOWN_PATTERNS = re.compile(
-        r'(cutscene_char\d{6}|char\d{6}|illust_dating\d+|illust_special\d+|illust_talk\d+|npc\d+|specialillust\w+|storypack\w+|RhythmHitAnim)',
+        r'(cutscene_char\d{6}(?:_[a-z0-9]+)?|char\d{6}(?:_[a-z0-9]+)?|illust_dating\d+|illust_special\d+|illust_talk\d+|npc\d+|specialillust[\w-]+|storypack\w+|RhythmHitAnim)',
         re.IGNORECASE
     )
 
@@ -215,10 +215,13 @@ def parse_catalog_for_bundle_names(catalog_content):
         filename = asset_key.split('/')[-1] if '/' in asset_key else asset_key
         for ext in ('.skel.bytes', '.atlas.txt'):
             if filename.lower().endswith(ext):
-                return filename[:-len(ext)]
-        if '.' in filename:
-            return filename.rsplit('.', 1)[0]
-        return filename
+                filename = filename[:-len(ext)]
+                break
+        else:
+            if '.' in filename:
+                filename = filename.rsplit('.', 1)[0]
+
+        return filename.lower()
 
     # --- Map asset keys to bundle names ---
     for i in range(len(entries)):
@@ -242,6 +245,9 @@ def parse_catalog_for_bundle_names(catalog_content):
             if matched_string.startswith('cutscene_'):
                 asset_type = "cutscene"
                 file_id = matched_string.replace('cutscene_', '')
+            elif matched_string.startswith('char') and '_' in matched_string:
+                asset_type = "cutscene"
+                file_id = matched_string
             else:
                 asset_type = "idle"
                 file_id = matched_string

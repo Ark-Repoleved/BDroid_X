@@ -121,9 +121,9 @@ def scrape_and_save(output_dir, version):
         # Create misc entry if it exists in the catalog.
         if "misc" in bundles and bundles["misc"]:
             misc_entry = {
-                "character": "Other",
+                "character": metadata.get("character", "Other"),
                 "file_id": file_id,
-                "costume": file_id,
+                "costume": metadata.get("costume", file_id),
                 "type": "misc",
                 "hashed_name": bundles["misc"]
             }
