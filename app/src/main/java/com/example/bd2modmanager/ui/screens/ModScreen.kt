@@ -29,7 +29,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.bd2modmanager.data.model.ModInfo
 import com.example.bd2modmanager.data.model.ResolutionState
 import com.example.bd2modmanager.ui.viewmodel.MainViewModel
@@ -281,17 +284,47 @@ fun ModScreen(
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 modifier = Modifier.fillMaxWidth()
                                             ) {
-                                                Text(
-                                                    text = when (hash) {
-                                                        "Unknown" -> "Unknown"
-                                                        "Invalid" -> "Invalid"
-                                                        else -> "Target: $hash"
-                                                    },
-                                                    style = MaterialTheme.typography.titleMedium,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.weight(1f)
-                                                )
+                                                when (hash) {
+                                                    "Unknown" -> {
+                                                        Text(
+                                                            text = "Unknown",
+                                                            style = MaterialTheme.typography.titleMedium,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.weight(1f)
+                                                        )
+                                                    }
+                                                    "Invalid" -> {
+                                                        Text(
+                                                            text = "Invalid",
+                                                            style = MaterialTheme.typography.titleMedium,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.weight(1f)
+                                                        )
+                                                    }
+                                                    else -> {
+                                                        Row(
+                                                            modifier = Modifier.weight(1f),
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Text(
+                                                                text = "Target: ",
+                                                                style = MaterialTheme.typography.titleMedium,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = MaterialTheme.colorScheme.primary
+                                                            )
+                                                            AutoShrinkText(
+                                                                text = hash,
+                                                                maxFontSize = MaterialTheme.typography.titleMedium.fontSize,
+                                                                minFontSize = 12.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = MaterialTheme.colorScheme.primary,
+                                                                modifier = Modifier.weight(1f)
+                                                            )
+                                                        }
+                                                    }
+                                                }
 
                                                 if (hash != "Unknown" && hash != "Invalid") {
                                                     IconButton(onClick = { onUninstallRequest(hash) }) {
@@ -343,6 +376,35 @@ fun ModScreen(
             }
         }
     }
+}
+
+@Composable
+private fun AutoShrinkText(
+    text: String,
+    modifier: Modifier = Modifier,
+    maxFontSize: TextUnit = 20.sp,
+    minFontSize: TextUnit = 12.sp,
+    fontWeight: FontWeight? = null,
+    color: androidx.compose.ui.graphics.Color = LocalContentColor.current
+) {
+    var currentFontSize by remember(text) { mutableStateOf(maxFontSize) }
+
+    Text(
+        text = text,
+        modifier = modifier,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Clip,
+        fontSize = currentFontSize,
+        fontWeight = fontWeight,
+        color = color,
+        style = LocalTextStyle.current.copy(color = color),
+        onTextLayout = { result ->
+            if (result.hasVisualOverflow && currentFontSize > minFontSize) {
+                currentFontSize = (currentFontSize.value - 1f).coerceAtLeast(minFontSize.value).sp
+            }
+        }
+    )
 }
 
 @Composable
@@ -456,31 +518,18 @@ fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit
                 )
             }
             Spacer(Modifier.width(8.dp))
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                AssistChip(
-                    onClick = { /* No action */ },
-                    label = { Text(modInfo.type.uppercase(), style = MaterialTheme.typography.labelSmall) },
-                    leadingIcon = {
-                        val icon = when(modInfo.type.lowercase()) {
-                            "idle" -> Icons.Default.Person
-                            "cutscene" -> Icons.Default.Movie
-                            else -> Icons.Default.Category
-                        }
-                        Icon(icon, contentDescription = modInfo.type, Modifier.size(14.dp))
-                    },
-                    modifier = Modifier.heightIn(max = 24.dp)
-                )
-                val stateLabel = when (modInfo.resolutionState) {
-                    ResolutionState.KNOWN -> "KNOWN"
-                    ResolutionState.MISC -> "MISC"
-                    ResolutionState.UNKNOWN -> "UNKNOWN"
-                    ResolutionState.INVALID -> "INVALID"
-                }
-                AssistChip(
-                    onClick = { /* No action */ },
-                    label = { Text(stateLabel, style = MaterialTheme.typography.labelSmall) },
-                    modifier = Modifier.heightIn(max = 24.dp)
-                )
+            AssistChip(
+                onClick = { /* No action */ },
+                label = { Text(modInfo.type.uppercase(), style = MaterialTheme.typography.labelSmall) },
+                leadingIcon = {
+                    val icon = when(modInfo.type.lowercase()) {
+                        "idle" -> Icons.Default.Person
+                        "cutscene" -> Icons.Default.Movie
+                        else -> Icons.Default.Category
+                    }
+                    Icon(icon, contentDescription = modInfo.type, Modifier.size(14.dp))
+                },
+                modifier = Modifier.heightIn(max = 24.dp)
             }
         }
     }
