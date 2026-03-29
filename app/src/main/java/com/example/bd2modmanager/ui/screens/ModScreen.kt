@@ -527,7 +527,7 @@ fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit
                         "cutscene" -> Icons.Default.Movie
                         else -> Icons.Default.Category
                     }
-                    Icon(icon, contentDescription = modInfo.type, Modifier.size(14.dp))
+                    Icon(icon, contentDescription = modInfo.type, modifier = Modifier.size(14.dp))
                 },
                 modifier = Modifier.heightIn(max = 24.dp)
             }
