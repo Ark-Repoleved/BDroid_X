@@ -8,7 +8,7 @@ from pathlib import Path
 from catalog_parser import read_int32_from_byte_array, read_object_from_byte_array
 
 
-INDEX_SCHEMA_VERSION = 3
+INDEX_SCHEMA_VERSION = 4
 
 
 def _normalize_filename(filename: str):
@@ -79,7 +79,6 @@ def build_asset_index(catalog_content):
     key_array = base64.b64decode(catalog_content['m_KeyDataString'])
     extra_data = base64.b64decode(catalog_content['m_ExtraDataString'])
     entry_data = base64.b64decode(catalog_content['m_EntryDataString'])
-    internal_ids = catalog_content.get('m_InternalIds') or []
 
     num_buckets = struct.unpack_from('<i', bucket_array, 0)[0]
     dependency_map = [None] * num_buckets
@@ -106,8 +105,7 @@ def build_asset_index(catalog_content):
     entries = []
 
     for m in range(number_of_entries):
-        internal_id_index = read_int32_from_byte_array(entry_data, index)
-        index += 4
+        index += 4  # internal_id_index (ignored for resolver index; exact bundle asset names only)
         provider_index = read_int32_from_byte_array(entry_data, index)
         index += 4
         dependency_key_index = read_int32_from_byte_array(entry_data, index)
@@ -121,8 +119,7 @@ def build_asset_index(catalog_content):
 
         entries.append({
             'dependency_index': dependency_key_index,
-            'primary_key_index': primary_key_index,
-            'internal_id_index': internal_id_index
+            'primary_key_index': primary_key_index
         })
 
         if provider_index == 1 and data_index >= 0:
@@ -197,9 +194,7 @@ def build_asset_index(catalog_content):
 
     for i in range(len(entries)):
         primary_key_index = entries[i]['primary_key_index']
-        internal_id_index = entries[i]['internal_id_index']
         raw_key = keys[primary_key_index] if primary_key_index < len(keys) else None
-        internal_id = internal_ids[internal_id_index] if 0 <= internal_id_index < len(internal_ids) else None
         bundle_info = resolve_bundle_info(i)
         if not bundle_info:
             continue
@@ -218,10 +213,6 @@ def build_asset_index(catalog_content):
         candidate_keys = []
         if isinstance(raw_key, str) and raw_key:
             candidate_keys.append(raw_key.lower())
-        if isinstance(internal_id, str) and internal_id:
-            lowered_internal = internal_id.lower()
-            if lowered_internal not in candidate_keys:
-                candidate_keys.append(lowered_internal)
 
         if not candidate_keys:
             continue
