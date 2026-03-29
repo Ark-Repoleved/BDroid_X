@@ -6,10 +6,8 @@ from catalog_indexer import normalize_filename
 
 
 def resolve_mod_folder(mod_file_names, asset_index):
-    resolved_targets = []
     unresolved_files = []
-    target_hashes = set()
-    family_keys = set()
+    file_matches = []
 
     assets_by_base = (asset_index or {}).get('assetsByBaseName', {})
     assets_by_exact = (asset_index or {}).get('assetsByExactKey', {})
@@ -18,68 +16,161 @@ def resolve_mod_folder(mod_file_names, asset_index):
         base_name = Path(file_name).name
         lowered_full = (file_name or '').replace('\\', '/').lower()
         candidates = normalize_filename(base_name)
-        matched = None
-        strategy = 'NONE'
+        matches = []
 
-        if lowered_full in assets_by_exact:
-            matched = assets_by_exact[lowered_full]
-            strategy = 'EXACT'
-        else:
-            for candidate in candidates:
-                hits = assets_by_base.get(candidate.lower()) or []
-                if hits:
-                    matched = hits[0]
-                    strategy = 'EXACT' if candidate.lower() == base_name.lower() else 'EXTENSION_MAPPING'
-                    break
+        exact_match = assets_by_exact.get(lowered_full)
+        if exact_match:
+            matches.append(_build_match(base_name, candidates, exact_match, 'EXACT', 1.0))
 
-        if matched:
-            target_hash = matched.get('targetHash')
-            family_key = _normalize_family_key(matched.get('familyKey'))
-            if target_hash:
-                target_hashes.add(target_hash)
-            if family_key:
-                family_keys.add(family_key)
-            resolved_targets.append({
-                'originalFileName': base_name,
-                'normalizedCandidates': candidates,
-                'resolvedAssetKey': matched.get('assetKey'),
-                'resolvedBundleName': matched.get('bundleName'),
-                'resolvedBundlePath': None,
-                'assetType': _infer_asset_type(base_name),
-                'targetHash': target_hash,
-                'familyKey': family_key,
-                'matchStrategy': strategy,
-                'confidence': 1.0 if strategy == 'EXACT' else 0.9
+        for candidate in candidates:
+            hits = assets_by_base.get(candidate.lower()) or []
+            strategy = 'EXACT' if candidate.lower() == base_name.lower() else 'EXTENSION_MAPPING'
+            confidence = 1.0 if strategy == 'EXACT' else 0.9
+            for hit in hits:
+                matches.append(_build_match(base_name, candidates, hit, strategy, confidence))
+
+        matches = _dedupe_matches(matches)
+
+        if matches:
+            file_matches.append({
+                'fileName': base_name,
+                'candidates': candidates,
+                'matches': matches,
+                'targetHashes': {m.get('targetHash') for m in matches if m.get('targetHash')}
             })
         else:
             unresolved_files.append(base_name)
 
-    # INVALID should be based only on successfully resolved technical targets.
-    # Unknown/unmatched files stay in unresolvedFiles and do not make the folder invalid by themselves.
-    if len(target_hashes) > 1 or (len(target_hashes) == 1 and len(family_keys) > 1):
-        state = 'INVALID'
-        error_reason = 'Multiple targets detected in one mod folder'
-        target_hash = None
-        family_key = None
-    elif len(target_hashes) == 1:
-        target_hash = next(iter(target_hashes))
-        family_key = next(iter(family_keys)) if family_keys else None
-        state = 'KNOWN'
-        error_reason = None
+    candidate_sets = [entry['targetHashes'] for entry in file_matches if entry['targetHashes']]
+
+    if not candidate_sets:
+        return {
+            'targetHash': None,
+            'resolvedFamilyKey': None,
+            'resolvedTargets': [],
+            'unresolvedFiles': unresolved_files,
+            'resolutionState': 'UNKNOWN',
+            'errorReason': 'No matching target could be resolved'
+        }
+
+    intersection = set(candidate_sets[0])
+    for target_set in candidate_sets[1:]:
+        intersection &= target_set
+
+    union = set()
+    for target_set in candidate_sets:
+        union |= target_set
+
+    if len(intersection) == 1:
+        target_hash = next(iter(intersection))
+    elif len(union) == 1:
+        target_hash = next(iter(union))
     else:
-        target_hash = None
-        family_key = None
-        state = 'UNKNOWN'
-        error_reason = 'No matching target could be resolved'
+        return {
+            'targetHash': None,
+            'resolvedFamilyKey': None,
+            'resolvedTargets': _select_representative_matches(file_matches, None),
+            'unresolvedFiles': unresolved_files,
+            'resolutionState': 'INVALID',
+            'errorReason': 'Multiple targets detected in one mod folder'
+        }
+
+    resolved_targets = _select_representative_matches(file_matches, target_hash)
+    family_keys = {
+        _normalize_family_key(match.get('familyKey'))
+        for match in resolved_targets
+        if _normalize_family_key(match.get('familyKey'))
+    }
+
+    if len(family_keys) > 1:
+        return {
+            'targetHash': None,
+            'resolvedFamilyKey': None,
+            'resolvedTargets': resolved_targets,
+            'unresolvedFiles': unresolved_files,
+            'resolutionState': 'INVALID',
+            'errorReason': 'Multiple targets detected in one mod folder'
+        }
 
     return {
         'targetHash': target_hash,
-        'resolvedFamilyKey': family_key,
+        'resolvedFamilyKey': next(iter(family_keys)) if family_keys else None,
         'resolvedTargets': resolved_targets,
         'unresolvedFiles': unresolved_files,
-        'resolutionState': state,
-        'errorReason': error_reason
+        'resolutionState': 'KNOWN',
+        'errorReason': None
     }
+
+
+def _build_match(base_name: str, candidates, matched, strategy: str, confidence: float):
+    target_hash = matched.get('targetHash')
+    family_key = _normalize_family_key(matched.get('familyKey'))
+    return {
+        'originalFileName': base_name,
+        'normalizedCandidates': candidates,
+        'resolvedAssetKey': matched.get('assetKey'),
+        'resolvedBundleName': matched.get('bundleName'),
+        'resolvedBundlePath': None,
+        'assetType': _infer_asset_type(base_name),
+        'targetHash': target_hash,
+        'familyKey': family_key,
+        'matchStrategy': strategy,
+        'confidence': confidence
+    }
+
+
+def _dedupe_matches(matches):
+    deduped = []
+    seen = set()
+    for match in matches:
+        key = (
+            match.get('resolvedAssetKey'),
+            match.get('targetHash'),
+            match.get('familyKey'),
+            match.get('matchStrategy')
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(match)
+    return deduped
+
+
+def _select_representative_matches(file_matches, target_hash):
+    resolved_targets = []
+    for entry in file_matches:
+        matches = entry['matches']
+        chosen = None
+
+        if target_hash:
+            matching_target = [m for m in matches if m.get('targetHash') == target_hash]
+            chosen = _prefer_best_match(matching_target)
+        else:
+            chosen = _prefer_best_match(matches)
+
+        if chosen:
+            resolved_targets.append(chosen)
+
+    return resolved_targets
+
+
+def _prefer_best_match(matches):
+    if not matches:
+        return None
+
+    strategy_rank = {
+        'EXACT': 0,
+        'EXTENSION_MAPPING': 1,
+        'NONE': 2
+    }
+
+    return sorted(
+        matches,
+        key=lambda m: (
+            strategy_rank.get(m.get('matchStrategy'), 99),
+            m.get('resolvedAssetKey') or ''
+        )
+    )[0]
 
 
 def _infer_asset_type(file_name: str):
