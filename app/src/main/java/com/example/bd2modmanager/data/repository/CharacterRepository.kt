@@ -45,7 +45,7 @@ class CharacterRepository(private val context: Context) {
                 val py = Python.getInstance()
                 val mainScript = py.getModule("main_script")
                 val result = mainScript.callAttr("update_character_data", context.filesDir.absolutePath).asList()
-                val status = result[0].toString() // SUCCESS, SKIPPED, FAILED
+                val status = result[0].toString()
                 val message = result[1].toString()
 
                 when (status) {
@@ -82,7 +82,14 @@ class CharacterRepository(private val context: Context) {
             val lut = mutableMapOf<String, MutableList<CharacterInfo>>()
             val internalFile = File(context.filesDir, CHARACTERS_JSON_FILENAME)
             if (!internalFile.exists()) return@withContext emptyMap()
-            val jsonString = try { internalFile.readText() } catch (e: Exception) { e.printStackTrace(); "" }
+
+            val jsonString = try {
+                internalFile.readText()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                ""
+            }
+
             if (jsonString.isNotEmpty()) {
                 try {
                     val rootObject = org.json.JSONObject(jsonString)
@@ -90,7 +97,12 @@ class CharacterRepository(private val context: Context) {
                     for (i in 0 until jsonArray.length()) {
                         val obj = jsonArray.getJSONObject(i)
                         val fileId = obj.getString("file_id").lowercase()
-                        val charInfo = CharacterInfo(obj.getString("character"), obj.getString("costume"), obj.getString("type"), obj.getString("hashed_name"))
+                        val charInfo = CharacterInfo(
+                            obj.getString("character"),
+                            obj.getString("costume"),
+                            obj.getString("type"),
+                            obj.getString("hashed_name")
+                        )
                         lut.getOrPut(fileId) { mutableListOf() }.add(charInfo)
                     }
                 } catch (e: org.json.JSONException) {
@@ -99,7 +111,12 @@ class CharacterRepository(private val context: Context) {
                         for (i in 0 until jsonArray.length()) {
                             val obj = jsonArray.getJSONObject(i)
                             val fileId = obj.getString("file_id").lowercase()
-                            val charInfo = CharacterInfo(obj.getString("character"), obj.getString("costume"), obj.getString("type"), obj.getString("hashed_name"))
+                            val charInfo = CharacterInfo(
+                                obj.getString("character"),
+                                obj.getString("costume"),
+                                obj.getString("type"),
+                                obj.getString("hashed_name")
+                            )
                             lut.getOrPut(fileId) { mutableListOf() }.add(charInfo)
                         }
                     } catch (e2: Exception) {
@@ -118,110 +135,35 @@ class CharacterRepository(private val context: Context) {
 
         val prioritizedCandidates = prioritizeCandidates(candidates)
         val exactPreferredFileIds = findExactPreferredFileIds(prioritizedCandidates)
-        val scoreByFileId = linkedMapOf<String, Int>()
-        for (candidate in prioritizedCandidates) {
-            scoreByFileId[candidate.fileId] = (scoreByFileId[candidate.fileId] ?: 0) + candidate.confidence
-        }
-
-        val rankedFileIds = scoreByFileId.entries
-            .sortedWith(
-                compareByDescending<Map.Entry<String, Int>> { exactPreferredFileIds.contains(it.key) }
-                    .thenByDescending { it.value }
-            )
-            .map { it.key }
+        val rankedFileIds = rankFileIds(prioritizedCandidates, exactPreferredFileIds)
         val hasCutsceneKeyword = fileNames.any { it.contains("cutscene", ignoreCase = true) }
 
         for (fileId in rankedFileIds) {
             val matches = characterLut[fileId] ?: continue
-            if (matches.isEmpty()) continue
-            if (matches.size == 1) return matches.first()
-
-            if (hasCutsceneKeyword) {
-                matches.find { it.type == "cutscene" }?.let { return it }
-            }
-
-            val validHashCandidates = matches.filter { !it.hashedName.isNullOrBlank() }
-            if (validHashCandidates.size == 1) {
-                return validHashCandidates.first()
-            }
-
-            matches.find { it.type == "idle" }?.let { return it }
-            return matches.first()
+            selectBestCharacterInfo(matches, hasCutsceneKeyword)?.let { return it }
         }
 
         return null
     }
 
     fun extractFileCandidate(entryName: String): FileCandidate? {
-        val normalizedEntryName = entryName.replace('\\', '/').trim()
-        if (normalizedEntryName.isBlank()) return null
-
-        val fileName = normalizedEntryName.substringAfterLast('/')
-        val loweredFileName = fileName.lowercase()
-
+        val loweredFileName = normalizeEntryFileName(entryName) ?: return null
         if (shouldIgnoreFile(loweredFileName)) return null
 
         val baseName = extractBaseName(loweredFileName) ?: return null
         if (baseName.length < 2) return null
 
-        val extension = loweredFileName.substringAfterLast('.', "")
-        val normalizedBaseName = normalizeMatchingBaseName(baseName)
-        val knownMatch = KNOWN_PATTERN.matchEntire(normalizedBaseName)
-        if (knownMatch != null) {
-            val matched = knownMatch.groupValues[1].lowercase()
-            val normalizedFileId = if (matched.startsWith("cutscene_")) {
-                matched.substringAfter("_")
-            } else {
-                matched
-            }
+        buildKnownPatternCandidate(entryName, loweredFileName, baseName)?.let { return it }
+        buildSactxCandidate(entryName, baseName)?.let { return it }
+        return buildFallbackCandidate(entryName, loweredFileName, baseName)
+    }
 
-            val kind = when {
-                loweredFileName.endsWith(".skel.bytes") || loweredFileName.endsWith(".skel") -> FileCandidateKind.SPINE_SKEL
-                loweredFileName.endsWith(".atlas.txt") || loweredFileName.endsWith(".atlas") -> FileCandidateKind.SPINE_ATLAS
-                extension == "json" -> FileCandidateKind.SPINE_JSON
-                else -> FileCandidateKind.GENERIC
-            }
+    // --- File-name analysis rules ------------------------------------------------------------
 
-            val confidence = when (kind) {
-                FileCandidateKind.SPINE_SKEL -> 120
-                FileCandidateKind.SPINE_ATLAS -> 100
-                FileCandidateKind.SPINE_JSON -> 95
-                else -> when {
-                    baseName != normalizedBaseName -> 72
-                    else -> 70
-                }
-            }
-
-            return FileCandidate(
-                fileId = normalizedFileId,
-                sourceName = entryName,
-                kind = kind,
-                confidence = confidence,
-                tier = when {
-                    normalizedBaseName == baseName -> FileCandidateTier.EXACT
-                    else -> FileCandidateTier.NORMALIZED
-                }
-            )
-        }
-
-        val sactxMatch = SACTX_PATTERN.matchEntire(baseName)
-        if (sactxMatch != null) {
-            val fileId = sactxMatch.groupValues[1].lowercase()
-            return FileCandidate(fileId, entryName, FileCandidateKind.SACTX, 80)
-        }
-
-        if (isTextureExtension(extension)) {
-            return FileCandidate(baseName, entryName, FileCandidateKind.TEXTURE, 35)
-        }
-
-        val genericConfidence = when {
-            loweredFileName.endsWith(".skel.bytes") || loweredFileName.endsWith(".skel") -> 75
-            loweredFileName.endsWith(".atlas.txt") || loweredFileName.endsWith(".atlas") -> 70
-            extension == "json" -> 65
-            else -> 45
-        }
-
-        return FileCandidate(baseName, entryName, FileCandidateKind.GENERIC, genericConfidence, FileCandidateTier.FALLBACK)
+    private fun normalizeEntryFileName(entryName: String): String? {
+        val normalizedEntryName = entryName.replace('\\', '/').trim()
+        if (normalizedEntryName.isBlank()) return null
+        return normalizedEntryName.substringAfterLast('/').lowercase()
     }
 
     private fun shouldIgnoreFile(loweredFileName: String): Boolean {
@@ -245,9 +187,105 @@ class CharacterRepository(private val context: Context) {
         return baseName.ifBlank { null }
     }
 
+    private fun normalizeMatchingBaseName(baseName: String): String {
+        val normalized = baseName.lowercase()
+        return normalized
+    }
+
     private fun isTextureExtension(extension: String): Boolean {
         return extension in setOf("png", "jpg", "jpeg", "webp")
     }
+
+    // --- Candidate extraction rules -----------------------------------------------------------
+
+    private fun buildKnownPatternCandidate(
+        entryName: String,
+        loweredFileName: String,
+        baseName: String
+    ): FileCandidate? {
+        val extension = loweredFileName.substringAfterLast('.', "")
+        val normalizedBaseName = normalizeMatchingBaseName(baseName)
+        val knownMatch = KNOWN_PATTERN.matchEntire(normalizedBaseName) ?: return null
+
+        val matched = knownMatch.groupValues[1].lowercase()
+        val normalizedFileId = if (matched.startsWith("cutscene_")) {
+            matched.substringAfter("_")
+        } else {
+            matched
+        }
+
+        val kind = classifyCandidateKind(loweredFileName, extension)
+        val confidence = confidenceForKnownCandidate(kind, baseName, normalizedBaseName)
+        val tier = if (normalizedBaseName == baseName) {
+            FileCandidateTier.EXACT
+        } else {
+            FileCandidateTier.NORMALIZED
+        }
+
+        return FileCandidate(
+            fileId = normalizedFileId,
+            sourceName = entryName,
+            kind = kind,
+            confidence = confidence,
+            tier = tier
+        )
+    }
+
+    private fun buildSactxCandidate(entryName: String, baseName: String): FileCandidate? {
+        val sactxMatch = SACTX_PATTERN.matchEntire(baseName) ?: return null
+        val fileId = sactxMatch.groupValues[1].lowercase()
+        return FileCandidate(fileId, entryName, FileCandidateKind.SACTX, 80)
+    }
+
+    private fun buildFallbackCandidate(
+        entryName: String,
+        loweredFileName: String,
+        baseName: String
+    ): FileCandidate? {
+        val extension = loweredFileName.substringAfterLast('.', "")
+        if (isTextureExtension(extension)) {
+            return FileCandidate(baseName, entryName, FileCandidateKind.TEXTURE, 35)
+        }
+
+        val genericConfidence = when {
+            loweredFileName.endsWith(".skel.bytes") || loweredFileName.endsWith(".skel") -> 75
+            loweredFileName.endsWith(".atlas.txt") || loweredFileName.endsWith(".atlas") -> 70
+            extension == "json" -> 65
+            else -> 45
+        }
+
+        return FileCandidate(
+            baseName,
+            entryName,
+            FileCandidateKind.GENERIC,
+            genericConfidence,
+            FileCandidateTier.FALLBACK
+        )
+    }
+
+    private fun classifyCandidateKind(loweredFileName: String, extension: String): FileCandidateKind {
+        return when {
+            loweredFileName.endsWith(".skel.bytes") || loweredFileName.endsWith(".skel") -> FileCandidateKind.SPINE_SKEL
+            loweredFileName.endsWith(".atlas.txt") || loweredFileName.endsWith(".atlas") -> FileCandidateKind.SPINE_ATLAS
+            extension == "json" -> FileCandidateKind.SPINE_JSON
+            else -> FileCandidateKind.GENERIC
+        }
+    }
+
+    private fun confidenceForKnownCandidate(
+        kind: FileCandidateKind,
+        baseName: String,
+        normalizedBaseName: String
+    ): Int {
+        return when (kind) {
+            FileCandidateKind.SPINE_SKEL -> 120
+            FileCandidateKind.SPINE_ATLAS -> 100
+            FileCandidateKind.SPINE_JSON -> 95
+            else -> if (baseName != normalizedBaseName) 72 else 70
+        }
+    }
+
+    // --- Candidate selection rules ------------------------------------------------------------
 
     private fun prioritizeCandidates(candidates: List<FileCandidate>): List<FileCandidate> {
         val tiersInOrder = listOf(
@@ -261,7 +299,7 @@ class CharacterRepository(private val context: Context) {
             if (tierCandidates.isEmpty()) continue
 
             return tierCandidates
-                .groupBy { Pair(it.fileId, it.kind) }
+                .groupBy { it.fileId to it.kind }
                 .map { (_, grouped) -> grouped.maxByOrNull { it.confidence }!! }
                 .sortedByDescending { it.confidence }
         }
@@ -275,23 +313,30 @@ class CharacterRepository(private val context: Context) {
                 (it.kind == FileCandidateKind.GENERIC || it.kind == FileCandidateKind.TEXTURE)
         }
 
-        val suffixedExactCandidates = exactGenericCandidates.filter { it.fileId.hasVariantSuffix() }
+        val suffixedExactCandidates = exactGenericCandidates.filter { it.fileId.hasMeaningfulVariantSuffix() }
         if (suffixedExactCandidates.isEmpty()) return emptySet()
 
         return suffixedExactCandidates.mapTo(linkedSetOf()) { it.fileId }
     }
 
-    private fun normalizeMatchingBaseName(baseName: String): String {
-        val normalized = baseName.lowercase()
-
-        if (normalized.startsWith("cutscene_char") || normalized.startsWith("char")) {
-            return normalized
+    private fun rankFileIds(
+        candidates: List<FileCandidate>,
+        exactPreferredFileIds: Set<String>
+    ): List<String> {
+        val scoreByFileId = linkedMapOf<String, Int>()
+        for (candidate in candidates) {
+            scoreByFileId[candidate.fileId] = (scoreByFileId[candidate.fileId] ?: 0) + candidate.confidence
         }
 
-        return normalized
+        return scoreByFileId.entries
+            .sortedWith(
+                compareByDescending<Map.Entry<String, Int>> { exactPreferredFileIds.contains(it.key) }
+                    .thenByDescending { it.value }
+            )
+            .map { it.key }
     }
 
-    private fun String.hasVariantSuffix(): Boolean {
+    private fun String.hasMeaningfulVariantSuffix(): Boolean {
         return when {
             startsWith("bg_idcard_bg_cutscene_") -> Regex("^bg_idcard_bg_cutscene_\\d+_.+$", RegexOption.IGNORE_CASE).matches(this)
             startsWith("cutscene_char") -> Regex("^cutscene_char\\d+_.+$", RegexOption.IGNORE_CASE).matches(this)
@@ -299,5 +344,27 @@ class CharacterRepository(private val context: Context) {
             startsWith("specialillust") -> Regex("^specialillust.+(?:_|-).+$", RegexOption.IGNORE_CASE).matches(this)
             else -> Regex("(?:_|-)[a-z0-9]+$", RegexOption.IGNORE_CASE).containsMatchIn(this)
         }
+    }
+
+    // --- Metadata selection rules -------------------------------------------------------------
+
+    private fun selectBestCharacterInfo(
+        matches: List<CharacterInfo>,
+        hasCutsceneKeyword: Boolean
+    ): CharacterInfo? {
+        if (matches.isEmpty()) return null
+        if (matches.size == 1) return matches.first()
+
+        if (hasCutsceneKeyword) {
+            matches.find { it.type == "cutscene" }?.let { return it }
+        }
+
+        val validHashCandidates = matches.filter { !it.hashedName.isNullOrBlank() }
+        if (validHashCandidates.size == 1) {
+            return validHashCandidates.first()
+        }
+
+        matches.find { it.type == "idle" }?.let { return it }
+        return matches.first()
     }
 }
