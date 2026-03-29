@@ -148,6 +148,28 @@ def resolve_mod_files(file_names_json: str, output_dir: str, quality: str = "HD"
         return False, traceback.format_exc()
 
 
+def resolve_mod_batch(mods_json: str, output_dir: str, quality: str = "HD", progress_callback=None):
+    try:
+        mods = json.loads(mods_json) if isinstance(mods_json, str) else mods_json
+        success, version_or_error, index = ensure_asset_index(output_dir, quality, progress_callback)
+        if not success:
+            return False, version_or_error
+
+        results = []
+        for mod in mods or []:
+            mod_id = mod.get("id")
+            file_names = mod.get("fileNames") or []
+            resolved = resolver.resolve_mod_folder(file_names, index)
+            results.append({
+                "id": mod_id,
+                "result": resolved
+            })
+        return True, json.dumps(results)
+    except Exception:
+        import traceback
+        return False, traceback.format_exc()
+
+
 def update_character_data(output_dir: str):
     """
     Entry point for Kotlin to run the character data scraper.
