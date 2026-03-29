@@ -71,8 +71,7 @@ def build_asset_index(catalog_content):
             'strings': [],
             'records': [],
             'assetsByExactKey': {},
-            'assetsByBaseName': {},
-            'bundlesByTargetHash': {}
+            'assetsByBaseName': {}
         }
 
     bucket_array = base64.b64decode(catalog_content['m_BucketDataString'])
@@ -153,7 +152,6 @@ def build_asset_index(catalog_content):
     record_ids = {}
     assets_by_exact = {}
     base_candidates = {}
-    bundles_by_hash = {}
 
     def intern_string(value):
         if value is None:
@@ -203,13 +201,6 @@ def build_asset_index(catalog_content):
         if not target_hash:
             continue
 
-        if target_hash not in bundles_by_hash:
-            bundles_by_hash[target_hash] = {
-                'bundleHash': bundle_info.get('bundle_hash'),
-                'bundleSize': bundle_info.get('bundle_size'),
-                'downloadName': bundle_info.get('download_name')
-            }
-
         candidate_keys = []
         if isinstance(raw_key, str) and raw_key:
             candidate_keys.append(raw_key.lower())
@@ -239,8 +230,7 @@ def build_asset_index(catalog_content):
         'strings': strings,
         'records': records,
         'assetsByExactKey': assets_by_exact,
-        'assetsByBaseName': assets_by_base,
-        'bundlesByTargetHash': bundles_by_hash
+        'assetsByBaseName': assets_by_base
     }
 
 

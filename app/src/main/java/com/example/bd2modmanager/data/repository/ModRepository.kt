@@ -160,7 +160,7 @@ class ModRepository(
                         }
                     }
 
-                    val resolvedHash = targetHash ?: bestMatch?.hashedName
+                    val resolvedHash = targetHash
                     val newCacheInfo = ModCacheInfo(
                         uriString = candidate.uriString,
                         lastModified = candidate.lastModified,

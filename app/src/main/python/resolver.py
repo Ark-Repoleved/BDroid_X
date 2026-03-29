@@ -146,7 +146,7 @@ def _decode_hit(asset_index, raw_hit):
 
     return {
         'assetKey': asset_key,
-        'bundleName': target_hash,
+        'bundleName': None,
         'targetHash': target_hash,
         'familyKey': family_key
     }

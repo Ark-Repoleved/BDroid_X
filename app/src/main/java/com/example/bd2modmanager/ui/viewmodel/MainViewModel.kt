@@ -172,7 +172,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     fun toggleSelectAll() {
         val filteredModUris = filteredModsList.value
-            .filter { it.resolutionState == ResolutionState.KNOWN || it.resolutionState == ResolutionState.MISC }
+            .filter { it.resolutionState == ResolutionState.KNOWN }
             .map { it.uri }
             .toSet()
         val currentSelections = _selectedMods.value
@@ -189,7 +189,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         val modsInGroup = filteredModsList.value
             .filter {
                 it.targetHash == groupHash &&
-                    (it.resolutionState == ResolutionState.KNOWN || it.resolutionState == ResolutionState.MISC)
+                    it.resolutionState == ResolutionState.KNOWN
             }
             .map { it.uri }
             .toSet()
@@ -209,7 +209,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             .mapNotNull { uri -> allMods.find { it.uri == uri } }
             .filter {
                 !it.targetHash.isNullOrBlank() &&
-                    (it.resolutionState == ResolutionState.KNOWN || it.resolutionState == ResolutionState.MISC)
+                    it.resolutionState == ResolutionState.KNOWN
             }
             .groupBy { it.targetHash!! }
             .map { (hash, mods) -> RepackJob(hash, mods) }
@@ -251,6 +251,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private suspend fun processSingleJob(context: Context, installJob: InstallJob, cacheKey: String) {
         val job = installJob.job
         val hashedName = job.hashedName
+        var originalDataCache: File? = null
+        var repackedDataCache: File? = null
+        val modAssetsDir = File(context.cacheDir, "temp_mod_assets_${hashedName}")
 
         try {
             updateJobStatus(hashedName, JobStatus.Downloading("Starting download..."))
@@ -261,12 +264,10 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             if (!downloadSuccess) {
                 throw Exception("Download failed: $messageOrPath")
             }
-            val originalDataCache = File(messageOrPath)
+            originalDataCache = File(messageOrPath)
             val relativePath = originalDataCache.relativeTo(context.cacheDir)
 
-
             updateJobStatus(hashedName, JobStatus.Installing("Extracting mod files..."))
-            val modAssetsDir = File(context.cacheDir, "temp_mod_assets_${hashedName}")
 
             if (modAssetsDir.exists()) modAssetsDir.deleteRecursively()
             modAssetsDir.mkdirs()
@@ -289,22 +290,18 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             }
 
             updateJobStatus(hashedName, JobStatus.Installing("Repacking bundle..."))
-            val repackedDataCache = File(context.cacheDir, "repacked/${relativePath.path}")
+            repackedDataCache = File(context.cacheDir, "repacked/${relativePath.path}")
             repackedDataCache.parentFile?.mkdirs()
 
             val (repackSuccess, repackMessage) = ModdingService.repackBundle(originalDataCache.absolutePath, modAssetsDir.absolutePath, repackedDataCache.absolutePath, useAstc.value) { progress ->
                 updateJobStatus(hashedName, JobStatus.Installing(progress))
             }
 
-            originalDataCache.delete()
-            modAssetsDir.deleteRecursively()
-
             if (!repackSuccess) {
                 throw Exception("Repack failed: $repackMessage")
             }
 
             val publicUri = saveFileToDownloads(context, repackedDataCache, relativePath.path, "Shared")
-            repackedDataCache.delete()
 
             if (publicUri != null) {
                 updateJobStatus(hashedName, JobStatus.Finished(relativePath.path))
@@ -321,6 +318,16 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 fullError
             }
             updateJobStatus(hashedName, JobStatus.Failed(displayMessage = displayError, detailedLog = fullError))
+        } finally {
+            try {
+                originalDataCache?.takeIf { it.exists() }?.delete()
+            } catch (_: Exception) {}
+            try {
+                repackedDataCache?.takeIf { it.exists() }?.delete()
+            } catch (_: Exception) {}
+            try {
+                if (modAssetsDir.exists()) modAssetsDir.deleteRecursively()
+            } catch (_: Exception) {}
         }
     }
 

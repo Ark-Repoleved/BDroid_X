@@ -52,7 +52,8 @@ fun ModScreen(
     val allModsList by viewModel.modsList.collectAsState()
     val groupedMods = modsList.groupBy {
         when (it.resolutionState) {
-            ResolutionState.KNOWN, ResolutionState.MISC -> it.targetHash ?: "Unknown"
+            ResolutionState.KNOWN -> it.targetHash ?: "Unknown"
+            ResolutionState.MISC -> it.targetHash ?: "Unknown"
             ResolutionState.UNKNOWN -> "Unknown"
             ResolutionState.INVALID -> "Invalid"
         }
@@ -131,7 +132,7 @@ fun ModScreen(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     val allModsCount = allModsList.count {
-                                        it.resolutionState == ResolutionState.KNOWN || it.resolutionState == ResolutionState.MISC
+                                        it.resolutionState == ResolutionState.KNOWN
                                     }
                                     val selectedModsCount = selectedMods.size
                                     val checkboxState = when {
@@ -482,7 +483,7 @@ fun EmptyModsScreen() {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit, onLongPress: () -> Unit) {
-    val isSelectable = modInfo.resolutionState == ResolutionState.KNOWN || modInfo.resolutionState == ResolutionState.MISC
+    val isSelectable = modInfo.resolutionState == ResolutionState.KNOWN
     val elevation by animateDpAsState(if (isSelected) 4.dp else 1.dp, label = "elevation")
     ElevatedCard(
         elevation = CardDefaults.cardElevation(defaultElevation = elevation),
