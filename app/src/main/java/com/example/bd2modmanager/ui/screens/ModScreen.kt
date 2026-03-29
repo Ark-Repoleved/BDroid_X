@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.bd2modmanager.data.model.ModInfo
+import com.example.bd2modmanager.data.model.ResolutionState
 import com.example.bd2modmanager.ui.viewmodel.MainViewModel
 import com.valentinilk.shimmer.shimmer
 
@@ -46,7 +47,13 @@ fun ModScreen(
     val modSourceDirectoryUri by viewModel.modSourceDirectoryUri.collectAsState()
     val modsList by viewModel.filteredModsList.collectAsState()
     val allModsList by viewModel.modsList.collectAsState()
-    val groupedMods = modsList.groupBy { it.targetHashedName ?: "Unknown" }
+    val groupedMods = modsList.groupBy {
+        when (it.resolutionState) {
+            ResolutionState.KNOWN, ResolutionState.MISC -> it.targetHash ?: "Unknown"
+            ResolutionState.UNKNOWN -> "Unknown"
+            ResolutionState.INVALID -> "Invalid"
+        }
+    }
     val selectedMods by viewModel.selectedMods.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val showShimmer by viewModel.showShimmer.collectAsState()
@@ -120,7 +127,9 @@ fun ModScreen(
                                     modifier = Modifier.size(width = 48.dp, height = 40.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    val allModsCount = allModsList.size
+                                    val allModsCount = allModsList.count {
+                                        it.resolutionState == ResolutionState.KNOWN || it.resolutionState == ResolutionState.MISC
+                                    }
                                     val selectedModsCount = selectedMods.size
                                     val checkboxState = when {
                                         selectedModsCount == 0 -> ToggleableState.Off
@@ -273,19 +282,25 @@ fun ModScreen(
                                                 modifier = Modifier.fillMaxWidth()
                                             ) {
                                                 Text(
-                                                    text = "Target: ${hash.take(12)}...",
+                                                    text = when (hash) {
+                                                        "Unknown" -> "Unknown"
+                                                        "Invalid" -> "Invalid"
+                                                        else -> "Target: $hash"
+                                                    },
                                                     style = MaterialTheme.typography.titleMedium,
                                                     fontWeight = FontWeight.Bold,
                                                     color = MaterialTheme.colorScheme.primary,
                                                     modifier = Modifier.weight(1f)
                                                 )
 
-                                                IconButton(onClick = { onUninstallRequest(hash) }) {
-                                                    Icon(
-                                                        Icons.Default.Delete,
-                                                        contentDescription = "Uninstall",
-                                                        tint = MaterialTheme.colorScheme.primary
-                                                    )
+                                                if (hash != "Unknown" && hash != "Invalid") {
+                                                    IconButton(onClick = { onUninstallRequest(hash) }) {
+                                                        Icon(
+                                                            Icons.Default.Delete,
+                                                            contentDescription = "Uninstall",
+                                                            tint = MaterialTheme.colorScheme.primary
+                                                        )
+                                                    }
                                                 }
 
                                                 val modsInGroupUris = modsInGroup.map { it.uri }.toSet()
@@ -405,6 +420,7 @@ fun EmptyModsScreen() {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit, onLongPress: () -> Unit) {
+    val isSelectable = modInfo.resolutionState == ResolutionState.KNOWN || modInfo.resolutionState == ResolutionState.MISC
     val elevation by animateDpAsState(if (isSelected) 4.dp else 1.dp, label = "elevation")
     ElevatedCard(
         elevation = CardDefaults.cardElevation(defaultElevation = elevation),
@@ -414,7 +430,7 @@ fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit
             .clip(CardDefaults.shape)
             .pointerInput(Unit) {
                 detectTapGestures(
-                    onTap = { onToggleSelection() },
+                    onTap = { if (isSelectable) onToggleSelection() },
                     onLongPress = { onLongPress() }
                 )
             }
@@ -423,7 +439,7 @@ fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit
             modifier = Modifier.padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Checkbox(checked = isSelected, onCheckedChange = { onToggleSelection() })
+            Checkbox(checked = isSelected, onCheckedChange = { if (isSelectable) onToggleSelection() }, enabled = isSelectable)
             Spacer(Modifier.width(4.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -440,19 +456,32 @@ fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit
                 )
             }
             Spacer(Modifier.width(8.dp))
-            AssistChip(
-                onClick = { /* No action */ },
-                label = { Text(modInfo.type.uppercase(), style = MaterialTheme.typography.labelSmall) },
-                leadingIcon = {
-                    val icon = when(modInfo.type.lowercase()) {
-                        "idle" -> Icons.Default.Person
-                        "cutscene" -> Icons.Default.Movie
-                        else -> Icons.Default.Category
-                    }
-                    Icon(icon, contentDescription = modInfo.type, Modifier.size(14.dp))
-                },
-                modifier = Modifier.heightIn(max = 24.dp)
-            )
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                AssistChip(
+                    onClick = { /* No action */ },
+                    label = { Text(modInfo.type.uppercase(), style = MaterialTheme.typography.labelSmall) },
+                    leadingIcon = {
+                        val icon = when(modInfo.type.lowercase()) {
+                            "idle" -> Icons.Default.Person
+                            "cutscene" -> Icons.Default.Movie
+                            else -> Icons.Default.Category
+                        }
+                        Icon(icon, contentDescription = modInfo.type, Modifier.size(14.dp))
+                    },
+                    modifier = Modifier.heightIn(max = 24.dp)
+                )
+                val stateLabel = when (modInfo.resolutionState) {
+                    ResolutionState.KNOWN -> "KNOWN"
+                    ResolutionState.MISC -> "MISC"
+                    ResolutionState.UNKNOWN -> "UNKNOWN"
+                    ResolutionState.INVALID -> "INVALID"
+                }
+                AssistChip(
+                    onClick = { /* No action */ },
+                    label = { Text(stateLabel, style = MaterialTheme.typography.labelSmall) },
+                    modifier = Modifier.heightIn(max = 24.dp)
+                )
+            }
         }
     }
 }

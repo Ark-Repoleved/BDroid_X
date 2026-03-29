@@ -164,7 +164,10 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     fun toggleSelectAll() {
-        val filteredModUris = filteredModsList.value.map { it.uri }.toSet()
+        val filteredModUris = filteredModsList.value
+            .filter { it.resolutionState == ResolutionState.KNOWN || it.resolutionState == ResolutionState.MISC }
+            .map { it.uri }
+            .toSet()
         val currentSelections = _selectedMods.value
         val selectedFilteredUris = currentSelections.intersect(filteredModUris)
 
@@ -176,7 +179,13 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     fun toggleSelectAllForGroup(groupHash: String) {
-        val modsInGroup = filteredModsList.value.filter { it.targetHashedName == groupHash }.map { it.uri }.toSet()
+        val modsInGroup = filteredModsList.value
+            .filter {
+                it.targetHash == groupHash &&
+                    (it.resolutionState == ResolutionState.KNOWN || it.resolutionState == ResolutionState.MISC)
+            }
+            .map { it.uri }
+            .toSet()
         val currentSelections = _selectedMods.value
         val groupSelections = currentSelections.intersect(modsInGroup)
 
@@ -191,8 +200,11 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         val allMods = _modsList.value
         val jobs = _selectedMods.value
             .mapNotNull { uri -> allMods.find { it.uri == uri } }
-            .filter { !it.targetHashedName.isNullOrBlank() }
-            .groupBy { it.targetHashedName!! }
+            .filter {
+                !it.targetHash.isNullOrBlank() &&
+                    (it.resolutionState == ResolutionState.KNOWN || it.resolutionState == ResolutionState.MISC)
+            }
+            .groupBy { it.targetHash!! }
             .map { (hash, mods) -> RepackJob(hash, mods) }
 
         if (jobs.isNotEmpty()) {

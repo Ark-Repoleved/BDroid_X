@@ -256,6 +256,19 @@ def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
 
 from utils.file_operations import find_file_case_insensitive
 
+
+def normalize_mod_filename(filename: str):
+    filename = (filename or '').strip()
+    lowered = filename.lower()
+    if lowered.endswith('.atlas'):
+        return lowered[:-6] + '.atlas.txt'
+    if lowered.endswith('.skel'):
+        return lowered[:-5] + '.skel.bytes'
+    if lowered.endswith('.skel.txt'):
+        return lowered[:-9] + '.skel.bytes'
+    return lowered
+
+
 def compress_image_astc(image_bytes, width, height, block_x, block_y):
     astcenc = _load_astcenc_library()
     if not astcenc:
@@ -461,10 +474,11 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
         
         for mod_filepath in mod_files:
             mod_filename = os.path.basename(mod_filepath)
+            normalized_filename = normalize_mod_filename(mod_filename)
             
             if mod_filename.lower().endswith('.json'):
                 base_name, _ = os.path.splitext(mod_filename)
-                target_asset_name = (base_name + ".skel").lower()
+                target_asset_name = normalize_mod_filename(base_name + ".skel")
                 if target_asset_name in asset_map:
                     json_files.append((mod_filepath, target_asset_name))
                     
@@ -478,7 +492,7 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                         else:
                             png_rgba_files.append((mod_filepath, target_asset_name))
             else:
-                target_asset_name = mod_filename.lower()
+                target_asset_name = normalized_filename
                 if target_asset_name in asset_map:
                     obj = asset_map[target_asset_name]
                     if obj.type.name == "TextAsset":
