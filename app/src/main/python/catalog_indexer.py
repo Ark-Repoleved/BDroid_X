@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import base64
 import json
+import re
 import struct
 from pathlib import Path
 
@@ -27,10 +28,14 @@ def _extract_family_key(name: str):
         return None
     lowered = name.lower()
     stem = Path(lowered).stem
+
     if stem.endswith('.atlas'):
         stem = stem[:-6]
     if stem.endswith('.skel'):
         stem = stem[:-5]
+
+    # Normalize common spine multi-page suffixes like _2, _3 so they map to the same family.
+    stem = re.sub(r'_(\d+)$', '', stem)
     return stem
 
 

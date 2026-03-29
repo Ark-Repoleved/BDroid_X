@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import re
 from pathlib import Path
 
 from catalog_indexer import normalize_filename
@@ -33,7 +34,7 @@ def resolve_mod_folder(mod_file_names, asset_index):
 
         if matched:
             target_hash = matched.get('targetHash')
-            family_key = matched.get('familyKey')
+            family_key = _normalize_family_key(matched.get('familyKey'))
             if target_hash:
                 target_hashes.add(target_hash)
             if family_key:
@@ -53,7 +54,9 @@ def resolve_mod_folder(mod_file_names, asset_index):
         else:
             unresolved_files.append(base_name)
 
-    if len(target_hashes) > 1 or len(family_keys) > 1:
+    # INVALID should be based only on successfully resolved technical targets.
+    # Unknown/unmatched files stay in unresolvedFiles and do not make the folder invalid by themselves.
+    if len(target_hashes) > 1 or (len(target_hashes) == 1 and len(family_keys) > 1):
         state = 'INVALID'
         error_reason = 'Multiple targets detected in one mod folder'
         target_hash = None
@@ -88,3 +91,11 @@ def _infer_asset_type(file_name: str):
     if lowered.endswith('.json'):
         return 'JsonSkeleton'
     return 'Unknown'
+
+
+def _normalize_family_key(value: str):
+    if not value:
+        return None
+    lowered = value.lower()
+    lowered = re.sub(r'_(\d+)$', '', lowered)
+    return lowered
