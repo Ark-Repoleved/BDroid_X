@@ -87,19 +87,9 @@ def resolve_mod_folder(mod_file_names, asset_index):
         if _normalize_family_key(match.get('familyKey'))
     }
 
-    if len(family_keys) > 1:
-        return {
-            'targetHash': None,
-            'resolvedFamilyKey': None,
-            'resolvedTargets': resolved_targets,
-            'unresolvedFiles': unresolved_files,
-            'resolutionState': 'INVALID',
-            'errorReason': 'Multiple targets detected in one mod folder'
-        }
-
     return {
         'targetHash': target_hash,
-        'resolvedFamilyKey': next(iter(family_keys)) if family_keys else None,
+        'resolvedFamilyKey': next(iter(family_keys)) if len(family_keys) == 1 else None,
         'resolvedTargets': resolved_targets,
         'unresolvedFiles': unresolved_files,
         'resolutionState': 'KNOWN',
@@ -108,7 +98,30 @@ def resolve_mod_folder(mod_file_names, asset_index):
 
 
 def _expand_candidates(base_name: str):
-    return list(dict.fromkeys(normalize_filename(base_name)))
+    candidates = list(dict.fromkeys(normalize_filename(base_name)))
+
+    bridge_key = _extract_sactx_bridge_key(base_name)
+    if bridge_key:
+        lowered = bridge_key.lower()
+        candidates.extend([
+            lowered,
+            f"{lowered}.spriteatlasv2"
+        ])
+
+    return list(dict.fromkeys(candidates))
+
+
+def _extract_sactx_bridge_key(file_name: str):
+    lowered = (file_name or '').strip().lower()
+    if not lowered.startswith('sactx-'):
+        return None
+
+    stem = Path(lowered).stem
+    match = re.search(r'-(localpacktitle\d+_[a-z0-9]+)-[0-9a-f]{6,}$', stem, re.IGNORECASE)
+    if not match:
+        return None
+
+    return match.group(1)
 
 
 def _decode_hits(asset_index, raw_hits):
