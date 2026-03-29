@@ -104,21 +104,7 @@ def resolve_mod_folder(mod_file_names, asset_index):
 
 
 def _expand_candidates(base_name: str):
-    candidates = list(normalize_filename(base_name))
-    lowered = (base_name or '').lower()
-    stem = Path(lowered).stem
-
-    if stem.endswith('.atlas'):
-        stem = stem[:-6]
-    if stem.endswith('.skel'):
-        stem = stem[:-5]
-
-    # specialillust files are cataloged through prefab / vp asset keys rather than direct png names.
-    if lowered.endswith('.png') and stem.startswith('specialillust'):
-        candidates.append(f'{stem}.prefab')
-        candidates.append(f'vp_{stem}.asset')
-
-    return list(dict.fromkeys(candidates))
+    return list(dict.fromkeys(normalize_filename(base_name)))
 
 
 def _prefer_primary_hits(hits):
