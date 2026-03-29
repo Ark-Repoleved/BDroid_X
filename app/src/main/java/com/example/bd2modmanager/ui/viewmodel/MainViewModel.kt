@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
@@ -111,8 +112,14 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _moveState = MutableStateFlow<MoveState>(MoveState.Idle)
     val moveState: StateFlow<MoveState> = _moveState.asStateFlow()
 
+    private var initialized = false
+    private var scanJob: Job? = null
+    private var pendingScanUri: Uri? = null
 
     fun initialize(context: Context) {
+        if (initialized) return
+        initialized = true
+
         characterRepository = CharacterRepository(context)
         modRepository = ModRepository(context, characterRepository)
 
@@ -605,19 +612,32 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
 
     fun scanModSourceDirectory(dirUri: Uri) {
-        _isLoading.value = true
-        viewModelScope.launch(Dispatchers.IO) {
-            isUpdatingCharacters.first { !it } // Wait for character data to be ready
-            try {
-                val mods = modRepository.scanMods(dirUri)
+        pendingScanUri = dirUri
+        if (scanJob?.isActive == true) return
+
+        scanJob = viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                val currentUri = pendingScanUri ?: break
+                pendingScanUri = null
+
                 withContext(Dispatchers.Main) {
-                    _modsList.value = mods
-                    _selectedMods.value = emptySet()
+                    _isLoading.value = true
                 }
-            } finally {
-                withContext(Dispatchers.Main) {
-                    _isLoading.value = false
+
+                isUpdatingCharacters.first { !it } // Wait for character data to be ready
+                try {
+                    val mods = modRepository.scanMods(currentUri)
+                    withContext(Dispatchers.Main) {
+                        _modsList.value = mods
+                        _selectedMods.value = emptySet()
+                    }
+                } finally {
+                    withContext(Dispatchers.Main) {
+                        _isLoading.value = false
+                    }
                 }
+
+                if (pendingScanUri == null) break
             }
         }
     }
