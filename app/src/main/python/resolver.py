@@ -15,7 +15,7 @@ def resolve_mod_folder(mod_file_names, asset_index):
     for file_name in mod_file_names or []:
         base_name = Path(file_name).name
         lowered_full = (file_name or '').replace('\\', '/').lower()
-        candidates = normalize_filename(base_name)
+        candidates = _expand_candidates(base_name)
         matches = []
 
         exact_match = assets_by_exact.get(lowered_full)
@@ -24,6 +24,7 @@ def resolve_mod_folder(mod_file_names, asset_index):
 
         for candidate in candidates:
             hits = assets_by_base.get(candidate.lower()) or []
+            hits = _prefer_primary_hits(hits)
             strategy = 'EXACT' if candidate.lower() == base_name.lower() else 'EXTENSION_MAPPING'
             confidence = 1.0 if strategy == 'EXACT' else 0.9
             for hit in hits:
@@ -100,6 +101,32 @@ def resolve_mod_folder(mod_file_names, asset_index):
         'resolutionState': 'KNOWN',
         'errorReason': None
     }
+
+
+def _expand_candidates(base_name: str):
+    candidates = list(normalize_filename(base_name))
+    lowered = (base_name or '').lower()
+    stem = Path(lowered).stem
+
+    if stem.endswith('.atlas'):
+        stem = stem[:-6]
+    if stem.endswith('.skel'):
+        stem = stem[:-5]
+
+    # specialillust files are cataloged through prefab / vp asset keys rather than direct png names.
+    if lowered.endswith('.png') and stem.startswith('specialillust'):
+        candidates.append(f'{stem}.prefab')
+        candidates.append(f'vp_{stem}.asset')
+
+    return list(dict.fromkeys(candidates))
+
+
+def _prefer_primary_hits(hits):
+    if not hits:
+        return []
+
+    primary_hits = [hit for hit in hits if '/censorship/' not in (hit.get('assetKey') or '')]
+    return primary_hits if primary_hits else hits
 
 
 def _build_match(base_name: str, candidates, matched, strategy: str, confidence: float):
