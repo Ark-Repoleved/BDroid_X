@@ -518,19 +518,28 @@ fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit
                 )
             }
             Spacer(Modifier.width(8.dp))
+            val typeIcon = when (modInfo.type.lowercase()) {
+                "idle" -> Icons.Default.Person
+                "cutscene" -> Icons.Default.Movie
+                else -> Icons.Default.Category
+            }
             AssistChip(
-                onClick = { /* No action */ },
-                label = { Text(modInfo.type.uppercase(), style = MaterialTheme.typography.labelSmall) },
+                onClick = {},
+                label = {
+                    Text(
+                        text = modInfo.type.uppercase(),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                },
                 leadingIcon = {
-                    val icon = when(modInfo.type.lowercase()) {
-                        "idle" -> Icons.Default.Person
-                        "cutscene" -> Icons.Default.Movie
-                        else -> Icons.Default.Category
-                    }
-                    Icon(icon, contentDescription = modInfo.type, modifier = Modifier.size(14.dp))
+                    Icon(
+                        imageVector = typeIcon,
+                        contentDescription = modInfo.type,
+                        modifier = Modifier.size(14.dp)
+                    )
                 },
                 modifier = Modifier.heightIn(max = 24.dp)
-            }
+            )
         }
     }
 }
