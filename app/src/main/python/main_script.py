@@ -24,6 +24,12 @@ catalog_cache_lock = threading.Lock()
 # to ensure that different installation processes use different caches.
 current_cache_key = None
 
+
+def _prune_catalog_cache(keep_version=None):
+    stale_versions = [version for version in catalog_cache.keys() if version != keep_version]
+    for version in stale_versions:
+        catalog_cache.pop(version, None)
+
 def unpack_bundle(bundle_path: str, output_dir: str, progress_callback=None):
     """
     Entry point for Kotlin to unpack a bundle.
@@ -76,6 +82,8 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
             return False, "Failed to get CDN version."
         
         report_progress(f"Latest version is {version}. Checking catalog...")
+        with catalog_cache_lock:
+            _prune_catalog_cache(version)
         # The download_catalog function will now use the shared cache
         catalog_content, error = cdn_downloader.download_catalog(
             output_dir, quality, version, catalog_cache, catalog_cache_lock, progress_callback
@@ -118,6 +126,8 @@ def ensure_asset_index(output_dir: str, quality: str = "HD", progress_callback=N
             return False, "Failed to get CDN version.", None
 
         report_progress(f"Latest version is {version}. Checking catalog...")
+        with catalog_cache_lock:
+            _prune_catalog_cache(version)
         catalog_content, error = cdn_downloader.download_catalog(
             output_dir, quality, version, catalog_cache, catalog_cache_lock, progress_callback
         )

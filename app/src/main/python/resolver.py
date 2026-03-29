@@ -20,10 +20,14 @@ def resolve_mod_folder(mod_file_names, asset_index):
 
         exact_match = assets_by_exact.get(lowered_full)
         if exact_match:
-            matches.append(_build_match(base_name, candidates, exact_match, 'EXACT', 1.0))
+            exact_hits = _decode_hits(asset_index, exact_match)
+            exact_hits = _prefer_primary_hits(exact_hits)
+            for hit in exact_hits:
+                matches.append(_build_match(base_name, candidates, hit, 'EXACT', 1.0))
 
         for candidate in candidates:
             hits = assets_by_base.get(candidate.lower()) or []
+            hits = _decode_hits(asset_index, hits)
             hits = _prefer_primary_hits(hits)
             strategy = 'EXACT' if candidate.lower() == base_name.lower() else 'EXTENSION_MAPPING'
             confidence = 1.0 if strategy == 'EXACT' else 0.9
@@ -105,6 +109,53 @@ def resolve_mod_folder(mod_file_names, asset_index):
 
 def _expand_candidates(base_name: str):
     return list(dict.fromkeys(normalize_filename(base_name)))
+
+
+def _decode_hits(asset_index, raw_hits):
+    if raw_hits is None:
+        return []
+    if not isinstance(raw_hits, list):
+        raw_hits = [raw_hits]
+
+    decoded = []
+    for item in raw_hits:
+        hit = _decode_hit(asset_index, item)
+        if hit:
+            decoded.append(hit)
+    return decoded
+
+
+def _decode_hit(asset_index, raw_hit):
+    if isinstance(raw_hit, dict):
+        return raw_hit
+    if not isinstance(raw_hit, int):
+        return None
+
+    records = (asset_index or {}).get('records') or []
+    strings = (asset_index or {}).get('strings') or []
+    if raw_hit < 0 or raw_hit >= len(records):
+        return None
+
+    record = records[raw_hit]
+    if not isinstance(record, list) or len(record) < 3:
+        return None
+
+    asset_key = _string_at(strings, record[0])
+    target_hash = _string_at(strings, record[1])
+    family_key = _string_at(strings, record[2])
+
+    return {
+        'assetKey': asset_key,
+        'bundleName': target_hash,
+        'targetHash': target_hash,
+        'familyKey': family_key
+    }
+
+
+def _string_at(strings, index):
+    if index is None or index < 0 or index >= len(strings):
+        return None
+    return strings[index]
 
 
 def _prefer_primary_hits(hits):

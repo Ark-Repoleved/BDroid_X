@@ -8,6 +8,9 @@ from pathlib import Path
 from catalog_parser import read_int32_from_byte_array, read_object_from_byte_array
 
 
+INDEX_SCHEMA_VERSION = 3
+
+
 def _normalize_filename(filename: str):
     filename = (filename or "").strip().lower()
     if not filename:
@@ -34,15 +37,39 @@ def _extract_family_key(name: str):
     if stem.endswith('.skel'):
         stem = stem[:-5]
 
-    # Normalize common spine multi-page suffixes like _2, _3 so they map to the same family.
     stem = re.sub(r'_(\d+)$', '', stem)
     return stem
+
+
+def _score_asset_key_for_base(asset_key: str, asset_base: str):
+    score = 0
+    if asset_key == asset_base:
+        score += 1000
+    if '/censorship/' not in asset_key:
+        score += 100
+    if asset_key.endswith('/' + asset_base):
+        score += 20
+    score -= len(asset_key)
+    return score
+
+
+def _cleanup_stale_indexes(output_dir, quality, keep_version):
+    pattern = f"asset_index_{quality.lower()}_*.json"
+    for path in Path(output_dir).glob(pattern):
+        if path.name != f"asset_index_{quality.lower()}_{keep_version}.json":
+            try:
+                path.unlink()
+            except Exception:
+                pass
 
 
 def build_asset_index(catalog_content):
     if not catalog_content:
         return {
+            'schemaVersion': INDEX_SCHEMA_VERSION,
             'version': None,
+            'strings': [],
+            'records': [],
             'assetsByExactKey': {},
             'assetsByBaseName': {},
             'bundlesByTargetHash': {}
@@ -52,6 +79,7 @@ def build_asset_index(catalog_content):
     key_array = base64.b64decode(catalog_content['m_KeyDataString'])
     extra_data = base64.b64decode(catalog_content['m_ExtraDataString'])
     entry_data = base64.b64decode(catalog_content['m_EntryDataString'])
+    internal_ids = catalog_content.get('m_InternalIds') or []
 
     num_buckets = struct.unpack_from('<i', bucket_array, 0)[0]
     dependency_map = [None] * num_buckets
@@ -78,7 +106,8 @@ def build_asset_index(catalog_content):
     entries = []
 
     for m in range(number_of_entries):
-        index += 4  # internal_id
+        internal_id_index = read_int32_from_byte_array(entry_data, index)
+        index += 4
         provider_index = read_int32_from_byte_array(entry_data, index)
         index += 4
         dependency_key_index = read_int32_from_byte_array(entry_data, index)
@@ -92,7 +121,8 @@ def build_asset_index(catalog_content):
 
         entries.append({
             'dependency_index': dependency_key_index,
-            'primary_key_index': primary_key_index
+            'primary_key_index': primary_key_index,
+            'internal_id_index': internal_id_index
         })
 
         if provider_index == 1 and data_index >= 0:
@@ -120,47 +150,103 @@ def build_asset_index(catalog_content):
                 return info
         return None
 
+    strings = []
+    string_ids = {}
+    records = []
+    record_ids = {}
     assets_by_exact = {}
-    assets_by_base = {}
+    base_candidates = {}
     bundles_by_hash = {}
+
+    def intern_string(value):
+        if value is None:
+            return -1
+        value = str(value)
+        existing = string_ids.get(value)
+        if existing is not None:
+            return existing
+        idx = len(strings)
+        strings.append(value)
+        string_ids[value] = idx
+        return idx
+
+    def intern_record(asset_key, target_hash, family_key):
+        asset_key_id = intern_string(asset_key)
+        target_hash_id = intern_string(target_hash)
+        family_key_id = intern_string(family_key) if family_key else -1
+        record_key = (asset_key_id, target_hash_id, family_key_id)
+        existing = record_ids.get(record_key)
+        if existing is not None:
+            return existing
+        idx = len(records)
+        records.append([asset_key_id, target_hash_id, family_key_id])
+        record_ids[record_key] = idx
+        return idx
+
+    def append_unique_ref(mapping, key, record_id):
+        existing = mapping.get(key)
+        if existing is None:
+            mapping[key] = record_id
+            return
+        if isinstance(existing, list):
+            if record_id not in existing:
+                existing.append(record_id)
+            return
+        if existing != record_id:
+            mapping[key] = [existing, record_id]
 
     for i in range(len(entries)):
         primary_key_index = entries[i]['primary_key_index']
+        internal_id_index = entries[i]['internal_id_index']
         raw_key = keys[primary_key_index] if primary_key_index < len(keys) else None
-        if not isinstance(raw_key, str):
-            continue
-
-        asset_key = raw_key.lower()
-        asset_base = Path(asset_key).name.lower()
+        internal_id = internal_ids[internal_id_index] if 0 <= internal_id_index < len(internal_ids) else None
         bundle_info = resolve_bundle_info(i)
         if not bundle_info:
             continue
 
         target_hash = bundle_info.get('bundle_name')
-        family_key = _extract_family_key(asset_base)
-        asset_info = {
-            'assetKey': asset_key,
-            'baseName': asset_base,
-            'bundleName': bundle_info.get('bundle_name'),
-            'bundleHash': bundle_info.get('bundle_hash'),
-            'bundleSize': bundle_info.get('bundle_size'),
-            'downloadName': bundle_info.get('download_name'),
-            'targetHash': target_hash,
-            'familyKey': family_key
-        }
+        if not target_hash:
+            continue
 
-        assets_by_exact[asset_key] = asset_info
-        assets_by_base.setdefault(asset_base, []).append(asset_info)
-        if target_hash:
+        if target_hash not in bundles_by_hash:
             bundles_by_hash[target_hash] = {
-                'bundleName': bundle_info.get('bundle_name'),
                 'bundleHash': bundle_info.get('bundle_hash'),
                 'bundleSize': bundle_info.get('bundle_size'),
                 'downloadName': bundle_info.get('download_name')
             }
 
+        candidate_keys = []
+        if isinstance(raw_key, str) and raw_key:
+            candidate_keys.append(raw_key.lower())
+        if isinstance(internal_id, str) and internal_id:
+            lowered_internal = internal_id.lower()
+            if lowered_internal not in candidate_keys:
+                candidate_keys.append(lowered_internal)
+
+        if not candidate_keys:
+            continue
+
+        for asset_key in candidate_keys:
+            asset_base = Path(asset_key).name.lower()
+            family_key = _extract_family_key(asset_base)
+            record_id = intern_record(asset_key, target_hash, family_key)
+            append_unique_ref(assets_by_exact, asset_key, record_id)
+
+            group_key = (asset_base, target_hash, family_key)
+            candidate = base_candidates.get(group_key)
+            score = _score_asset_key_for_base(asset_key, asset_base)
+            if candidate is None or score > candidate[0]:
+                base_candidates[group_key] = (score, record_id)
+
+    assets_by_base = {}
+    for (asset_base, _target_hash, _family_key), (_score, record_id) in base_candidates.items():
+        append_unique_ref(assets_by_base, asset_base, record_id)
+
     return {
+        'schemaVersion': INDEX_SCHEMA_VERSION,
         'version': None,
+        'strings': strings,
+        'records': records,
         'assetsByExactKey': assets_by_exact,
         'assetsByBaseName': assets_by_base,
         'bundlesByTargetHash': bundles_by_hash
@@ -168,15 +254,28 @@ def build_asset_index(catalog_content):
 
 
 def load_or_build_asset_index(output_dir, quality, version, catalog_content):
-    index_path = Path(output_dir).joinpath(f"asset_index_{quality.lower()}_{version}.json")
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    _cleanup_stale_indexes(output_path, quality, version)
+
+    index_path = output_path.joinpath(f"asset_index_{quality.lower()}_{version}.json")
     if index_path.exists():
-        with open(index_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        try:
+            with open(index_path, 'r', encoding='utf-8') as f:
+                index = json.load(f)
+            if index.get('schemaVersion') == INDEX_SCHEMA_VERSION:
+                return index
+        except Exception:
+            pass
+        try:
+            index_path.unlink()
+        except Exception:
+            pass
 
     index = build_asset_index(catalog_content)
     index['version'] = version
     with open(index_path, 'w', encoding='utf-8') as f:
-        json.dump(index, f, ensure_ascii=False)
+        json.dump(index, f, ensure_ascii=False, separators=(',', ':'))
     return index
 
 
