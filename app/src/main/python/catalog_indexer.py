@@ -34,8 +34,8 @@ def _extract_family_key(name: str):
     if stem.endswith('.skel'):
         stem = stem[:-5]
 
-    # Normalize common page / variant suffixes like _2, _3, -1, -2 so they map to the same family.
-    stem = re.sub(r'([_-])(\d+)$', '', stem)
+    # Normalize common spine multi-page suffixes like _2, _3 so they map to the same family.
+    stem = re.sub(r'_(\d+)$', '', stem)
     return stem
 
 

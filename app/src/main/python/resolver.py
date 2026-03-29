@@ -97,5 +97,5 @@ def _normalize_family_key(value: str):
     if not value:
         return None
     lowered = value.lower()
-    lowered = re.sub(r'([_-])(\d+)$', '', lowered)
+    lowered = re.sub(r'_(\d+)$', '', lowered)
     return lowered
