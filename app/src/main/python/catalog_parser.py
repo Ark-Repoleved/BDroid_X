@@ -209,7 +209,7 @@ def parse_catalog_for_bundle_names(catalog_content):
             continue
 
         # Extract file_id like 'char000104' from asset_key like 'assets/asset/character/char000104/char000104.skel.bytes'
-        match = re.search(r'(cutscene_char\d{6}|char\d{6}|illust_dating\d+|illust_special\d+|illust_talk\d+|npc\d+|specialillust\w+|storypack\w+|\bRhythmHitAnim\b)', asset_key, re.IGNORECASE)
+        match = re.search(r'(cutscene_char\d{6}|char\d{6}|illust_dating\d+|illust_special\d+|illust_talk\d+|npc\d+|specialillust[a-z0-9_-]+|storypack[a-z0-9_-]+|\bRhythmHitAnim\b)', asset_key, re.IGNORECASE)
         if not match:
             continue
         
