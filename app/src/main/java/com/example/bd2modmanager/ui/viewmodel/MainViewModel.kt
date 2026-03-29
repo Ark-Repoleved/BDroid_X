@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
@@ -111,8 +112,14 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _moveState = MutableStateFlow<MoveState>(MoveState.Idle)
     val moveState: StateFlow<MoveState> = _moveState.asStateFlow()
 
+    private var initialized = false
+    private var scanJob: Job? = null
+    private var pendingScanUri: Uri? = null
 
     fun initialize(context: Context) {
+        if (initialized) return
+        initialized = true
+
         characterRepository = CharacterRepository(context)
         modRepository = ModRepository(context, characterRepository)
 
@@ -164,7 +171,10 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     fun toggleSelectAll() {
-        val filteredModUris = filteredModsList.value.map { it.uri }.toSet()
+        val filteredModUris = filteredModsList.value
+            .filter { it.resolutionState == ResolutionState.KNOWN }
+            .map { it.uri }
+            .toSet()
         val currentSelections = _selectedMods.value
         val selectedFilteredUris = currentSelections.intersect(filteredModUris)
 
@@ -176,7 +186,13 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     fun toggleSelectAllForGroup(groupHash: String) {
-        val modsInGroup = filteredModsList.value.filter { it.targetHashedName == groupHash }.map { it.uri }.toSet()
+        val modsInGroup = filteredModsList.value
+            .filter {
+                it.targetHash == groupHash &&
+                    it.resolutionState == ResolutionState.KNOWN
+            }
+            .map { it.uri }
+            .toSet()
         val currentSelections = _selectedMods.value
         val groupSelections = currentSelections.intersect(modsInGroup)
 
@@ -191,8 +207,11 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         val allMods = _modsList.value
         val jobs = _selectedMods.value
             .mapNotNull { uri -> allMods.find { it.uri == uri } }
-            .filter { !it.targetHashedName.isNullOrBlank() }
-            .groupBy { it.targetHashedName!! }
+            .filter {
+                !it.targetHash.isNullOrBlank() &&
+                    it.resolutionState == ResolutionState.KNOWN
+            }
+            .groupBy { it.targetHash!! }
             .map { (hash, mods) -> RepackJob(hash, mods) }
 
         if (jobs.isNotEmpty()) {
@@ -232,6 +251,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private suspend fun processSingleJob(context: Context, installJob: InstallJob, cacheKey: String) {
         val job = installJob.job
         val hashedName = job.hashedName
+        var originalDataCache: File? = null
+        var repackedDataCache: File? = null
+        val modAssetsDir = File(context.cacheDir, "temp_mod_assets_${hashedName}")
 
         try {
             updateJobStatus(hashedName, JobStatus.Downloading("Starting download..."))
@@ -242,12 +264,10 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             if (!downloadSuccess) {
                 throw Exception("Download failed: $messageOrPath")
             }
-            val originalDataCache = File(messageOrPath)
+            originalDataCache = File(messageOrPath)
             val relativePath = originalDataCache.relativeTo(context.cacheDir)
 
-
             updateJobStatus(hashedName, JobStatus.Installing("Extracting mod files..."))
-            val modAssetsDir = File(context.cacheDir, "temp_mod_assets_${hashedName}")
 
             if (modAssetsDir.exists()) modAssetsDir.deleteRecursively()
             modAssetsDir.mkdirs()
@@ -270,22 +290,18 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             }
 
             updateJobStatus(hashedName, JobStatus.Installing("Repacking bundle..."))
-            val repackedDataCache = File(context.cacheDir, "repacked/${relativePath.path}")
+            repackedDataCache = File(context.cacheDir, "repacked/${relativePath.path}")
             repackedDataCache.parentFile?.mkdirs()
 
             val (repackSuccess, repackMessage) = ModdingService.repackBundle(originalDataCache.absolutePath, modAssetsDir.absolutePath, repackedDataCache.absolutePath, useAstc.value) { progress ->
                 updateJobStatus(hashedName, JobStatus.Installing(progress))
             }
 
-            originalDataCache.delete()
-            modAssetsDir.deleteRecursively()
-
             if (!repackSuccess) {
                 throw Exception("Repack failed: $repackMessage")
             }
 
             val publicUri = saveFileToDownloads(context, repackedDataCache, relativePath.path, "Shared")
-            repackedDataCache.delete()
 
             if (publicUri != null) {
                 updateJobStatus(hashedName, JobStatus.Finished(relativePath.path))
@@ -302,6 +318,16 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 fullError
             }
             updateJobStatus(hashedName, JobStatus.Failed(displayMessage = displayError, detailedLog = fullError))
+        } finally {
+            try {
+                originalDataCache?.takeIf { it.exists() }?.delete()
+            } catch (_: Exception) {}
+            try {
+                repackedDataCache?.takeIf { it.exists() }?.delete()
+            } catch (_: Exception) {}
+            try {
+                if (modAssetsDir.exists()) modAssetsDir.deleteRecursively()
+            } catch (_: Exception) {}
         }
     }
 
@@ -593,19 +619,32 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
 
     fun scanModSourceDirectory(dirUri: Uri) {
-        _isLoading.value = true
-        viewModelScope.launch(Dispatchers.IO) {
-            isUpdatingCharacters.first { !it } // Wait for character data to be ready
-            try {
-                val mods = modRepository.scanMods(dirUri)
+        pendingScanUri = dirUri
+        if (scanJob?.isActive == true) return
+
+        scanJob = viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                val currentUri = pendingScanUri ?: break
+                pendingScanUri = null
+
                 withContext(Dispatchers.Main) {
-                    _modsList.value = mods
-                    _selectedMods.value = emptySet()
+                    _isLoading.value = true
                 }
-            } finally {
-                withContext(Dispatchers.Main) {
-                    _isLoading.value = false
+
+                isUpdatingCharacters.first { !it } // Wait for character data to be ready
+                try {
+                    val mods = modRepository.scanMods(currentUri)
+                    withContext(Dispatchers.Main) {
+                        _modsList.value = mods
+                        _selectedMods.value = emptySet()
+                    }
+                } finally {
+                    withContext(Dispatchers.Main) {
+                        _isLoading.value = false
+                    }
                 }
+
+                if (pendingScanUri == null) break
             }
         }
     }

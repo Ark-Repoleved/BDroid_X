@@ -256,6 +256,7 @@ def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
 
 from utils.file_operations import find_file_case_insensitive
 
+
 def compress_image_astc(image_bytes, width, height, block_x, block_y):
     astcenc = _load_astcenc_library()
     if not astcenc:

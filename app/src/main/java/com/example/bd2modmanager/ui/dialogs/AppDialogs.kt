@@ -307,7 +307,7 @@ fun UninstallConfirmationDialog(
         title = { Text("Confirm Restore") },
         text = {
             Text(
-                "Are you sure you want to restore the original file for this group?\n\nTarget: ${targetHash.take(12)}...",
+                "Are you sure you want to restore the original file for this group?\n\nTarget: ${targetHash}",
                 textAlign = TextAlign.Center
             )
         },

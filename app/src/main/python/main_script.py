@@ -10,6 +10,9 @@ import character_scraper
 import cdn_downloader
 from unpacker import unpack_bundle as unpacker_main
 import spine_merger
+import resolver
+import catalog_indexer
+import json
 
 # --- Global Cache for CDN Catalog ---
 # In-memory cache for the catalog JSON content.
@@ -20,6 +23,12 @@ catalog_cache_lock = threading.Lock()
 # A variable to track the current cache key (e.g., a timestamp for the batch install)
 # to ensure that different installation processes use different caches.
 current_cache_key = None
+
+
+def _prune_catalog_cache(keep_version=None):
+    stale_versions = [version for version in catalog_cache.keys() if version != keep_version]
+    for version in stale_versions:
+        catalog_cache.pop(version, None)
 
 def unpack_bundle(bundle_path: str, output_dir: str, progress_callback=None):
     """
@@ -73,6 +82,8 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
             return False, "Failed to get CDN version."
         
         report_progress(f"Latest version is {version}. Checking catalog...")
+        with catalog_cache_lock:
+            _prune_catalog_cache(version)
         # The download_catalog function will now use the shared cache
         catalog_content, error = cdn_downloader.download_catalog(
             output_dir, quality, version, catalog_cache, catalog_cache_lock, progress_callback
@@ -102,7 +113,72 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
         report_progress(f"A critical error occurred: {error_message}")
         return False, error_message
 
-import json
+def ensure_asset_index(output_dir: str, quality: str = "HD", progress_callback=None):
+    def report_progress(message):
+        if progress_callback:
+            progress_callback(message)
+        print(message)
+
+    try:
+        report_progress(f"Fetching CDN version for {quality} quality...")
+        version = cdn_downloader.get_cdn_version(quality)
+        if not version:
+            return False, "Failed to get CDN version.", None
+
+        report_progress(f"Latest version is {version}. Checking catalog...")
+        with catalog_cache_lock:
+            _prune_catalog_cache(version)
+        catalog_content, error = cdn_downloader.download_catalog(
+            output_dir, quality, version, catalog_cache, catalog_cache_lock, progress_callback
+        )
+        if error:
+            return False, error, None
+
+        report_progress("Building/loading asset index...")
+        index = catalog_indexer.load_or_build_asset_index(output_dir, quality, version, catalog_content)
+        return True, version, index
+    except Exception as e:
+        import traceback
+        error_message = traceback.format_exc()
+        report_progress(f"A critical error occurred while building asset index: {error_message}")
+        return False, error_message, None
+
+
+def resolve_mod_files(file_names_json: str, output_dir: str, quality: str = "HD", progress_callback=None):
+    try:
+        file_names = json.loads(file_names_json) if isinstance(file_names_json, str) else file_names_json
+        success, version_or_error, index = ensure_asset_index(output_dir, quality, progress_callback)
+        if not success:
+            return False, version_or_error
+
+        result = resolver.resolve_mod_folder(file_names, index)
+        return True, json.dumps(result)
+    except Exception as e:
+        import traceback
+        return False, traceback.format_exc()
+
+
+def resolve_mod_batch(mods_json: str, output_dir: str, quality: str = "HD", progress_callback=None):
+    try:
+        mods = json.loads(mods_json) if isinstance(mods_json, str) else mods_json
+        success, version_or_error, index = ensure_asset_index(output_dir, quality, progress_callback)
+        if not success:
+            return False, version_or_error
+
+        results = []
+        for mod in mods or []:
+            mod_id = mod.get("id")
+            file_names = mod.get("fileNames") or []
+            resolved = resolver.resolve_mod_folder(file_names, index)
+            results.append({
+                "id": mod_id,
+                "result": resolved
+            })
+        return True, json.dumps(results)
+    except Exception:
+        import traceback
+        return False, traceback.format_exc()
+
 
 def update_character_data(output_dir: str):
     """
