@@ -116,7 +116,7 @@ class CharacterRepository(private val context: Context) {
     fun findBestMatch(candidates: List<FileCandidate>, fileNames: List<String>): CharacterInfo? {
         if (candidates.isEmpty()) return null
 
-        val prioritizedCandidates = candidates.prioritizeCandidates()
+        val prioritizedCandidates = prioritizeCandidates(candidates)
         val exactPreferredFileIds = findExactPreferredFileIds(prioritizedCandidates)
         val scoreByFileId = linkedMapOf<String, Int>()
         for (candidate in prioritizedCandidates) {
