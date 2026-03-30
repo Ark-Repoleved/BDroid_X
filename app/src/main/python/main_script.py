@@ -13,6 +13,7 @@ import spine_merger
 import resolver
 import catalog_indexer
 import json
+from pathlib import Path
 
 # --- Global Cache for CDN Catalog ---
 # In-memory cache for the catalog JSON content.
@@ -120,7 +121,26 @@ def ensure_asset_index(output_dir: str, quality: str = "HD", progress_callback=N
         print(message)
 
     try:
-        report_progress(f"Fetching CDN version for {quality} quality...")
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        pattern = f"asset_index_{quality.lower()}_*.json"
+        local_indexes = sorted(output_path.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+
+        for index_path in local_indexes:
+            try:
+                with open(index_path, 'r', encoding='utf-8') as f:
+                    index = json.load(f)
+                if index.get('schemaVersion') == catalog_indexer.INDEX_SCHEMA_VERSION:
+                    version = index.get('version')
+                    report_progress(f"Using local asset index {index_path.name} without CDN refresh.")
+                    return True, version, index
+            except Exception:
+                try:
+                    index_path.unlink()
+                except Exception:
+                    pass
+
+        report_progress(f"No valid local asset index found for {quality}. Fetching CDN version...")
         version = cdn_downloader.get_cdn_version(quality)
         if not version:
             return False, "Failed to get CDN version.", None

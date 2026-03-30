@@ -204,8 +204,12 @@ class ModRepository(
         }
     }
 
+    private fun getModCacheFile(): File {
+        return File(context.filesDir, MOD_CACHE_FILENAME)
+    }
+
     private fun loadModCache(): Map<String, ModCacheInfo> {
-        val cacheFile = File(context.cacheDir, MOD_CACHE_FILENAME)
+        val cacheFile = getModCacheFile()
         if (!cacheFile.exists()) return emptyMap()
 
         return try {
@@ -220,7 +224,7 @@ class ModRepository(
 
     private fun saveModCache(cache: Map<String, ModCacheInfo>) {
         try {
-            val cacheFile = File(context.cacheDir, MOD_CACHE_FILENAME)
+            val cacheFile = getModCacheFile()
             val json = gson.toJson(cache)
             cacheFile.writeText(json)
         } catch (e: Exception) {
