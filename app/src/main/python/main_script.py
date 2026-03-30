@@ -201,14 +201,12 @@ def ensure_asset_index(output_dir: str, quality: str = "HD", progress_callback=N
     try:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
-        version = cdn_downloader.get_cdn_version(quality)
-        if not version:
-            return False, "Failed to get CDN version.", None
 
-        index = _load_valid_local_index(output_dir, quality, version)
+        index = _load_valid_local_index(output_dir, quality)
         if index is None:
-            return False, "Asset index missing or stale. Refresh metadata first.", None
+            return False, "Asset index missing. Refresh metadata first.", None
 
+        version = index.get('version')
         report_progress(f"Using local asset index for version {version}.")
         return True, version, index
     except Exception as e:
