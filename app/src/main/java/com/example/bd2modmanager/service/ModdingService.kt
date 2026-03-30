@@ -3,6 +3,8 @@ package com.example.bd2modmanager.service
 
 import com.chaquo.python.PyObject
 import com.chaquo.python.Python
+import org.json.JSONArray
+import org.json.JSONObject
 
 object ModdingService {
 
@@ -71,6 +73,50 @@ object ModdingService {
         } catch (e: Exception) {
             e.printStackTrace()
             Pair(false, e.message ?: "An unknown error occurred in Kotlin during unpack.")
+        }
+    }
+
+    fun resolveModFiles(fileNamesJson: String, outputDir: String, quality: String, onProgress: (String) -> Unit): Pair<Boolean, JSONObject?> {
+        return try {
+            val py = Python.getInstance()
+            val mainScript = py.getModule("main_script")
+
+            val result = mainScript.callAttr(
+                "resolve_mod_files",
+                fileNamesJson,
+                outputDir,
+                quality,
+                PyObject.fromJava(onProgress)
+            ).asList()
+
+            val success = result[0].toBoolean()
+            val payload = result[1].toString()
+            Pair(success, if (success) JSONObject(payload) else null)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Pair(false, null)
+        }
+    }
+
+    fun resolveModBatch(modsJson: String, outputDir: String, quality: String, onProgress: (String) -> Unit): Pair<Boolean, JSONArray?> {
+        return try {
+            val py = Python.getInstance()
+            val mainScript = py.getModule("main_script")
+
+            val result = mainScript.callAttr(
+                "resolve_mod_batch",
+                modsJson,
+                outputDir,
+                quality,
+                PyObject.fromJava(onProgress)
+            ).asList()
+
+            val success = result[0].toBoolean()
+            val payload = result[1].toString()
+            Pair(success, if (success) JSONArray(payload) else null)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Pair(false, null)
         }
     }
 

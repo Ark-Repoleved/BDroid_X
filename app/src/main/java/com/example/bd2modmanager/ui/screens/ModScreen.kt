@@ -29,8 +29,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.bd2modmanager.data.model.ModInfo
+import com.example.bd2modmanager.data.model.ResolutionState
 import com.example.bd2modmanager.ui.viewmodel.MainViewModel
 import com.valentinilk.shimmer.shimmer
 
@@ -46,7 +50,14 @@ fun ModScreen(
     val modSourceDirectoryUri by viewModel.modSourceDirectoryUri.collectAsState()
     val modsList by viewModel.filteredModsList.collectAsState()
     val allModsList by viewModel.modsList.collectAsState()
-    val groupedMods = modsList.groupBy { it.targetHashedName ?: "Unknown" }
+    val groupedMods = modsList.groupBy {
+        when (it.resolutionState) {
+            ResolutionState.KNOWN -> it.targetHash ?: "Unknown"
+            ResolutionState.MISC -> it.targetHash ?: "Unknown"
+            ResolutionState.UNKNOWN -> "Unknown"
+            ResolutionState.INVALID -> "Invalid"
+        }
+    }
     val selectedMods by viewModel.selectedMods.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val showShimmer by viewModel.showShimmer.collectAsState()
@@ -120,7 +131,9 @@ fun ModScreen(
                                     modifier = Modifier.size(width = 48.dp, height = 40.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    val allModsCount = allModsList.size
+                                    val allModsCount = allModsList.count {
+                                        it.resolutionState == ResolutionState.KNOWN
+                                    }
                                     val selectedModsCount = selectedMods.size
                                     val checkboxState = when {
                                         selectedModsCount == 0 -> ToggleableState.Off
@@ -272,20 +285,56 @@ fun ModScreen(
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 modifier = Modifier.fillMaxWidth()
                                             ) {
-                                                Text(
-                                                    text = "Target: ${hash.take(12)}...",
-                                                    style = MaterialTheme.typography.titleMedium,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.weight(1f)
-                                                )
+                                                when (hash) {
+                                                    "Unknown" -> {
+                                                        Text(
+                                                            text = "Unknown",
+                                                            style = MaterialTheme.typography.titleMedium,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.weight(1f)
+                                                        )
+                                                    }
+                                                    "Invalid" -> {
+                                                        Text(
+                                                            text = "Invalid",
+                                                            style = MaterialTheme.typography.titleMedium,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.weight(1f)
+                                                        )
+                                                    }
+                                                    else -> {
+                                                        Row(
+                                                            modifier = Modifier.weight(1f),
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Text(
+                                                                text = "Target: ",
+                                                                style = MaterialTheme.typography.titleMedium,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = MaterialTheme.colorScheme.primary
+                                                            )
+                                                            AutoShrinkText(
+                                                                text = hash,
+                                                                maxFontSize = MaterialTheme.typography.titleMedium.fontSize,
+                                                                minFontSize = 12.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = MaterialTheme.colorScheme.primary,
+                                                                modifier = Modifier.weight(1f)
+                                                            )
+                                                        }
+                                                    }
+                                                }
 
-                                                IconButton(onClick = { onUninstallRequest(hash) }) {
-                                                    Icon(
-                                                        Icons.Default.Delete,
-                                                        contentDescription = "Uninstall",
-                                                        tint = MaterialTheme.colorScheme.primary
-                                                    )
+                                                if (hash != "Unknown" && hash != "Invalid") {
+                                                    IconButton(onClick = { onUninstallRequest(hash) }) {
+                                                        Icon(
+                                                            Icons.Default.Delete,
+                                                            contentDescription = "Uninstall",
+                                                            tint = MaterialTheme.colorScheme.primary
+                                                        )
+                                                    }
                                                 }
 
                                                 val modsInGroupUris = modsInGroup.map { it.uri }.toSet()
@@ -328,6 +377,35 @@ fun ModScreen(
             }
         }
     }
+}
+
+@Composable
+private fun AutoShrinkText(
+    text: String,
+    modifier: Modifier = Modifier,
+    maxFontSize: TextUnit = 20.sp,
+    minFontSize: TextUnit = 12.sp,
+    fontWeight: FontWeight? = null,
+    color: androidx.compose.ui.graphics.Color = LocalContentColor.current
+) {
+    var currentFontSize by remember(text) { mutableStateOf(maxFontSize) }
+
+    Text(
+        text = text,
+        modifier = modifier,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Clip,
+        fontSize = currentFontSize,
+        fontWeight = fontWeight,
+        color = color,
+        style = LocalTextStyle.current.copy(color = color),
+        onTextLayout = { result ->
+            if (result.hasVisualOverflow && currentFontSize > minFontSize) {
+                currentFontSize = (currentFontSize.value - 1f).coerceAtLeast(minFontSize.value).sp
+            }
+        }
+    )
 }
 
 @Composable
@@ -405,6 +483,7 @@ fun EmptyModsScreen() {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit, onLongPress: () -> Unit) {
+    val isSelectable = modInfo.resolutionState == ResolutionState.KNOWN
     val elevation by animateDpAsState(if (isSelected) 4.dp else 1.dp, label = "elevation")
     ElevatedCard(
         elevation = CardDefaults.cardElevation(defaultElevation = elevation),
@@ -414,7 +493,7 @@ fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit
             .clip(CardDefaults.shape)
             .pointerInput(Unit) {
                 detectTapGestures(
-                    onTap = { onToggleSelection() },
+                    onTap = { if (isSelectable) onToggleSelection() },
                     onLongPress = { onLongPress() }
                 )
             }
@@ -423,7 +502,7 @@ fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit
             modifier = Modifier.padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Checkbox(checked = isSelected, onCheckedChange = { onToggleSelection() })
+            Checkbox(checked = isSelected, onCheckedChange = { if (isSelectable) onToggleSelection() }, enabled = isSelectable)
             Spacer(Modifier.width(4.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -440,16 +519,25 @@ fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit
                 )
             }
             Spacer(Modifier.width(8.dp))
+            val typeIcon = when (modInfo.type.lowercase()) {
+                "idle" -> Icons.Default.Person
+                "cutscene" -> Icons.Default.Movie
+                else -> Icons.Default.Category
+            }
             AssistChip(
-                onClick = { /* No action */ },
-                label = { Text(modInfo.type.uppercase(), style = MaterialTheme.typography.labelSmall) },
+                onClick = {},
+                label = {
+                    Text(
+                        text = modInfo.type.uppercase(),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                },
                 leadingIcon = {
-                    val icon = when(modInfo.type.lowercase()) {
-                        "idle" -> Icons.Default.Person
-                        "cutscene" -> Icons.Default.Movie
-                        else -> Icons.Default.Category
-                    }
-                    Icon(icon, contentDescription = modInfo.type, Modifier.size(14.dp))
+                    Icon(
+                        imageVector = typeIcon,
+                        contentDescription = modInfo.type,
+                        modifier = Modifier.size(14.dp)
+                    )
                 },
                 modifier = Modifier.heightIn(max = 24.dp)
             )

@@ -142,6 +142,18 @@ ASTC_FORMATS = {
     51: (8, 8), 52: (10, 10), 53: (12, 12),
 }
 
+
+def _build_unique_export_path(output_dir, base_name, extension, path_id):
+    safe_name = (base_name or 'unnamed').replace('/', '_')
+    filename = f"{safe_name}{extension}"
+    dest_path = os.path.join(output_dir, filename)
+    if not os.path.exists(dest_path):
+        return dest_path
+
+    duplicate_filename = f"{safe_name} #{path_id}{extension}"
+    return os.path.join(output_dir, duplicate_filename)
+
+
 def unpack_bundle(bundle_path, output_dir, progress_callback=print):
     progress_callback(f"Starting to unpack '{os.path.basename(bundle_path)}'...")
     
@@ -169,15 +181,14 @@ def unpack_bundle(bundle_path, output_dir, progress_callback=print):
                     continue
 
                 dest_name = data.m_Name.replace('/', '_')
-                dest_path = os.path.join(output_dir, dest_name)
-                
+                path_id = getattr(obj, 'path_id', 'dup')
+
                 current_progress = f"Processing asset {i+1}/{total_objects}: {dest_name}"
                 progress_callback(current_progress)
 
                 if obj.type.name == "Texture2D":
-                    if not dest_path.lower().endswith((".png", ".jpg", ".jpeg")):
-                        dest_path += ".png"
-                    
+                    dest_path = _build_unique_export_path(output_dir, dest_name, ".png", path_id)
+
                     img = None
                     try:
                         img = data.image
@@ -190,6 +201,8 @@ def unpack_bundle(bundle_path, output_dir, progress_callback=print):
                     # Handle both TextAsset and MonoBehaviour .skel files
                     if obj.type.name == "MonoBehaviour" and ".skel" not in dest_name.lower():
                         continue # Skip non-skel MonoBehaviours
+
+                    dest_path = _build_unique_export_path(output_dir, dest_name, "", path_id)
                     
                     with open(dest_path, "wb") as f:
                         content = data.m_Script

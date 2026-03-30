@@ -34,7 +34,7 @@ class CharacterRepository(private val context: Context) {
                     "SUCCESS" -> {
                         println("Successfully ran scraper and saved characters.json: $message")
                         // When a new characters.json is generated, the mod cache becomes invalid.
-                        val cacheFile = File(context.cacheDir, MOD_CACHE_FILENAME)
+                        val cacheFile = File(context.filesDir, MOD_CACHE_FILENAME)
                         if (cacheFile.exists()) {
                             cacheFile.delete()
                             println("Deleted mod cache to force re-scan.")

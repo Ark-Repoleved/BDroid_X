@@ -256,6 +256,7 @@ def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
 
 from utils.file_operations import find_file_case_insensitive
 
+
 def compress_image_astc(image_bytes, width, height, block_x, block_y):
     astcenc = _load_astcenc_library()
     if not astcenc:
@@ -370,6 +371,13 @@ def _compress_texture_worker(args):
     return result
 
 
+def _asset_objects(asset_map, target_asset_name: str, type_name: str = None):
+    objects = list(asset_map.get(target_asset_name, []))
+    if type_name:
+        objects = [obj for obj in objects if obj.type.name == type_name]
+    return objects
+
+
 def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_path: str, use_astc: bool, progress_callback=None):
     """
     Repack a unity bundle with modded assets.
@@ -442,8 +450,9 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
         for obj in env.objects:
             try:
                 data = obj.read()
-                if hasattr(data, 'm_Name'):
-                    asset_map[data.m_Name.lower()] = obj
+                if hasattr(data, 'm_Name') and data.m_Name:
+                    key = data.m_Name.lower()
+                    asset_map.setdefault(key, []).append(obj)
             except Exception:
                 pass  # Skip objects that can't be read
 
@@ -465,24 +474,20 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
             if mod_filename.lower().endswith('.json'):
                 base_name, _ = os.path.splitext(mod_filename)
                 target_asset_name = (base_name + ".skel").lower()
-                if target_asset_name in asset_map:
+                if _asset_objects(asset_map, target_asset_name, "TextAsset"):
                     json_files.append((mod_filepath, target_asset_name))
                     
             elif mod_filename.lower().endswith('.png'):
                 target_asset_name = os.path.splitext(mod_filename)[0].lower()
-                if target_asset_name in asset_map:
-                    obj = asset_map[target_asset_name]
-                    if obj.type.name == "Texture2D":
-                        if use_astc:
-                            png_astc_files.append((mod_filepath, target_asset_name))
-                        else:
-                            png_rgba_files.append((mod_filepath, target_asset_name))
+                if _asset_objects(asset_map, target_asset_name, "Texture2D"):
+                    if use_astc:
+                        png_astc_files.append((mod_filepath, target_asset_name))
+                    else:
+                        png_rgba_files.append((mod_filepath, target_asset_name))
             else:
                 target_asset_name = mod_filename.lower()
-                if target_asset_name in asset_map:
-                    obj = asset_map[target_asset_name]
-                    if obj.type.name == "TextAsset":
-                        text_files.append((mod_filepath, target_asset_name))
+                if _asset_objects(asset_map, target_asset_name, "TextAsset"):
+                    text_files.append((mod_filepath, target_asset_name))
         
         report_progress(f"  - JSON animations: {len(json_files)}")
         report_progress(f"  - ASTC textures: {len(png_astc_files)}")
@@ -499,8 +504,7 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
             
             try:
                 report_progress(f"{current_progress}Converting animation: {mod_filename}")
-                obj = asset_map[target_asset_name]
-                data = obj.read()
+                target_objects = _asset_objects(asset_map, target_asset_name, "TextAsset")
 
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".skel") as tmp_skel_file:
                     temp_skel_path = tmp_skel_file.name
@@ -509,11 +513,13 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                     json_to_skel(mod_filepath, temp_skel_path)
                     with open(temp_skel_path, 'rb') as f:
                         skel_binary_data = f.read()
-                    
-                    data.m_Script = skel_binary_data.decode("utf-8", "surrogateescape")
-                    data.save()
-                    edited = True
-                    report_progress(f"{current_progress}Successfully replaced: {mod_filename}")
+
+                    for obj in target_objects:
+                        data = obj.read()
+                        data.m_Script = skel_binary_data.decode("utf-8", "surrogateescape")
+                        data.save()
+                        edited = True
+                    report_progress(f"{current_progress}Successfully replaced: {mod_filename} -> {len(target_objects)} object(s)")
                 finally:
                     if os.path.exists(temp_skel_path):
                         os.remove(temp_skel_path)
@@ -529,12 +535,15 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
             
             try:
                 report_progress(f"{current_progress}Replacing asset: {mod_filename}")
-                obj = asset_map[target_asset_name]
-                data = obj.read()
+                target_objects = _asset_objects(asset_map, target_asset_name, "TextAsset")
                 with open(mod_filepath, "rb") as f:
-                    data.m_Script = f.read().decode("utf-8", "surrogateescape")
-                data.save()
-                edited = True
+                    new_script = f.read().decode("utf-8", "surrogateescape")
+
+                for obj in target_objects:
+                    data = obj.read()
+                    data.m_Script = new_script
+                    data.save()
+                    edited = True
                 
             except Exception as e:
                 import traceback
@@ -583,24 +592,25 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                                 # 立即寫入 Bundle
                                 target_asset_name = result['target_asset_name']
                                 try:
-                                    obj = asset_map[target_asset_name]
-                                    data = obj.read()
-                                    
-                                    data.m_TextureFormat = 48  # ASTC_RGB_4x4
-                                    data.image_data = result['compressed_data']
-                                    data.m_CompleteImageSize = len(result['compressed_data'])
-                                    data.m_Width = result['width']
-                                    data.m_Height = result['height']
-                                    data.m_MipCount = 1
-                                    
-                                    if hasattr(data, 'm_StreamData'):
-                                        data.m_StreamData.offset = 0
-                                        data.m_StreamData.size = 0
-                                        data.m_StreamData.path = ""
-                                    
-                                    data.save()
-                                    edited = True
-                                    total_success += 1
+                                    target_objects = _asset_objects(asset_map, target_asset_name, "Texture2D")
+                                    for obj in target_objects:
+                                        data = obj.read()
+                                        
+                                        data.m_TextureFormat = 48  # ASTC_RGB_4x4
+                                        data.image_data = result['compressed_data']
+                                        data.m_CompleteImageSize = len(result['compressed_data'])
+                                        data.m_Width = result['width']
+                                        data.m_Height = result['height']
+                                        data.m_MipCount = 1
+                                        
+                                        if hasattr(data, 'm_StreamData'):
+                                            data.m_StreamData.offset = 0
+                                            data.m_StreamData.size = 0
+                                            data.m_StreamData.path = ""
+                                        
+                                        data.save()
+                                        edited = True
+                                    total_success += len(target_objects)
                                     
                                 except Exception as e:
                                     total_failed += 1
@@ -635,21 +645,22 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                         target_asset_name = result['target_asset_name']
                         mod_filename = os.path.basename(result['mod_filepath'])
                         try:
-                            obj = asset_map[target_asset_name]
-                            data = obj.read()
-                            data.m_TextureFormat = 48
-                            data.image_data = result['compressed_data']
-                            data.m_CompleteImageSize = len(result['compressed_data'])
-                            data.m_Width = result['width']
-                            data.m_Height = result['height']
-                            data.m_MipCount = 1
-                            if hasattr(data, 'm_StreamData'):
-                                data.m_StreamData.offset = 0
-                                data.m_StreamData.size = 0
-                                data.m_StreamData.path = ""
-                            data.save()
-                            edited = True
-                            total_success += 1
+                            target_objects = _asset_objects(asset_map, target_asset_name, "Texture2D")
+                            for obj in target_objects:
+                                data = obj.read()
+                                data.m_TextureFormat = 48
+                                data.image_data = result['compressed_data']
+                                data.m_CompleteImageSize = len(result['compressed_data'])
+                                data.m_Width = result['width']
+                                data.m_Height = result['height']
+                                data.m_MipCount = 1
+                                if hasattr(data, 'm_StreamData'):
+                                    data.m_StreamData.offset = 0
+                                    data.m_StreamData.size = 0
+                                    data.m_StreamData.path = ""
+                                data.save()
+                                edited = True
+                            total_success += len(target_objects)
                         except Exception as e:
                             total_failed += 1
                     else:
@@ -679,23 +690,24 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                 pil_img = None
                 try:
                     report_progress(f"{current_progress}Processing: {mod_filename}")
-                    obj = asset_map[target_asset_name]
-                    data = obj.read()
-                    
+                    target_objects = _asset_objects(asset_map, target_asset_name, "Texture2D")
                     pil_img = Image.open(mod_filepath).convert("RGBA")
-                    
-                    data.m_TextureFormat = 4  # RGBA32
-                    data.image = pil_img
-                    
-                    data.m_MipCount = 1
-                    
-                    if hasattr(data, 'm_StreamData'):
-                        data.m_StreamData.offset = 0
-                        data.m_StreamData.size = 0
-                        data.m_StreamData.path = ""
-                    
-                    data.save()
-                    edited = True
+
+                    for obj in target_objects:
+                        data = obj.read()
+                        
+                        data.m_TextureFormat = 4  # RGBA32
+                        data.image = pil_img
+                        
+                        data.m_MipCount = 1
+                        
+                        if hasattr(data, 'm_StreamData'):
+                            data.m_StreamData.offset = 0
+                            data.m_StreamData.size = 0
+                            data.m_StreamData.path = ""
+                        
+                        data.save()
+                        edited = True
                     
                 except Exception as e:
                     import traceback

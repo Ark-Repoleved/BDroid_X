@@ -2,6 +2,34 @@ package com.example.bd2modmanager.data.model
 
 import android.net.Uri
 
+enum class ResolutionState {
+    KNOWN,
+    MISC,
+    UNKNOWN,
+    INVALID
+}
+
+enum class MatchStrategy {
+    EXACT,
+    NORMALIZED,
+    EXTENSION_MAPPING,
+    FALLBACK,
+    NONE
+}
+
+data class ResolvedTarget(
+    val originalFileName: String,
+    val normalizedCandidates: List<String> = emptyList(),
+    val resolvedAssetKey: String? = null,
+    val resolvedBundleName: String? = null,
+    val resolvedBundlePath: String? = null,
+    val assetType: String? = null,
+    val targetHash: String? = null,
+    val familyKey: String? = null,
+    val matchStrategy: MatchStrategy = MatchStrategy.NONE,
+    val confidence: Float = 0f
+)
+
 data class ModInfo(
     val name: String,
     val character: String,
@@ -10,7 +38,13 @@ data class ModInfo(
     val isEnabled: Boolean,
     val uri: Uri,
     val targetHashedName: String?,
-    val isDirectory: Boolean
+    val isDirectory: Boolean,
+    val resolutionState: ResolutionState = ResolutionState.UNKNOWN,
+    val targetHash: String? = targetHashedName,
+    val resolvedFamilyKey: String? = null,
+    val resolvedTargets: List<ResolvedTarget> = emptyList(),
+    val unresolvedFiles: List<String> = emptyList(),
+    val errorReason: String? = null
 )
 
 data class ModCacheInfo(
@@ -21,7 +55,12 @@ data class ModCacheInfo(
     val costume: String,
     val type: String,
     val targetHashedName: String?,
-    val isDirectory: Boolean
+    val isDirectory: Boolean,
+    val resolutionState: ResolutionState = ResolutionState.UNKNOWN,
+    val targetHash: String? = targetHashedName,
+    val resolvedFamilyKey: String? = null,
+    val unresolvedFiles: List<String> = emptyList(),
+    val errorReason: String? = null
 )
 
 data class CharacterInfo(val character: String, val costume: String, val type: String, val hashedName: String)
