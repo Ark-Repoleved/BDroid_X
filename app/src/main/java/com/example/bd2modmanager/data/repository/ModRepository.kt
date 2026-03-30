@@ -110,7 +110,7 @@ class ModRepository(
 
                 val (batchSuccess, batchResults) = ModdingService.resolveModBatch(
                     batchPayload.toString(),
-                    context.cacheDir.absolutePath,
+                    context.filesDir.absolutePath,
                     "HD"
                 ) { }
 
