@@ -31,22 +31,102 @@ def _prune_catalog_cache(keep_version=None):
     for version in stale_versions:
         catalog_cache.pop(version, None)
 
+
+def _load_valid_local_index(output_dir: str, quality: str, version: str = None):
+    output_path = Path(output_dir)
+    pattern = f"asset_index_{quality.lower()}_*.json"
+    candidates = sorted(output_path.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
+
+    for index_path in candidates:
+        try:
+            with open(index_path, 'r', encoding='utf-8') as f:
+                index = json.load(f)
+            if index.get('schemaVersion') != catalog_indexer.INDEX_SCHEMA_VERSION:
+                continue
+            if version and index.get('version') != version:
+                continue
+            return index
+        except Exception:
+            try:
+                index_path.unlink()
+            except Exception:
+                pass
+    return None
+
+
+def _refresh_metadata(output_dir: str, quality: str = "HD", progress_callback=None):
+    def report_progress(message):
+        if progress_callback:
+            progress_callback(message)
+        print(message)
+
+    try:
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        report_progress(f"Fetching CDN version for {quality} quality...")
+        latest_version = cdn_downloader.get_cdn_version(quality)
+        if not latest_version:
+            return False, "Failed to get CDN version.", None, None
+
+        characters_json_path = output_path / "characters.json"
+        stored_version = None
+        if characters_json_path.exists():
+            try:
+                with open(characters_json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                stored_version = data.get("version")
+            except (json.JSONDecodeError, KeyError, TypeError):
+                stored_version = None
+
+        existing_index = _load_valid_local_index(output_dir, quality, latest_version)
+        characters_up_to_date = stored_version == latest_version and characters_json_path.exists()
+        index_up_to_date = existing_index is not None
+
+        if characters_up_to_date and index_up_to_date:
+            report_progress(f"Metadata already up to date for version {latest_version}.")
+            return True, "SKIPPED", latest_version, existing_index
+
+        report_progress(f"Refreshing shared metadata for version {latest_version}...")
+        with catalog_cache_lock:
+            _prune_catalog_cache(latest_version)
+        catalog_content, error = cdn_downloader.download_catalog(
+            output_dir, quality, latest_version, catalog_cache, catalog_cache_lock, progress_callback
+        )
+        if error:
+            return False, error, None, None
+
+        if not characters_up_to_date:
+            report_progress("Rebuilding characters.json from shared catalog...")
+            success, message = character_scraper.scrape_and_save_from_catalog(output_dir, latest_version, catalog_content)
+            if not success:
+                return False, message, None, None
+
+        report_progress("Rebuilding/loading asset index from shared catalog...")
+        index = catalog_indexer.load_or_build_asset_index(output_dir, quality, latest_version, catalog_content)
+        return True, "SUCCESS", latest_version, index
+    except Exception as e:
+        import traceback
+        error_message = traceback.format_exc()
+        report_progress(f"A critical error occurred while refreshing metadata: {error_message}")
+        return False, error_message, None, None
+
+
 def unpack_bundle(bundle_path: str, output_dir: str, progress_callback=None):
     """
     Entry point for Kotlin to unpack a bundle.
     Returns a tuple: (success: Boolean, message: String)
     """
     try:
-        # The progress callback will handle printing.
         success, message = unpacker_main(
             bundle_path=bundle_path,
             output_dir=output_dir,
             progress_callback=progress_callback
         )
-        
+
         print(message)
         return success, message
-            
+
     except Exception as e:
         import traceback
         error_message = traceback.format_exc()
@@ -55,6 +135,7 @@ def unpack_bundle(bundle_path: str, output_dir: str, progress_callback=None):
             progress_callback(f"An error occurred: {e}")
         return False, error_message
 
+
 def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callback=None):
     """
     Entry point for Kotlin to download a bundle from the CDN.
@@ -62,30 +143,27 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
     Returns a tuple: (success: Boolean, message_or_path: String)
     """
     global current_cache_key
+
     def report_progress(message):
         if progress_callback:
             progress_callback(message)
         print(message)
 
     try:
-        # --- Cache Management ---
-        # If the cache key from the client has changed, it signifies a new batch operation.
-        # We should clear the cache to ensure we fetch the latest catalog for the new batch.
         with catalog_cache_lock:
             if current_cache_key != cache_key:
                 report_progress("New batch installation detected, clearing catalog cache.")
                 catalog_cache.clear()
                 current_cache_key = cache_key
-        
+
         report_progress(f"Fetching CDN version for {quality} quality...")
         version = cdn_downloader.get_cdn_version(quality)
         if not version:
             return False, "Failed to get CDN version."
-        
+
         report_progress(f"Latest version is {version}. Checking catalog...")
         with catalog_cache_lock:
             _prune_catalog_cache(version)
-        # The download_catalog function will now use the shared cache
         catalog_content, error = cdn_downloader.download_catalog(
             output_dir, quality, version, catalog_cache, catalog_cache_lock, progress_callback
         )
@@ -93,7 +171,6 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
             return False, error
 
         report_progress(f"Searching for bundle {hashed_name} in catalog...")
-        # find_and_download_bundle now takes the catalog content directly
         output_file_path, error = cdn_downloader.find_and_download_bundle(
             catalog_content=catalog_content,
             version=version,
@@ -105,7 +182,7 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
 
         if error:
             return False, error
-        
+
         return True, output_file_path
 
     except Exception as e:
@@ -113,6 +190,7 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
         error_message = traceback.format_exc()
         report_progress(f"A critical error occurred: {error_message}")
         return False, error_message
+
 
 def ensure_asset_index(output_dir: str, quality: str = "HD", progress_callback=None):
     def report_progress(message):
@@ -123,44 +201,20 @@ def ensure_asset_index(output_dir: str, quality: str = "HD", progress_callback=N
     try:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
-        pattern = f"asset_index_{quality.lower()}_*.json"
-        local_indexes = sorted(output_path.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
-
-        for index_path in local_indexes:
-            try:
-                with open(index_path, 'r', encoding='utf-8') as f:
-                    index = json.load(f)
-                if index.get('schemaVersion') == catalog_indexer.INDEX_SCHEMA_VERSION:
-                    version = index.get('version')
-                    report_progress(f"Using local asset index {index_path.name} without CDN refresh.")
-                    return True, version, index
-            except Exception:
-                try:
-                    index_path.unlink()
-                except Exception:
-                    pass
-
-        report_progress(f"No valid local asset index found for {quality}. Fetching CDN version...")
         version = cdn_downloader.get_cdn_version(quality)
         if not version:
             return False, "Failed to get CDN version.", None
 
-        report_progress(f"Latest version is {version}. Checking catalog...")
-        with catalog_cache_lock:
-            _prune_catalog_cache(version)
-        catalog_content, error = cdn_downloader.download_catalog(
-            output_dir, quality, version, catalog_cache, catalog_cache_lock, progress_callback
-        )
-        if error:
-            return False, error, None
+        index = _load_valid_local_index(output_dir, quality, version)
+        if index is None:
+            return False, "Asset index missing or stale. Refresh metadata first.", None
 
-        report_progress("Building/loading asset index...")
-        index = catalog_indexer.load_or_build_asset_index(output_dir, quality, version, catalog_content)
+        report_progress(f"Using local asset index for version {version}.")
         return True, version, index
     except Exception as e:
         import traceback
         error_message = traceback.format_exc()
-        report_progress(f"A critical error occurred while building asset index: {error_message}")
+        report_progress(f"A critical error occurred while loading asset index: {error_message}")
         return False, error_message, None
 
 
@@ -202,50 +256,21 @@ def resolve_mod_batch(mods_json: str, output_dir: str, quality: str = "HD", prog
 
 def update_character_data(output_dir: str):
     """
-    Entry point for Kotlin to run the character data scraper.
-    Checks versions to avoid unnecessary work.
+    Entry point for Kotlin to refresh all shared metadata.
     Returns a tuple: (status: String, message: String)
     Status can be "SUCCESS", "SKIPPED", "FAILED"
     """
     try:
-        # 1. Get latest CDN version
-        print("[Python] Getting latest CDN version...")
-        latest_version = cdn_downloader.get_cdn_version("HD")
-        if not latest_version:
-            return "FAILED", "Could not retrieve latest CDN version."
-        print(f"[Python] Latest CDN version is: {latest_version}")
-
-        # 2. Check local characters.json
-        characters_json_path = os.path.join(output_dir, "characters.json")
-        stored_version = None
-        if os.path.exists(characters_json_path):
-            try:
-                with open(characters_json_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    stored_version = data.get("version")
-                print(f"[Python] Found local characters.json with version: {stored_version}")
-            except (json.JSONDecodeError, KeyError, TypeError) as e:
-                print(f"[Python] Could not read version from local characters.json: {e}. Will regenerate.")
-                stored_version = None
-        
-        # 3. Compare versions
-        if stored_version and stored_version == latest_version:
-            print("[Python] Local characters.json is up to date. Skipping generation.")
-            return "SKIPPED", "characters.json is already up to date."
-
-        # 4. Run scraper if needed
-        print("[Python] Local data is outdated or missing. Running scraper...")
-        success, message = character_scraper.scrape_and_save(output_dir, latest_version)
-        
+        success, status, version, _index = _refresh_metadata(output_dir, "HD")
         if success:
-            return "SUCCESS", message
-        else:
-            return "FAILED", message
-
+            if status == "SKIPPED":
+                return "SKIPPED", "characters.json and asset index are already up to date."
+            return "SUCCESS", f"Metadata refreshed for version {version}."
+        return "FAILED", status
     except Exception as e:
         import traceback
         error_message = traceback.format_exc()
-        print(f"An error occurred during scraping process: {error_message}")
+        print(f"An error occurred during metadata refresh process: {error_message}")
         return "FAILED", error_message
 
 
@@ -255,7 +280,6 @@ def main(original_bundle_path: str, modded_assets_folder: str, output_path: str,
     Returns a tuple: (success: Boolean, message: String)
     """
     try:
-        # The progress callback will handle printing, so we can remove the print statements here.
         success, message = repack_bundle(
             original_bundle_path=original_bundle_path,
             modded_assets_folder=modded_assets_folder,
@@ -263,15 +287,16 @@ def main(original_bundle_path: str, modded_assets_folder: str, output_path: str,
             use_astc=use_astc,
             progress_callback=progress_callback
         )
-        
+
         print(message)
         return success, message
-            
+
     except Exception as e:
         import traceback
         error_message = traceback.format_exc()
         print(f"An error occurred: {error_message}")
         return False, error_message
+
 
 def merge_spine_assets(mod_dir_path: str, progress_callback=None):
     """
