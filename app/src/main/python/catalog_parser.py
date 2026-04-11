@@ -134,6 +134,11 @@ def parse_catalog_for_bundle_names(catalog_content):
 
     asset_map = {}
 
+    # Dynamically find the AssetBundleProvider index from m_ProviderIds
+    provider_ids = catalog_content.get('m_ProviderIds', [])
+    bundle_provider = "UnityEngine.ResourceManagement.ResourceProviders.AssetBundleProvider"
+    bundle_provider_index = provider_ids.index(bundle_provider) if bundle_provider in provider_ids else -1
+
     # Decode base64 data
     bucket_array = base64.b64decode(catalog_content['m_BucketDataString'])
     key_array = base64.b64decode(catalog_content['m_KeyDataString'])
@@ -179,7 +184,7 @@ def parse_catalog_for_bundle_names(catalog_content):
 
         entries.append({'dependency_index': dependency_key_index, 'primary_key_index': primary_key_index})
 
-        if provider_index == 1 and data_index >= 0:
+        if provider_index == bundle_provider_index and data_index >= 0:
             bundle_info = read_object_from_byte_array(extra_data, data_index)
             bundles[m] = {
                 'bundle_name': bundle_info.get('m_BundleName'),
@@ -195,11 +200,10 @@ def parse_catalog_for_bundle_names(catalog_content):
         if dep_idx < 0 or dep_idx >= len(dependency_map):
             return None
         deps = dependency_map[dep_idx] or []
-        for dep_entry in deps:
-            info = bundles.get(dep_entry)
-            if info:
-                return info
-        return None
+        if not deps:
+            return None
+        info = bundles.get(deps[0])
+        return info if info else None
 
     # --- Map asset keys to bundle names ---
     for i in range(len(entries)):

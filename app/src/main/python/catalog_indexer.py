@@ -23,6 +23,7 @@ def _normalize_filename(filename: str):
         candidates.append(filename[:-5] + '.skel.bytes')
     if filename.endswith('.skel.txt'):
         candidates.append(filename[:-9] + '.skel.bytes')
+        
     return list(dict.fromkeys(candidates))
 
 
@@ -74,6 +75,11 @@ def build_asset_index(catalog_content):
             'assetsByBaseName': {}
         }
 
+    # Dynamically find the AssetBundleProvider index from m_ProviderIds
+    provider_ids = catalog_content.get('m_ProviderIds', [])
+    bundle_provider = "UnityEngine.ResourceManagement.ResourceProviders.AssetBundleProvider"
+    bundle_provider_index = provider_ids.index(bundle_provider) if bundle_provider in provider_ids else -1
+
     bucket_array = base64.b64decode(catalog_content['m_BucketDataString'])
     key_array = base64.b64decode(catalog_content['m_KeyDataString'])
     extra_data = base64.b64decode(catalog_content['m_ExtraDataString'])
@@ -124,7 +130,7 @@ def build_asset_index(catalog_content):
             'internal_id_index': internal_id_index
         })
 
-        if provider_index == 1 and data_index >= 0:
+        if provider_index == bundle_provider_index and data_index >= 0:
             bundle_info = read_object_from_byte_array(extra_data, data_index)
             if bundle_info:
                 bundles[m] = {
@@ -143,11 +149,10 @@ def build_asset_index(catalog_content):
         if dep_idx < 0 or dep_idx >= len(dependency_map):
             return None
         deps = dependency_map[dep_idx] or []
-        for dep_entry in deps:
-            info = bundles.get(dep_entry)
-            if info:
-                return info
-        return None
+        if not deps:
+            return None
+        info = bundles.get(deps[0])
+        return info if info else None
 
     strings = []
     string_ids = {}
