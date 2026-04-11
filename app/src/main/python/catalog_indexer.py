@@ -23,14 +23,7 @@ def _normalize_filename(filename: str):
         candidates.append(filename[:-5] + '.skel.bytes')
     if filename.endswith('.skel.txt'):
         candidates.append(filename[:-9] + '.skel.bytes')
-
-    # If the catalog only has a .prefab entry for this stem, we still want to match.
-    # e.g. illust_dating11.png -> also try illust_dating11.prefab
-    stem = Path(filename).stem
-    prefab_candidate = f"{stem}.prefab"
-    if prefab_candidate != filename:
-        candidates.append(prefab_candidate)
-
+        
     return list(dict.fromkeys(candidates))
 
 
