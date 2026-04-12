@@ -301,7 +301,13 @@ def _filter_bridge_noise(base_name: str, matches):
             key=lambda match: (match.get('resolvedAssetKey') or '').lower()
         )[:1]
 
-    if not (lowered.endswith('.skel') or lowered.endswith('.skel.bytes') or lowered.endswith('.atlas') or lowered.endswith('.atlas.txt')):
+    if not (
+        lowered.endswith('.skel')
+        or lowered.endswith('.skel.bytes')
+        or lowered.endswith('.json')
+        or lowered.endswith('.atlas')
+        or lowered.endswith('.atlas.txt')
+    ):
         return matches
 
     preferred = []
@@ -335,7 +341,13 @@ def _inherit_png_targets_from_spine_pairs(file_matches):
         lowered = file_name.lower()
         if lowered.endswith('.png'):
             continue
-        if not (lowered.endswith('.skel') or lowered.endswith('.skel.bytes') or lowered.endswith('.atlas') or lowered.endswith('.atlas.txt')):
+        if not (
+            lowered.endswith('.skel')
+            or lowered.endswith('.skel.bytes')
+            or lowered.endswith('.json')
+            or lowered.endswith('.atlas')
+            or lowered.endswith('.atlas.txt')
+        ):
             continue
 
         target_hashes = list(entry.get('targetHashes') or [])
@@ -425,7 +437,7 @@ def _infer_asset_type(file_name: str):
     lowered = (file_name or '').lower()
     if lowered.endswith('.png'):
         return 'Texture2D'
-    if lowered.endswith('.atlas') or lowered.endswith('.atlas.txt') or lowered.endswith('.skel') or lowered.endswith('.skel.txt') or lowered.endswith('.skel.bytes'):
+    if lowered.endswith('.atlas') or lowered.endswith('.atlas.txt') or lowered.endswith('.skel') or lowered.endswith('.skel.txt') or lowered.endswith('.skel.bytes') or lowered.endswith('.json'):
         return 'TextAsset'
     if lowered.endswith('.json'):
         return 'JsonSkeleton'

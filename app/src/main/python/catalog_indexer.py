@@ -8,7 +8,7 @@ from pathlib import Path
 from catalog_parser import read_int32_from_byte_array, read_object_from_byte_array
 
 
-INDEX_SCHEMA_VERSION = 7
+INDEX_SCHEMA_VERSION = 8
 
 
 def _normalize_filename(filename: str):
@@ -23,6 +23,8 @@ def _normalize_filename(filename: str):
         candidates.append(filename[:-5] + '.skel.bytes')
     if filename.endswith('.skel.txt'):
         candidates.append(filename[:-9] + '.skel.bytes')
+    if filename.endswith('.json'):
+        candidates.append(filename[:-5] + '.skel.bytes')
 
     stem = _mod_asset_stem(filename)
     if stem:
@@ -300,6 +302,7 @@ def build_asset_index(catalog_content):
                     char_id,
                     f'{char_id}.skel',
                     f'{char_id}.skel.bytes',
+                    f'{char_id}.json',
                     f'{char_id}.atlas',
                     f'{char_id}.atlas.txt',
                 ])
@@ -311,6 +314,7 @@ def build_asset_index(catalog_content):
                     dating_id,
                     f'{dating_id}.skel',
                     f'{dating_id}.skel.bytes',
+                    f'{dating_id}.json',
                     f'{dating_id}.atlas',
                     f'{dating_id}.atlas.txt',
                 ])
@@ -322,6 +326,7 @@ def build_asset_index(catalog_content):
                     vp_key,
                     f'{vp_key}.skel',
                     f'{vp_key}.skel.bytes',
+                    f'{vp_key}.json',
                     f'{vp_key}.atlas',
                     f'{vp_key}.atlas.txt',
                 ])
@@ -331,6 +336,7 @@ def build_asset_index(catalog_content):
                         dating_id,
                         f'{dating_id}.skel',
                         f'{dating_id}.skel.bytes',
+                        f'{dating_id}.json',
                         f'{dating_id}.atlas',
                         f'{dating_id}.atlas.txt',
                     ])
