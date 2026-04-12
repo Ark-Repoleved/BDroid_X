@@ -321,28 +321,6 @@ def build_asset_index(catalog_content):
                     f'{dating_id}.atlas.txt',
                 ])
 
-            dating_vp_match = re.fullmatch(r'(vp_illust_dating\d+)\.asset', asset_base, re.IGNORECASE)
-            if dating_vp_match:
-                vp_key = dating_vp_match.group(1).lower()
-                base_aliases.extend([
-                    vp_key,
-                    f'{vp_key}.skel',
-                    f'{vp_key}.skel.bytes',
-                    f'{vp_key}.json',
-                    f'{vp_key}.atlas',
-                    f'{vp_key}.atlas.txt',
-                ])
-                if vp_key.startswith('vp_'):
-                    dating_id = vp_key[3:]
-                    base_aliases.extend([
-                        dating_id,
-                        f'{dating_id}.skel',
-                        f'{dating_id}.skel.bytes',
-                        f'{dating_id}.json',
-                        f'{dating_id}.atlas',
-                        f'{dating_id}.atlas.txt',
-                    ])
-
             for alias in dict.fromkeys(x.lower() for x in base_aliases if x):
                 group_key = (alias, target_hash, family_key)
                 candidate = base_candidates.get(group_key)
