@@ -437,10 +437,10 @@ def _infer_asset_type(file_name: str):
     lowered = (file_name or '').lower()
     if lowered.endswith('.png'):
         return 'Texture2D'
-    if lowered.endswith('.atlas') or lowered.endswith('.atlas.txt') or lowered.endswith('.skel') or lowered.endswith('.skel.txt') or lowered.endswith('.skel.bytes') or lowered.endswith('.json'):
-        return 'TextAsset'
     if lowered.endswith('.json'):
         return 'JsonSkeleton'
+    if lowered.endswith('.atlas') or lowered.endswith('.atlas.txt') or lowered.endswith('.skel') or lowered.endswith('.skel.txt') or lowered.endswith('.skel.bytes'):
+        return 'TextAsset'
     return 'Unknown'
 
 
