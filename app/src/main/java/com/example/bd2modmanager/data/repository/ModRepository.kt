@@ -153,11 +153,6 @@ class ModRepository(
                             displayCostume = bestMatch.costume
                             displayType = bestMatch.type
                         }
-                        candidate.modDetails.fileId?.startsWith("char", ignoreCase = true) == true -> {
-                            displayCharacter = "Character"
-                            displayCostume = candidate.modDetails.fileId ?: "Other"
-                            displayType = "idle"
-                        }
                         else -> {
                             displayCharacter = "Other"
                             displayCostume = "Other"

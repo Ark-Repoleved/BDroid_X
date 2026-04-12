@@ -106,12 +106,6 @@ def scrape_and_save_from_catalog(output_dir, version, catalog_content):
             cutscene_entry["hashed_name"] = bundles["cutscene"]
             all_characters_data.append(cutscene_entry)
 
-        if "rhythm" in bundles and bundles["rhythm"]:
-            rhythm_entry = base_entry.copy()
-            rhythm_entry["type"] = "rhythm"
-            rhythm_entry["hashed_name"] = bundles["rhythm"]
-            all_characters_data.append(rhythm_entry)
-
     if not all_characters_data:
         print("[Python] Warning: No character data could be generated from the catalog.", file=sys.stderr)
 
