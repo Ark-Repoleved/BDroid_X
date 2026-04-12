@@ -87,10 +87,6 @@ def _extract_family_key(name: str):
     if dating_match:
         return dating_match.group(1).lower()
 
-    dating_vp_match = re.fullmatch(r'(vp_illust_dating\d+)\.asset', lowered, re.IGNORECASE)
-    if dating_vp_match:
-        return dating_vp_match.group(1).lower()
-
     char_match = re.fullmatch(r'illust_(char\d{6})_\d+\.prefab', lowered, re.IGNORECASE)
     if char_match:
         return char_match.group(1).lower()
