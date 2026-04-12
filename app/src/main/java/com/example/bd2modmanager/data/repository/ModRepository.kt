@@ -29,6 +29,11 @@ class ModRepository(
         private const val MOD_CACHE_FILENAME = "mod_cache.json"
     }
 
+    private fun shouldIgnoreModEntry(entryName: String?): Boolean {
+        val name = entryName?.substringAfterLast('/')?.trim()?.lowercase() ?: return true
+        return name.isEmpty() || name == ".modfile" || name.endsWith(".modfile")
+    }
+
     private val gson = Gson()
 
     private data class ScannedModCandidate(
@@ -240,8 +245,10 @@ class ModRepository(
                 ZipInputStream(it).use { zis ->
                     var entry = zis.nextEntry
                     while (entry != null) {
-                        fileNames.add(entry.name)
-                        if (fileId == null) fileId = characterRepository.extractFileId(entry.name)
+                        if (!entry.isDirectory && !shouldIgnoreModEntry(entry.name)) {
+                            fileNames.add(entry.name)
+                            if (fileId == null) fileId = characterRepository.extractFileId(entry.name)
+                        }
                         entry = zis.nextEntry
                     }
                 }
@@ -258,6 +265,7 @@ class ModRepository(
         try {
             DocumentFile.fromTreeUri(context, dirUri)?.listFiles()?.forEach { file ->
                 val entryName = file.name ?: ""
+                if (shouldIgnoreModEntry(entryName)) return@forEach
                 fileNames.add(entryName)
                 if (file.isFile) {
                     if (fileId == null) fileId = characterRepository.extractFileId(entryName)
