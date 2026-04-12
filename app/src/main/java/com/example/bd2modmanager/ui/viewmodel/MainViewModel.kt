@@ -35,6 +35,11 @@ import java.util.zip.ZipInputStream
 
 class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel() {
 
+    private fun shouldIgnoreModEntry(entryName: String?): Boolean {
+        val name = entryName?.substringAfterLast('/')?.trim()?.lowercase() ?: return true
+        return name.isEmpty() || name == ".modfile" || name.endsWith(".modfile")
+    }
+
     private lateinit var characterRepository: CharacterRepository
     private lateinit var modRepository: ModRepository
 
@@ -280,8 +285,11 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                         ZipInputStream(fis).use { zis ->
                             var entry = zis.nextEntry
                             while (entry != null) {
-                                val newFile = File(modAssetsDir, entry.name)
-                                if (entry.isDirectory) newFile.mkdirs() else newFile.outputStream().use { fos -> zis.copyTo(fos) }
+                                if (!entry.isDirectory && !shouldIgnoreModEntry(entry.name)) {
+                                    val newFile = File(modAssetsDir, entry.name)
+                                    newFile.parentFile?.mkdirs()
+                                    newFile.outputStream().use { fos -> zis.copyTo(fos) }
+                                }
                                 entry = zis.nextEntry
                             }
                         }
@@ -518,8 +526,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                             ZipInputStream(fis).use { zis ->
                                 var entry = zis.nextEntry
                                 while (entry != null) {
-                                    if (!entry.isDirectory) {
-                                        val newFile = File(tempDir, entry.name.substringAfterLast('/'))
+                                    val fileName = entry.name.substringAfterLast('/')
+                                    if (!entry.isDirectory && !shouldIgnoreModEntry(fileName)) {
+                                        val newFile = File(tempDir, fileName)
                                         newFile.outputStream().use { fos -> zis.copyTo(fos) }
                                     }
                                     entry = zis.nextEntry
@@ -587,8 +596,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private fun copyDirectoryToCacheNonRecursive(context: Context, sourceDir: DocumentFile, destinationDir: File) {
         if (!destinationDir.exists()) destinationDir.mkdirs()
         sourceDir.listFiles().forEach { file ->
-            if (file.isFile) {
-                val destFile = File(destinationDir, file.name!!)
+            val fileName = file.name ?: return@forEach
+            if (file.isFile && !shouldIgnoreModEntry(fileName)) {
+                val destFile = File(destinationDir, fileName)
                 try {
                     context.contentResolver.openInputStream(file.uri)?.use { input -> destFile.outputStream().use { output -> input.copyTo(output) } }
                 } catch (e: Exception) { e.printStackTrace() }
@@ -599,6 +609,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private fun copyDirectoryToSaf(context: Context, sourceDir: File, destinationDoc: DocumentFile) {
         sourceDir.listFiles()?.forEach { file ->
             if (file.isFile) {
+                if (shouldIgnoreModEntry(file.name)) return@forEach
                 val newFile = destinationDoc.createFile("application/octet-stream", file.name)
                 newFile?.let {
                     context.contentResolver.openOutputStream(it.uri)?.use { output ->
@@ -700,8 +711,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private fun copyDirectoryToCache(context: Context, sourceDir: DocumentFile, destinationDir: File) {
         if (!destinationDir.exists()) destinationDir.mkdirs()
         sourceDir.listFiles().forEach { file ->
-            if (file.isFile) {
-                val destFile = File(destinationDir, file.name!!)
+            val fileName = file.name ?: return@forEach
+            if (file.isFile && !shouldIgnoreModEntry(fileName)) {
+                val destFile = File(destinationDir, fileName)
                 try {
                     context.contentResolver.openInputStream(file.uri)?.use { input -> destFile.outputStream().use { output -> input.copyTo(output) } }
                 } catch (e: Exception) { e.printStackTrace() }
@@ -724,7 +736,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     val sourceDir = DocumentFile.fromTreeUri(context, modInfo.uri)
                     sourceDir?.listFiles()?.forEach { file ->
                         val fileName = file.name ?: ""
-                        if (fileName.endsWith(".skel") || fileName.endsWith(".json") || fileName.endsWith(".atlas") || fileName.endsWith(".png")) {
+                        if (!shouldIgnoreModEntry(fileName) && (fileName.endsWith(".skel") || fileName.endsWith(".json") || fileName.endsWith(".atlas") || fileName.endsWith(".png"))) {
                             val destFile = File(tempDir, fileName)
                             context.contentResolver.openInputStream(file.uri)?.use { input ->
                                 destFile.outputStream().use { output ->
@@ -744,7 +756,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                             var entry = zis.nextEntry
                             while (entry != null) {
                                 val fileName = entry.name.substringAfterLast('/')
-                                if (fileName.endsWith(".skel") || fileName.endsWith(".json") || fileName.endsWith(".atlas") || fileName.endsWith(".png")) {
+                                if (!entry.isDirectory && !shouldIgnoreModEntry(fileName) && (fileName.endsWith(".skel") || fileName.endsWith(".json") || fileName.endsWith(".atlas") || fileName.endsWith(".png"))) {
                                     val destFile = File(tempDir, fileName)
                                     destFile.outputStream().use { fos -> zis.copyTo(fos) }
 

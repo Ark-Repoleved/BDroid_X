@@ -199,9 +199,15 @@ def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
         report_progress(f"Saved merged image: {output_path}")
 
         all_sprites_for_block = []
+        filter_line = None
         for original_png_name in target_pngs:
             atlas_data = atlas_db.get(original_png_name)
-            if not atlas_data: continue
+            if not atlas_data:
+                report_progress(f"WARNING: Missing atlas entry for {original_png_name}; skipping atlas block data during merge.")
+                continue
+
+            if filter_line is None:
+                filter_line = atlas_data['filter_line']
 
             offset_x, offset_y = merged_offsets[original_png_name]
             
@@ -222,7 +228,10 @@ def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
                     else: modified_sprites.append(line)
                 all_sprites_for_block.append('\n'.join(modified_sprites))
 
-        filter_line = atlas_db[target_pngs[0]]['filter_line']
+        if filter_line is None:
+            report_progress(f"WARNING: No atlas blocks matched merged texture group {target_pngs}; skipping output atlas block for {output_image_name}.")
+            continue
+
         new_block = [
             output_image_name,
             f" size: {base_image.width},{base_image.height}",

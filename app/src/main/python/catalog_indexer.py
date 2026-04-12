@@ -8,7 +8,7 @@ from pathlib import Path
 from catalog_parser import read_int32_from_byte_array, read_object_from_byte_array
 
 
-INDEX_SCHEMA_VERSION = 5
+INDEX_SCHEMA_VERSION = 8
 
 
 def _normalize_filename(filename: str):
@@ -23,8 +23,55 @@ def _normalize_filename(filename: str):
         candidates.append(filename[:-5] + '.skel.bytes')
     if filename.endswith('.skel.txt'):
         candidates.append(filename[:-9] + '.skel.bytes')
-        
+    if filename.endswith('.json'):
+        candidates.append(filename[:-5] + '.skel.bytes')
+
+    stem = _mod_asset_stem(filename)
+    if stem:
+        if re.fullmatch(r'illust_dating\d+', stem, re.IGNORECASE):
+            candidates.extend([
+                f'{stem}.prefab',
+                f'vp_{stem}.asset',
+                f'char/datingillust/{stem}.prefab',
+                f'char/datingillust/vp_{stem}.asset',
+            ])
+
+        candidates.extend(_prefab_bridge_candidates(stem))
+
     return list(dict.fromkeys(candidates))
+
+
+def _mod_asset_stem(asset_name: str):
+    lowered = (asset_name or '').strip().lower()
+    if not lowered:
+        return None
+
+    for suffix in ('.skel.bytes', '.atlas.txt'):
+        if lowered.endswith(suffix):
+            return lowered[:-len(suffix)]
+
+    return Path(lowered).stem
+
+
+
+def _prefab_bridge_candidates(stem: str):
+    if not stem:
+        return []
+
+    candidates = []
+    if re.fullmatch(r'char\d{6}', stem, re.IGNORECASE):
+        candidates.extend([
+            f'illust_{stem}_01.prefab',
+            f'illust_{stem}_1.prefab',
+        ])
+    if re.fullmatch(r'npc\d{6}', stem, re.IGNORECASE):
+        candidates.extend([
+            f'illust_{stem}_01.prefab',
+            f'illust_{stem}_1.prefab',
+            f'illust_{stem}_2.prefab',
+        ])
+    return candidates
+
 
 
 def _extract_family_key(name: str):
@@ -37,6 +84,22 @@ def _extract_family_key(name: str):
         stem = stem[:-6]
     if stem.endswith('.skel'):
         stem = stem[:-5]
+
+    dating_match = re.fullmatch(r'(illust_dating\d+)\.prefab', lowered, re.IGNORECASE)
+    if dating_match:
+        return dating_match.group(1).lower()
+
+    dating_vp_match = re.fullmatch(r'(vp_illust_dating\d+)\.asset', lowered, re.IGNORECASE)
+    if dating_vp_match:
+        return dating_vp_match.group(1).lower()
+
+    char_match = re.fullmatch(r'illust_(char\d{6})_\d+\.prefab', lowered, re.IGNORECASE)
+    if char_match:
+        return char_match.group(1).lower()
+
+    npc_match = re.fullmatch(r'illust_(npc\d{6})_\d+\.prefab', lowered, re.IGNORECASE)
+    if npc_match:
+        return npc_match.group(1).lower()
 
     stem = re.sub(r'_(\d+)$', '', stem)
     return stem
@@ -228,11 +291,62 @@ def build_asset_index(catalog_content):
             record_id = intern_record(asset_key, target_hash, family_key)
             append_unique_ref(assets_by_exact, asset_key, record_id)
 
-            group_key = (asset_base, target_hash, family_key)
-            candidate = base_candidates.get(group_key)
-            score = _score_asset_key_for_base(asset_key, asset_base)
-            if candidate is None or score > candidate[0]:
-                base_candidates[group_key] = (score, record_id)
+            base_aliases = _normalize_filename(asset_base)
+            if family_key:
+                base_aliases.append(family_key)
+
+            char_prefab_match = re.fullmatch(r'illust_(char\d{6})_\d+\.prefab', asset_base, re.IGNORECASE)
+            if char_prefab_match:
+                char_id = char_prefab_match.group(1).lower()
+                base_aliases.extend([
+                    char_id,
+                    f'{char_id}.skel',
+                    f'{char_id}.skel.bytes',
+                    f'{char_id}.json',
+                    f'{char_id}.atlas',
+                    f'{char_id}.atlas.txt',
+                ])
+
+            dating_match = re.fullmatch(r'(illust_dating\d+)\.prefab', asset_base, re.IGNORECASE)
+            if dating_match:
+                dating_id = dating_match.group(1).lower()
+                base_aliases.extend([
+                    dating_id,
+                    f'{dating_id}.skel',
+                    f'{dating_id}.skel.bytes',
+                    f'{dating_id}.json',
+                    f'{dating_id}.atlas',
+                    f'{dating_id}.atlas.txt',
+                ])
+
+            dating_vp_match = re.fullmatch(r'(vp_illust_dating\d+)\.asset', asset_base, re.IGNORECASE)
+            if dating_vp_match:
+                vp_key = dating_vp_match.group(1).lower()
+                base_aliases.extend([
+                    vp_key,
+                    f'{vp_key}.skel',
+                    f'{vp_key}.skel.bytes',
+                    f'{vp_key}.json',
+                    f'{vp_key}.atlas',
+                    f'{vp_key}.atlas.txt',
+                ])
+                if vp_key.startswith('vp_'):
+                    dating_id = vp_key[3:]
+                    base_aliases.extend([
+                        dating_id,
+                        f'{dating_id}.skel',
+                        f'{dating_id}.skel.bytes',
+                        f'{dating_id}.json',
+                        f'{dating_id}.atlas',
+                        f'{dating_id}.atlas.txt',
+                    ])
+
+            for alias in dict.fromkeys(x.lower() for x in base_aliases if x):
+                group_key = (alias, target_hash, family_key)
+                candidate = base_candidates.get(group_key)
+                score = _score_asset_key_for_base(asset_key, asset_base)
+                if candidate is None or score > candidate[0]:
+                    base_candidates[group_key] = (score, record_id)
 
     assets_by_base = {}
     for (asset_base, _target_hash, _family_key), (_score, record_id) in base_candidates.items():

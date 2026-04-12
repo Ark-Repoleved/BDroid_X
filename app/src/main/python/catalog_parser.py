@@ -228,10 +228,28 @@ def parse_catalog_for_bundle_names(catalog_content):
             asset_type = "idle"
             file_id = matched_string
 
-        # For 'idle' and 'cutscene' animations, only accept the .skel.bytes file to ensure
+        # For 'cutscene' animations, only accept the .skel.bytes file to ensure
         # we get the correct bundle hash, not the hash for the atlas or png.
-        if (asset_type == "idle" or asset_type == "cutscene") and not asset_key.lower().endswith('.skel.bytes'):
-            continue
+        #
+        # For 'idle', also allow the specific prefab/asset forms that newer catalogs use
+        # for character / NPC / dating illust targets. Keep this allowlist narrow so we
+        # do not accidentally reclassify unrelated prefab/asset entries (for example rhythm)
+        # as idle.
+        ext = asset_key.lower()
+        if asset_type == "cutscene":
+            if not ext.endswith('.skel.bytes'):
+                continue
+        elif asset_type == "idle":
+            if ext.endswith('.skel.bytes'):
+                pass
+            elif re.search(r'(^|/)illust_char\d{6}_\d+\.prefab$', ext, re.IGNORECASE):
+                pass
+            elif re.search(r'(^|/)illust_npc\d+_\d+\.prefab$', ext, re.IGNORECASE):
+                pass
+            elif re.search(r'(^|/)(illust_dating\d+\.prefab|vp_illust_dating\d+\.asset)$', ext, re.IGNORECASE):
+                pass
+            else:
+                continue
         
         bundle_info = resolve_bundle_info(i)
         if bundle_info and 'bundle_name' in bundle_info:
