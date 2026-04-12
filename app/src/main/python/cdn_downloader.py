@@ -194,6 +194,11 @@ def find_and_download_bundle(catalog_content, version, quality, hashed_name, out
     if not catalog_content:
         return None, "Catalog content is missing or empty."
 
+    # Dynamically find the AssetBundleProvider index from m_ProviderIds
+    provider_ids = catalog_content.get('m_ProviderIds', [])
+    bundle_provider = "UnityEngine.ResourceManagement.ResourceProviders.AssetBundleProvider"
+    bundle_provider_index = provider_ids.index(bundle_provider) if bundle_provider in provider_ids else -1
+
     bucket_array = base64.b64decode(catalog_content['m_BucketDataString'])
     key_array = base64.b64decode(catalog_content['m_KeyDataString'])
     extra_data = base64.b64decode(catalog_content['m_ExtraDataString'])
@@ -225,7 +230,7 @@ def find_and_download_bundle(catalog_content, version, quality, hashed_name, out
         index += 4 # primary_key
         index += 4 # resource_type
 
-        if provider_index == 1 and data_index >= 0:
+        if provider_index == bundle_provider_index and data_index >= 0:
             bundle_info = read_object_from_byte_array(extra_data, data_index)
             if bundle_info and bundle_info.get('m_BundleName') == hashed_name:
                 raw_key = keys[primary_key_index] if primary_key_index < len(keys) else ''

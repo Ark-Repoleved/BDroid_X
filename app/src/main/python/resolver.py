@@ -35,6 +35,7 @@ def resolve_mod_folder(mod_file_names, asset_index):
                 matches.append(_build_match(base_name, candidates, hit, strategy, confidence))
 
         matches = _dedupe_matches(matches)
+        matches = _filter_bridge_noise(base_name, matches)
 
         if matches:
             file_matches.append({
@@ -45,6 +46,8 @@ def resolve_mod_folder(mod_file_names, asset_index):
             })
         else:
             unresolved_files.append(base_name)
+
+    _inherit_png_targets_from_spine_pairs(file_matches)
 
     candidate_sets = [entry['targetHashes'] for entry in file_matches if entry['targetHashes']]
 
@@ -100,6 +103,31 @@ def resolve_mod_folder(mod_file_names, asset_index):
 def _expand_candidates(base_name: str):
     candidates = list(dict.fromkeys(normalize_filename(base_name)))
 
+    lowered_base = (base_name or '').strip().lower()
+    stem = _mod_asset_stem(lowered_base)
+    if stem:
+        if re.fullmatch(r'illust_dating\d+', stem, re.IGNORECASE):
+            candidates.extend([
+                f'{stem}.prefab',
+                f'char/datingillust/{stem}.prefab',
+            ])
+
+        if re.fullmatch(r'char\d{6}', stem, re.IGNORECASE):
+            candidates.extend([
+                f'illust_{stem}_01.prefab',
+                f'illust_{stem}_1.prefab',
+            ])
+
+        if re.fullmatch(r'npc\d{6}', stem, re.IGNORECASE):
+            candidates.extend([
+                f'illust_{stem}_01.prefab',
+                f'illust_{stem}_1.prefab',
+                f'illust_{stem}_2.prefab',
+            ])
+
+        if _is_rhythm_hit_anim_stem(stem):
+            candidates.extend(_rhythm_bridge_candidates())
+
     bridge_key = _extract_sactx_bridge_key(base_name)
     if bridge_key:
         lowered = bridge_key.lower()
@@ -109,6 +137,19 @@ def _expand_candidates(base_name: str):
         ])
 
     return list(dict.fromkeys(candidates))
+
+
+def _mod_asset_stem(asset_name: str):
+    lowered = (asset_name or '').strip().lower()
+    if not lowered:
+        return None
+
+    for suffix in ('.skel.bytes', '.atlas.txt'):
+        if lowered.endswith(suffix):
+            return lowered[:-len(suffix)]
+
+    return Path(lowered).stem
+
 
 
 def _extract_sactx_bridge_key(file_name: str):
@@ -122,6 +163,19 @@ def _extract_sactx_bridge_key(file_name: str):
         return None
 
     return match.group(1)
+
+
+def _is_rhythm_hit_anim_stem(stem: str):
+    if not stem:
+        return False
+    return re.fullmatch(r'rhythmhitanim(?:_\d+)?', stem, re.IGNORECASE) is not None
+
+
+def _rhythm_bridge_candidates():
+    return [
+        f'rhythm_char{n:03d}.prefab'
+        for n in range(1, 6)
+    ]
 
 
 def _decode_hits(asset_index, raw_hits):
@@ -213,6 +267,133 @@ def _dedupe_matches(matches):
     return deduped
 
 
+def _filter_bridge_noise(base_name: str, matches):
+    if not matches:
+        return matches
+
+    lowered = (base_name or '').strip().lower()
+    stem = _mod_asset_stem(lowered)
+    if not stem:
+        return matches
+
+    if _is_rhythm_hit_anim_stem(stem):
+        pattern = re.compile(r'(^|.*/)rhythm_char\d{3}\.prefab$', re.IGNORECASE)
+        rhythm_matches = []
+        for match in matches:
+            asset_key = (match.get('resolvedAssetKey') or '').lower()
+            if pattern.search(asset_key):
+                rhythm_matches.append(match)
+
+        if not rhythm_matches:
+            return matches
+
+        exact_char001 = [
+            match for match in rhythm_matches
+            if (match.get('resolvedAssetKey') or '').lower().endswith('rhythm_char001.prefab')
+        ]
+        if exact_char001:
+            return exact_char001
+
+        return sorted(
+            rhythm_matches,
+            key=lambda match: (match.get('resolvedAssetKey') or '').lower()
+        )[:1]
+
+    if not (
+        lowered.endswith('.skel')
+        or lowered.endswith('.skel.bytes')
+        or lowered.endswith('.json')
+        or lowered.endswith('.atlas')
+        or lowered.endswith('.atlas.txt')
+    ):
+        return matches
+
+    preferred = []
+
+    if re.fullmatch(r'char\d{6}', stem, re.IGNORECASE):
+        pattern = re.compile(rf'(^|.*/)illust_{re.escape(stem)}_\d+\.prefab$', re.IGNORECASE)
+        for match in matches:
+            asset_key = (match.get('resolvedAssetKey') or '').lower()
+            if pattern.search(asset_key):
+                preferred.append(match)
+        return preferred if preferred else matches
+
+    if re.fullmatch(r'npc\d{6}', stem, re.IGNORECASE):
+        pattern = re.compile(rf'(^|.*/)illust_{re.escape(stem)}_\d+\.prefab$', re.IGNORECASE)
+        for match in matches:
+            asset_key = (match.get('resolvedAssetKey') or '').lower()
+            if pattern.search(asset_key):
+                preferred.append(match)
+        return preferred if preferred else matches
+
+    return matches
+
+
+def _inherit_png_targets_from_spine_pairs(file_matches):
+    if not file_matches:
+        return
+
+    anchor_by_stem = {}
+    for entry in file_matches:
+        file_name = entry.get('fileName') or ''
+        lowered = file_name.lower()
+        if lowered.endswith('.png'):
+            continue
+        if not (
+            lowered.endswith('.skel')
+            or lowered.endswith('.skel.bytes')
+            or lowered.endswith('.json')
+            or lowered.endswith('.atlas')
+            or lowered.endswith('.atlas.txt')
+        ):
+            continue
+
+        target_hashes = list(entry.get('targetHashes') or [])
+        if len(target_hashes) != 1:
+            continue
+
+        representative = _prefer_best_match(entry.get('matches') or [])
+        if not representative:
+            continue
+
+        stem = _mod_asset_stem(lowered)
+        if not stem:
+            continue
+
+        anchor_by_stem[stem] = {
+            'targetHash': target_hashes[0],
+            'match': representative,
+        }
+
+    for entry in file_matches:
+        file_name = entry.get('fileName') or ''
+        lowered = file_name.lower()
+        if not lowered.endswith('.png'):
+            continue
+
+        stem = _mod_asset_stem(lowered)
+        anchor = anchor_by_stem.get(stem)
+        if not anchor:
+            continue
+
+        anchor_target_hash = anchor['targetHash']
+        existing_matches = entry.get('matches') or []
+        matching_target = [m for m in existing_matches if m.get('targetHash') == anchor_target_hash]
+        if matching_target:
+            entry['matches'] = matching_target
+            entry['targetHashes'] = {anchor_target_hash}
+            continue
+
+        inherited = dict(anchor['match'])
+        inherited['originalFileName'] = file_name
+        inherited['assetType'] = _infer_asset_type(file_name)
+        inherited['matchStrategy'] = 'EXTENSION_MAPPING'
+        inherited['confidence'] = min(float(inherited.get('confidence') or 0.9), 0.9)
+        entry['matches'] = [inherited]
+        entry['targetHashes'] = {anchor_target_hash}
+
+
+
 def _select_representative_matches(file_matches, target_hash):
     resolved_targets = []
     for entry in file_matches:
@@ -254,10 +435,10 @@ def _infer_asset_type(file_name: str):
     lowered = (file_name or '').lower()
     if lowered.endswith('.png'):
         return 'Texture2D'
-    if lowered.endswith('.atlas') or lowered.endswith('.atlas.txt') or lowered.endswith('.skel') or lowered.endswith('.skel.txt') or lowered.endswith('.skel.bytes'):
-        return 'TextAsset'
     if lowered.endswith('.json'):
         return 'JsonSkeleton'
+    if lowered.endswith('.atlas') or lowered.endswith('.atlas.txt') or lowered.endswith('.skel') or lowered.endswith('.skel.txt') or lowered.endswith('.skel.bytes'):
+        return 'TextAsset'
     return 'Unknown'
 
 
