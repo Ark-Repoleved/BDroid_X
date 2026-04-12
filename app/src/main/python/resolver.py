@@ -35,6 +35,7 @@ def resolve_mod_folder(mod_file_names, asset_index):
                 matches.append(_build_match(base_name, candidates, hit, strategy, confidence))
 
         matches = _dedupe_matches(matches)
+        matches = _filter_bridge_noise(base_name, matches)
 
         if matches:
             file_matches.append({
@@ -100,6 +101,23 @@ def resolve_mod_folder(mod_file_names, asset_index):
 def _expand_candidates(base_name: str):
     candidates = list(dict.fromkeys(normalize_filename(base_name)))
 
+    lowered_base = (base_name or '').strip().lower()
+    stem = _mod_asset_stem(lowered_base)
+    if stem:
+        if re.fullmatch(r'illust_dating\d+', stem, re.IGNORECASE):
+            candidates.extend([
+                f'{stem}.prefab',
+                f'vp_{stem}.asset',
+                f'char/datingillust/{stem}.prefab',
+                f'char/datingillust/vp_{stem}.asset',
+            ])
+
+        if re.fullmatch(r'char\d{6}', stem, re.IGNORECASE):
+            candidates.extend([
+                f'illust_{stem}_01.prefab',
+                f'illust_{stem}_1.prefab',
+            ])
+
     bridge_key = _extract_sactx_bridge_key(base_name)
     if bridge_key:
         lowered = bridge_key.lower()
@@ -109,6 +127,19 @@ def _expand_candidates(base_name: str):
         ])
 
     return list(dict.fromkeys(candidates))
+
+
+def _mod_asset_stem(asset_name: str):
+    lowered = (asset_name or '').strip().lower()
+    if not lowered:
+        return None
+
+    for suffix in ('.skel.bytes', '.atlas.txt'):
+        if lowered.endswith(suffix):
+            return lowered[:-len(suffix)]
+
+    return Path(lowered).stem
+
 
 
 def _extract_sactx_bridge_key(file_name: str):
@@ -211,6 +242,28 @@ def _dedupe_matches(matches):
         seen.add(key)
         deduped.append(match)
     return deduped
+
+
+def _filter_bridge_noise(base_name: str, matches):
+    if not matches:
+        return matches
+
+    lowered = (base_name or '').strip().lower()
+    if not (lowered.endswith('.skel') or lowered.endswith('.skel.bytes') or lowered.endswith('.atlas') or lowered.endswith('.atlas.txt')):
+        return matches
+
+    stem = _mod_asset_stem(lowered)
+    if not stem or not re.fullmatch(r'char\d{6}', stem, re.IGNORECASE):
+        return matches
+
+    preferred = []
+    pattern = re.compile(rf'(^|.*/)illust_{re.escape(stem)}_\d+\.prefab$', re.IGNORECASE)
+    for match in matches:
+        asset_key = (match.get('resolvedAssetKey') or '').lower()
+        if pattern.search(asset_key):
+            preferred.append(match)
+
+    return preferred if preferred else matches
 
 
 def _select_representative_matches(file_matches, target_hash):
