@@ -8,7 +8,7 @@ from pathlib import Path
 from catalog_parser import read_int32_from_byte_array, read_object_from_byte_array
 
 
-INDEX_SCHEMA_VERSION = 6
+INDEX_SCHEMA_VERSION = 7
 
 
 def _normalize_filename(filename: str):
@@ -62,6 +62,12 @@ def _prefab_bridge_candidates(stem: str):
             f'illust_{stem}_01.prefab',
             f'illust_{stem}_1.prefab',
         ])
+    if re.fullmatch(r'npc\d{6}', stem, re.IGNORECASE):
+        candidates.extend([
+            f'illust_{stem}_01.prefab',
+            f'illust_{stem}_1.prefab',
+            f'illust_{stem}_2.prefab',
+        ])
     return candidates
 
 
@@ -88,6 +94,10 @@ def _extract_family_key(name: str):
     char_match = re.fullmatch(r'illust_(char\d{6})_\d+\.prefab', lowered, re.IGNORECASE)
     if char_match:
         return char_match.group(1).lower()
+
+    npc_match = re.fullmatch(r'illust_(npc\d{6})_\d+\.prefab', lowered, re.IGNORECASE)
+    if npc_match:
+        return npc_match.group(1).lower()
 
     stem = re.sub(r'_(\d+)$', '', stem)
     return stem

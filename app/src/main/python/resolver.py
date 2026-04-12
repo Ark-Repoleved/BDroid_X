@@ -118,6 +118,13 @@ def _expand_candidates(base_name: str):
                 f'illust_{stem}_1.prefab',
             ])
 
+        if re.fullmatch(r'npc\d{6}', stem, re.IGNORECASE):
+            candidates.extend([
+                f'illust_{stem}_01.prefab',
+                f'illust_{stem}_1.prefab',
+                f'illust_{stem}_2.prefab',
+            ])
+
     bridge_key = _extract_sactx_bridge_key(base_name)
     if bridge_key:
         lowered = bridge_key.lower()
@@ -253,17 +260,28 @@ def _filter_bridge_noise(base_name: str, matches):
         return matches
 
     stem = _mod_asset_stem(lowered)
-    if not stem or not re.fullmatch(r'char\d{6}', stem, re.IGNORECASE):
+    if not stem:
         return matches
 
     preferred = []
-    pattern = re.compile(rf'(^|.*/)illust_{re.escape(stem)}_\d+\.prefab$', re.IGNORECASE)
-    for match in matches:
-        asset_key = (match.get('resolvedAssetKey') or '').lower()
-        if pattern.search(asset_key):
-            preferred.append(match)
 
-    return preferred if preferred else matches
+    if re.fullmatch(r'char\d{6}', stem, re.IGNORECASE):
+        pattern = re.compile(rf'(^|.*/)illust_{re.escape(stem)}_\d+\.prefab$', re.IGNORECASE)
+        for match in matches:
+            asset_key = (match.get('resolvedAssetKey') or '').lower()
+            if pattern.search(asset_key):
+                preferred.append(match)
+        return preferred if preferred else matches
+
+    if re.fullmatch(r'npc\d{6}', stem, re.IGNORECASE):
+        pattern = re.compile(rf'(^|.*/)illust_{re.escape(stem)}_\d+\.prefab$', re.IGNORECASE)
+        for match in matches:
+            asset_key = (match.get('resolvedAssetKey') or '').lower()
+            if pattern.search(asset_key):
+                preferred.append(match)
+        return preferred if preferred else matches
+
+    return matches
 
 
 def _select_representative_matches(file_matches, target_hash):
