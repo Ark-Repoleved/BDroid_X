@@ -109,9 +109,7 @@ def _expand_candidates(base_name: str):
         if re.fullmatch(r'illust_dating\d+', stem, re.IGNORECASE):
             candidates.extend([
                 f'{stem}.prefab',
-                f'vp_{stem}.asset',
                 f'char/datingillust/{stem}.prefab',
-                f'char/datingillust/vp_{stem}.asset',
             ])
 
         if re.fullmatch(r'char\d{6}', stem, re.IGNORECASE):
