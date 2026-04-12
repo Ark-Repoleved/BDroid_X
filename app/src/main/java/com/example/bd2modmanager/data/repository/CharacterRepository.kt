@@ -121,6 +121,6 @@ class CharacterRepository(private val context: Context) {
     }
 
     fun extractFileId(entryName: String): String? {
-        return "(char\\d{6}|illust_dating\\d+|illust_special\\d+|illust_talk\\d+|npc\\d+|specialillust\\w+|storypack\\w+|\\bRhythmHitAnim\\b)".toRegex(RegexOption.IGNORE_CASE).find(entryName)?.value?.lowercase()
+        return "(char\\d{6}|illust_dating\\d+|illust_special\\d+|illust_talk\\d+|npc\\d+|specialillust\\w+|storypack\\w+)".toRegex(RegexOption.IGNORE_CASE).find(entryName)?.value?.lowercase()
     }
 }
