@@ -223,15 +223,26 @@ def parse_catalog_for_bundle_names(catalog_content):
         if matched_string.startswith('cutscene_'):
             asset_type = "cutscene"
             file_id = matched_string.replace('cutscene_', '')
+        elif matched_string == 'rhythmhitanim':
+            asset_type = "rhythm"
+            file_id = "rhythmhitanim"
         else:
             # If it doesn't have the cutscene_ prefix, it's for the 'idle' slot.
             asset_type = "idle"
             file_id = matched_string
 
-        # For 'idle' and 'cutscene' animations, only accept the .skel.bytes file to ensure
-        # we get the correct bundle hash, not the hash for the atlas or png.
-        if (asset_type == "idle" or asset_type == "cutscene") and not asset_key.lower().endswith('.skel.bytes'):
-            continue
+        # For 'idle' and 'cutscene' animations, accept the .skel.bytes file.
+        # For newer versions, also accept .prefab and .asset (for dating) for the idle slot.
+        ext = asset_key.lower()
+        if asset_type == "cutscene":
+            if not ext.endswith('.skel.bytes'):
+                continue
+        elif asset_type == \"idle\":
+            # Preference: .prefab > .skel.bytes > .asset
+            # But here we just allow them through; the last one processed for a file_id/type wins.
+            # Usually the catalog is ordered such that the most relevant one is processed.
+            if not (ext.endswith('.skel.bytes') or ext.endswith('.prefab') or ext.endswith('.asset')):
+                continue
         
         bundle_info = resolve_bundle_info(i)
         if bundle_info and 'bundle_name' in bundle_info:
