@@ -202,8 +202,16 @@ def parse_catalog_for_bundle_names(catalog_content):
         deps = dependency_map[dep_idx] or []
         if not deps:
             return None
+
         info = bundles.get(deps[0])
-        return info if info else None
+        if info:
+            return info
+
+        for dep_entry in deps[1:]:
+            info = bundles.get(dep_entry)
+            if info:
+                return info
+        return None
 
     # --- Map asset keys to bundle names ---
     for i in range(len(entries)):
