@@ -47,6 +47,8 @@ def resolve_mod_folder(mod_file_names, asset_index):
         else:
             unresolved_files.append(base_name)
 
+    _inherit_png_targets_from_spine_pairs(file_matches)
+
     candidate_sets = [entry['targetHashes'] for entry in file_matches if entry['targetHashes']]
 
     if not candidate_sets:
@@ -125,6 +127,9 @@ def _expand_candidates(base_name: str):
                 f'illust_{stem}_2.prefab',
             ])
 
+        if _is_rhythm_hit_anim_stem(stem):
+            candidates.extend(_rhythm_bridge_candidates())
+
     bridge_key = _extract_sactx_bridge_key(base_name)
     if bridge_key:
         lowered = bridge_key.lower()
@@ -160,6 +165,19 @@ def _extract_sactx_bridge_key(file_name: str):
         return None
 
     return match.group(1)
+
+
+def _is_rhythm_hit_anim_stem(stem: str):
+    if not stem:
+        return False
+    return re.fullmatch(r'rhythmhitanim(?:_\d+)?', stem, re.IGNORECASE) is not None
+
+
+def _rhythm_bridge_candidates():
+    return [
+        f'rhythm_char{n:03d}.prefab'
+        for n in range(1, 6)
+    ]
 
 
 def _decode_hits(asset_index, raw_hits):
@@ -256,11 +274,34 @@ def _filter_bridge_noise(base_name: str, matches):
         return matches
 
     lowered = (base_name or '').strip().lower()
-    if not (lowered.endswith('.skel') or lowered.endswith('.skel.bytes') or lowered.endswith('.atlas') or lowered.endswith('.atlas.txt')):
-        return matches
-
     stem = _mod_asset_stem(lowered)
     if not stem:
+        return matches
+
+    if _is_rhythm_hit_anim_stem(stem):
+        pattern = re.compile(r'(^|.*/)rhythm_char\d{3}\.prefab$', re.IGNORECASE)
+        rhythm_matches = []
+        for match in matches:
+            asset_key = (match.get('resolvedAssetKey') or '').lower()
+            if pattern.search(asset_key):
+                rhythm_matches.append(match)
+
+        if not rhythm_matches:
+            return matches
+
+        exact_char001 = [
+            match for match in rhythm_matches
+            if (match.get('resolvedAssetKey') or '').lower().endswith('rhythm_char001.prefab')
+        ]
+        if exact_char001:
+            return exact_char001
+
+        return sorted(
+            rhythm_matches,
+            key=lambda match: (match.get('resolvedAssetKey') or '').lower()
+        )[:1]
+
+    if not (lowered.endswith('.skel') or lowered.endswith('.skel.bytes') or lowered.endswith('.atlas') or lowered.endswith('.atlas.txt')):
         return matches
 
     preferred = []
@@ -282,6 +323,65 @@ def _filter_bridge_noise(base_name: str, matches):
         return preferred if preferred else matches
 
     return matches
+
+
+def _inherit_png_targets_from_spine_pairs(file_matches):
+    if not file_matches:
+        return
+
+    anchor_by_stem = {}
+    for entry in file_matches:
+        file_name = entry.get('fileName') or ''
+        lowered = file_name.lower()
+        if lowered.endswith('.png'):
+            continue
+        if not (lowered.endswith('.skel') or lowered.endswith('.skel.bytes') or lowered.endswith('.atlas') or lowered.endswith('.atlas.txt')):
+            continue
+
+        target_hashes = list(entry.get('targetHashes') or [])
+        if len(target_hashes) != 1:
+            continue
+
+        representative = _prefer_best_match(entry.get('matches') or [])
+        if not representative:
+            continue
+
+        stem = _mod_asset_stem(lowered)
+        if not stem:
+            continue
+
+        anchor_by_stem[stem] = {
+            'targetHash': target_hashes[0],
+            'match': representative,
+        }
+
+    for entry in file_matches:
+        file_name = entry.get('fileName') or ''
+        lowered = file_name.lower()
+        if not lowered.endswith('.png'):
+            continue
+
+        stem = _mod_asset_stem(lowered)
+        anchor = anchor_by_stem.get(stem)
+        if not anchor:
+            continue
+
+        anchor_target_hash = anchor['targetHash']
+        existing_matches = entry.get('matches') or []
+        matching_target = [m for m in existing_matches if m.get('targetHash') == anchor_target_hash]
+        if matching_target:
+            entry['matches'] = matching_target
+            entry['targetHashes'] = {anchor_target_hash}
+            continue
+
+        inherited = dict(anchor['match'])
+        inherited['originalFileName'] = file_name
+        inherited['assetType'] = _infer_asset_type(file_name)
+        inherited['matchStrategy'] = 'EXTENSION_MAPPING'
+        inherited['confidence'] = min(float(inherited.get('confidence') or 0.9), 0.9)
+        entry['matches'] = [inherited]
+        entry['targetHashes'] = {anchor_target_hash}
+
 
 
 def _select_representative_matches(file_matches, target_hash):
