@@ -213,7 +213,7 @@ def parse_catalog_for_bundle_names(catalog_content):
             continue
 
         # Extract file_id like 'char000104' from asset_key like 'assets/asset/character/char000104/char000104.skel.bytes'
-        match = re.search(r'(cutscene_char\d{6}|char\d{6}|illust_dating\d+|illust_special\d+|illust_talk\d+|npc\d+|specialillust\w+|storypack\w+)', asset_key, re.IGNORECASE)
+        match = re.search(r'(cutscene_char\d{6}|char\d{6}|illust_dating\d+|illust_special\d+|illust_talk\d+|npc\d+|specialillust\w+|storypack\w+|\bRhythmHitAnim\b)', asset_key, re.IGNORECASE)
         if not match:
             continue
         
@@ -223,6 +223,9 @@ def parse_catalog_for_bundle_names(catalog_content):
         if matched_string.startswith('cutscene_'):
             asset_type = "cutscene"
             file_id = matched_string.replace('cutscene_', '')
+        elif matched_string == 'rhythmhitanim':
+            asset_type = "rhythm"
+            file_id = "rhythmhitanim"
         else:
             # If it doesn't have the cutscene_ prefix, it's for the 'idle' slot.
             asset_type = "idle"
