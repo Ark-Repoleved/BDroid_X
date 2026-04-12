@@ -31,9 +31,7 @@ def _normalize_filename(filename: str):
         if re.fullmatch(r'illust_dating\d+', stem, re.IGNORECASE):
             candidates.extend([
                 f'{stem}.prefab',
-                f'vp_{stem}.asset',
                 f'char/datingillust/{stem}.prefab',
-                f'char/datingillust/vp_{stem}.asset',
             ])
 
         candidates.extend(_prefab_bridge_candidates(stem))
