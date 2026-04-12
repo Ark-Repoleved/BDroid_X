@@ -254,7 +254,7 @@ def parse_catalog_for_bundle_names(catalog_content):
                 pass
             elif re.search(r'(^|/)illust_npc\d+_\d+\.prefab$', ext, re.IGNORECASE):
                 pass
-            elif re.search(r'(^|/)(illust_dating\d+\.prefab|vp_illust_dating\d+\.asset)$', ext, re.IGNORECASE):
+            elif re.search(r'(^|/)illust_dating\d+\.prefab$', ext, re.IGNORECASE):
                 pass
             else:
                 continue
