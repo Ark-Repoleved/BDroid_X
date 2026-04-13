@@ -118,6 +118,16 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _moveState = MutableStateFlow<MoveState>(MoveState.Idle)
     val moveState: StateFlow<MoveState> = _moveState.asStateFlow()
 
+    private val _bundleScanState = MutableStateFlow<BundleScanState>(BundleScanState.Idle)
+    val bundleScanState: StateFlow<BundleScanState> = _bundleScanState.asStateFlow()
+
+    private val _showVersionMismatchWarning = MutableStateFlow(false)
+    val showVersionMismatchWarning: StateFlow<Boolean> = _showVersionMismatchWarning.asStateFlow()
+
+    // Stored for deferred scan execution after user confirmation
+    private var pendingCheckResult: BundleCheckResult? = null
+    private var appContext: Context? = null
+
     private var initialized = false
     private var scanJob: Job? = null
     private var pendingScanUri: Uri? = null
@@ -126,39 +136,62 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         if (initialized) return
         initialized = true
 
+        appContext = context.applicationContext
         characterRepository = CharacterRepository(context)
         modRepository = ModRepository(context, characterRepository)
 
         viewModelScope.launch {
+            var requiresDeferredInitialization = false
             try {
                 _isUpdatingCharacters.value = true
 
-                // Step 1: Update characters.json from CDN
-                characterRepository.updateCharacterData()
+                // Check if local characters.json exists before update
+                val hadLocalCharacters = characterRepository.hasLocalCharactersJson()
 
-                // Step 2: Scan local bundles via Shizuku (incremental, fast if cache is up to date)
-                // This must complete before mod scanning so the asset index is available.
+                // Step 1: Update characters.json from CDN
+                val updateStatus = characterRepository.updateCharacterData()
+                val charactersWereRefreshed = (updateStatus == "SUCCESS" && hadLocalCharacters)
+
+                // Step 2: Check local bundles via Shizuku (don't scan yet — ask user first)
                 if (ShizukuManager.isAvailable()) {
-                    withContext(Dispatchers.IO) {
-                        // Use externalCacheDir for temp files because Shizuku service runs
-                        // as shell UID and cannot write to app's internal cacheDir (/data/data/...)
-                        val shizukuCacheDir = (context.externalCacheDir ?: context.cacheDir).absolutePath
-                        ShizukuManager.scanLocalBundles(
-                            outputDir = context.filesDir.absolutePath,
-                            cacheDir = shizukuCacheDir
+                    val checkResult = withContext(Dispatchers.IO) {
+                        ShizukuManager.checkLocalBundles(
+                            outputDir = context.filesDir.absolutePath
                         ) { progress ->
-                            Log.d("MainViewModel", "Bundle scan: $progress")
+                            Log.d("MainViewModel", "Bundle check: $progress")
+                        }
+                    }
+
+                    if (checkResult != null) {
+                        if (checkResult.needsScanCount > 0) {
+                            // Bundles need scanning — show confirmation dialog
+                            pendingCheckResult = checkResult
+                            _bundleScanState.value = BundleScanState.Confirmation(checkResult.needsScanCount)
+                            requiresDeferredInitialization = true
+                        } else {
+                            // No bundles need scanning — finalize with cached data
+                            withContext(Dispatchers.IO) {
+                                ModdingService.finalizeScan(context.filesDir.absolutePath) { }
+                            }
+
+                            // If characters.json was just updated but no new bundles,
+                            // the user likely hasn't updated the game yet.
+                            if (charactersWereRefreshed) {
+                                _showVersionMismatchWarning.value = true
+                            }
                         }
                     }
                 } else {
                     Log.d("MainViewModel", "Shizuku not available, skipping local bundle scan. Using cached index if available.")
                 }
-            } finally {
-                _isUpdatingCharacters.value = false
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Error during initialization", e)
             }
 
-            // Step 3: Scan mod source directory (uses the local bundle index for resolution)
-            modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
+            if (!requiresDeferredInitialization) {
+                // Proceed immediately if no scan confirmation is needed
+                finishInitialization()
+            }
         }
 
         viewModelScope.launch {
@@ -180,6 +213,75 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     fun setUseAstc(useAstc: Boolean) {
         savedStateHandle["use_astc"] = useAstc
+    }
+
+    // --- Bundle Scan Dialog Actions ---
+
+    fun confirmBundleScan() {
+        val context = appContext ?: return
+        val checkResult = pendingCheckResult ?: return
+
+        viewModelScope.launch {
+            try {
+                // Use externalCacheDir for temp files because Shizuku service runs
+                // as shell UID and cannot write to app's internal cacheDir (/data/data/...)
+                val shizukuCacheDir = (context.externalCacheDir ?: context.cacheDir).absolutePath
+
+                val (success, scanned, failed) = withContext(Dispatchers.IO) {
+                    ShizukuManager.executeBundleScan(
+                        outputDir = context.filesDir.absolutePath,
+                        cacheDir = shizukuCacheDir,
+                        checkResult = checkResult
+                    ) { currentIndex, total, bundleName, message ->
+                        viewModelScope.launch(Dispatchers.Main) {
+                            _bundleScanState.value = BundleScanState.Scanning(
+                                currentIndex = currentIndex,
+                                totalCount = total,
+                                currentBundle = bundleName,
+                                progressMessage = message
+                            )
+                        }
+                    }
+                }
+
+                if (success) {
+                    _bundleScanState.value = BundleScanState.Finished(
+                        scannedCount = scanned,
+                        failedCount = failed,
+                        message = "Scan complete. $scanned scanned, $failed failed."
+                    )
+                } else {
+                    _bundleScanState.value = BundleScanState.Failed("Bundle scan failed.")
+                }
+            } catch (e: Exception) {
+                _bundleScanState.value = BundleScanState.Failed(e.message ?: "Unknown error")
+            } finally {
+                pendingCheckResult = null
+                // Finish initialization and trigger mod rescan with new index
+                finishInitialization()
+            }
+        }
+    }
+
+    fun dismissBundleScan() {
+        // User cancelled or dismissed results — don't finalize if cancelled.
+        val wasPending = pendingCheckResult != null
+        pendingCheckResult = null
+        _bundleScanState.value = BundleScanState.Idle
+
+        // If user is skipping the confirmation dialog, we must finish initialization now 
+        if (wasPending) {
+            finishInitialization()
+        }
+    }
+
+    private fun finishInitialization() {
+        _isUpdatingCharacters.value = false
+        modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
+    }
+
+    fun dismissVersionMismatchWarning() {
+        _showVersionMismatchWarning.value = false
     }
 
     fun setSearchActive(isActive: Boolean) {
