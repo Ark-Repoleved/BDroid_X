@@ -228,10 +228,10 @@ def _parse_catalog_data(output_dir):
     """
     Parse the catalog to extract:
       1. bundle_name → downloadName mapping
-      2. asset_filename → bundle_name mapping (authoritative, from catalog dependency chain)
+      2. bundle_name → list of asset keys (for reverse-lookup disambiguation)
 
     Returns:
-        Tuple (download_names: dict, catalog_asset_to_bundle: dict)
+        Tuple (download_names: dict, catalog_bundle_to_keys: dict)
     """
     try:
         from catalog_parser import read_int32_from_byte_array, read_object_from_byte_array
@@ -333,8 +333,8 @@ def _parse_catalog_data(output_dir):
                     return bundle_entries[dep_entry]
             return None
 
-        # --- Build asset filename → bundle mapping ---
-        catalog_asset_to_bundle = {}
+        # --- Build bundle → asset keys mapping ---
+        catalog_bundle_to_keys = {}
         for i in range(len(all_entries)):
             if i in bundle_entries:
                 continue  # Skip bundle entries themselves
@@ -350,41 +350,42 @@ def _parse_catalog_data(output_dir):
             if not bundle_name:
                 continue
 
-            # Extract filename from full path and normalize
-            filename = asset_key.rsplit('/', 1)[-1].strip().lower()
-            if not filename:
-                continue
+            if bundle_name not in catalog_bundle_to_keys:
+                catalog_bundle_to_keys[bundle_name] = []
+            catalog_bundle_to_keys[bundle_name].append(asset_key.lower())
 
-            # Store multiple key variants to maximize matching with scanned m_Names:
-            names_to_store = set()
-
-            # 1. Original filename as-is (e.g., "char000104.skel.bytes", "char000104.png")
-            names_to_store.add(filename)
-
-            # 2. Normalized extensions to match scanner m_Name conventions
-            if filename.endswith('.skel.bytes'):
-                names_to_store.add(filename[:-6])  # "char000104.skel"
-            elif filename.endswith('.atlas.txt'):
-                names_to_store.add(filename[:-4])   # "char000104.atlas"
-
-            # 3. Stem without any extension (e.g., "char000104")
-            #    Handles catalog keys that are just labels with no extension
-            stem = filename.rsplit('.', 1)[0] if '.' in filename else filename
-            # For compound extensions like "char000104.skel", also try removing
-            for ext in ('.skel', '.atlas'):
-                if stem.endswith(ext):
-                    names_to_store.add(stem[:-len(ext)])
-
-            # First occurrence per key wins
-            for name in names_to_store:
-                if name and name not in catalog_asset_to_bundle:
-                    catalog_asset_to_bundle[name] = bundle_name
-
-        return download_names, catalog_asset_to_bundle
+        return download_names, catalog_bundle_to_keys
 
     except Exception as e:
         print(f"Error parsing catalog data: {e}")
         return {}, {}
+
+
+def _score_bundle_for_asset(asset_name, catalog_keys):
+    """
+    Score how well a bundle's catalog asset keys match a scanned m_Name.
+
+    Returns an integer score (higher = better match, 0 = no match).
+    """
+    # Strip extension from m_Name for stem matching
+    stem = asset_name.rsplit('.', 1)[0] if '.' in asset_name else asset_name
+
+    best_score = 0
+    for key in catalog_keys:
+        # Exact filename match (highest priority)
+        key_filename = key.rsplit('/', 1)[-1]
+        if key_filename == asset_name:
+            return 100  # Perfect match, return immediately
+
+        # Stem appears in the key's filename portion
+        if stem in key_filename:
+            best_score = max(best_score, 50 + len(stem))
+
+        # Stem appears anywhere in the full key path
+        elif stem in key:
+            best_score = max(best_score, 10 + len(stem))
+
+    return best_score
 
 
 def finalize_scan(output_dir, progress_callback=None):
@@ -432,12 +433,37 @@ def finalize_scan(output_dir, progress_callback=None):
                 if bundle_name not in asset_to_bundles[asset_name]:
                     asset_to_bundles[asset_name].append(bundle_name)
 
-        # Parse catalog for downloadNames and authoritative asset→bundle mapping
-        download_names, catalog_asset_to_bundle = _parse_catalog_data(output_dir)
+        # Parse catalog for downloadNames and bundle→keys mapping
+        download_names, catalog_bundle_to_keys = _parse_catalog_data(output_dir)
         for b_name, b_info in all_bundles.items():
             b_info["downloadName"] = download_names.get(b_name, "")
 
-        report(f"Catalog: {len(download_names)} downloadNames, {len(catalog_asset_to_bundle)} asset mappings")
+        # Build catalogAssetToBundle by cross-referencing:
+        # For each ambiguous asset (multiple bundles), score each bundle's
+        # catalog asset keys against the m_Name and pick the best match.
+        catalog_asset_to_bundle = {}
+        ambiguous_count = 0
+        resolved_count = 0
+        for asset_name, bundle_list in asset_to_bundles.items():
+            if len(bundle_list) <= 1:
+                continue  # Only one bundle — no ambiguity
+            ambiguous_count += 1
+
+            best_bundle = None
+            best_score = 0
+            for bundle_name in bundle_list:
+                cat_keys = catalog_bundle_to_keys.get(bundle_name, [])
+                score = _score_bundle_for_asset(asset_name, cat_keys)
+                if score > best_score:
+                    best_score = score
+                    best_bundle = bundle_name
+
+            if best_bundle:
+                catalog_asset_to_bundle[asset_name] = best_bundle
+                resolved_count += 1
+
+        report(f"Catalog: {len(download_names)} downloadNames, "
+               f"{ambiguous_count} ambiguous assets, {resolved_count} resolved")
 
         # Save index to disk
         os.makedirs(output_dir, exist_ok=True)
