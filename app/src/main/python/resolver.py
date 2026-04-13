@@ -58,20 +58,20 @@ def resolve_mod_folder(mod_file_names, local_index):
         match_strategy = 'LOCAL_SCAN'
 
         for candidate in candidates:
-            # Check catalog first (authoritative, single bundle)
-            catalog_bundle = catalog_asset_to_bundle.get(candidate)
-            if catalog_bundle:
-                matched_candidate = candidate
-                matched_bundles = {catalog_bundle}
-                match_strategy = 'CATALOG'
-                break  # Catalog is authoritative — no need to check further
-
-            # Fall back to scan-based lookup (may have duplicates)
             bundles = asset_to_bundles.get(candidate)
             if bundles:
                 if matched_candidate is None:
                     matched_candidate = candidate
                 matched_bundles.update(bundles)
+
+        # Use catalog to narrow down if multiple bundles matched
+        if len(matched_bundles) > 1:
+            for candidate in candidates:
+                catalog_bundle = catalog_asset_to_bundle.get(candidate)
+                if catalog_bundle and catalog_bundle in matched_bundles:
+                    matched_bundles = {catalog_bundle}
+                    match_strategy = 'CATALOG_FILTERED'
+                    break
 
         if matched_candidate and matched_bundles:
             file_matches.append({
