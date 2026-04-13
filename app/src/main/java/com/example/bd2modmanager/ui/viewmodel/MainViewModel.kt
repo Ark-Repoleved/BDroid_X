@@ -141,6 +141,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         modRepository = ModRepository(context, characterRepository)
 
         viewModelScope.launch {
+            var requiresDeferredInitialization = false
             try {
                 _isUpdatingCharacters.value = true
 
@@ -166,6 +167,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                             // Bundles need scanning — show confirmation dialog
                             pendingCheckResult = checkResult
                             _bundleScanState.value = BundleScanState.Confirmation(checkResult.needsScanCount)
+                            requiresDeferredInitialization = true
                         } else {
                             // No bundles need scanning — finalize with cached data
                             withContext(Dispatchers.IO) {
@@ -182,12 +184,14 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 } else {
                     Log.d("MainViewModel", "Shizuku not available, skipping local bundle scan. Using cached index if available.")
                 }
-            } finally {
-                _isUpdatingCharacters.value = false
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Error during initialization", e)
             }
 
-            // Step 3: Scan mod source directory (uses the local bundle index for resolution)
-            modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
+            if (!requiresDeferredInitialization) {
+                // Proceed immediately if no scan confirmation is needed
+                finishInitialization()
+            }
         }
 
         viewModelScope.launch {
@@ -253,17 +257,27 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 _bundleScanState.value = BundleScanState.Failed(e.message ?: "Unknown error")
             } finally {
                 pendingCheckResult = null
-                // Trigger mod rescan with updated index
-                modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
+                // Finish initialization and trigger mod rescan with new index
+                finishInitialization()
             }
         }
     }
 
     fun dismissBundleScan() {
-        // User cancelled — don't finalize, keep stale cache.
-        // Next app launch will re-check and prompt again.
+        // User cancelled or dismissed results — don't finalize if cancelled.
+        val wasPending = pendingCheckResult != null
         pendingCheckResult = null
         _bundleScanState.value = BundleScanState.Idle
+
+        // If user is skipping the confirmation dialog, we must finish initialization now 
+        if (wasPending) {
+            finishInitialization()
+        }
+    }
+
+    private fun finishInitialization() {
+        _isUpdatingCharacters.value = false
+        modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
     }
 
     fun dismissVersionMismatchWarning() {
