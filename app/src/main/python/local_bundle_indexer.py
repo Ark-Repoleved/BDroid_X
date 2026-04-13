@@ -355,17 +355,30 @@ def _parse_catalog_data(output_dir):
             if not filename:
                 continue
 
-            # Normalize extensions to match scanner m_Name conventions:
-            #   .skel.bytes → .skel
-            #   .atlas.txt  → .atlas
-            if filename.endswith('.skel.bytes'):
-                filename = filename[:-6]  # remove '.bytes'
-            elif filename.endswith('.atlas.txt'):
-                filename = filename[:-4]  # remove '.txt'
+            # Store multiple key variants to maximize matching with scanned m_Names:
+            names_to_store = set()
 
-            # First occurrence wins (primary asset entry)
-            if filename not in catalog_asset_to_bundle:
-                catalog_asset_to_bundle[filename] = bundle_name
+            # 1. Original filename as-is (e.g., "char000104.skel.bytes", "char000104.png")
+            names_to_store.add(filename)
+
+            # 2. Normalized extensions to match scanner m_Name conventions
+            if filename.endswith('.skel.bytes'):
+                names_to_store.add(filename[:-6])  # "char000104.skel"
+            elif filename.endswith('.atlas.txt'):
+                names_to_store.add(filename[:-4])   # "char000104.atlas"
+
+            # 3. Stem without any extension (e.g., "char000104")
+            #    Handles catalog keys that are just labels with no extension
+            stem = filename.rsplit('.', 1)[0] if '.' in filename else filename
+            # For compound extensions like "char000104.skel", also try removing
+            for ext in ('.skel', '.atlas'):
+                if stem.endswith(ext):
+                    names_to_store.add(stem[:-len(ext)])
+
+            # First occurrence per key wins
+            for name in names_to_store:
+                if name and name not in catalog_asset_to_bundle:
+                    catalog_asset_to_bundle[name] = bundle_name
 
         return download_names, catalog_asset_to_bundle
 

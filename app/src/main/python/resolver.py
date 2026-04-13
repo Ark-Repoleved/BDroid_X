@@ -67,10 +67,19 @@ def resolve_mod_folder(mod_file_names, local_index):
         # Use catalog to narrow down if multiple bundles matched
         if len(matched_bundles) > 1:
             for candidate in candidates:
-                catalog_bundle = catalog_asset_to_bundle.get(candidate)
-                if catalog_bundle and catalog_bundle in matched_bundles:
-                    matched_bundles = {catalog_bundle}
-                    match_strategy = 'CATALOG_FILTERED'
+                # Try exact match first, then stem (no extension)
+                lookup_keys = [candidate]
+                stem = candidate.rsplit('.', 1)[0] if '.' in candidate else candidate
+                if stem != candidate:
+                    lookup_keys.append(stem)
+
+                for key in lookup_keys:
+                    catalog_bundle = catalog_asset_to_bundle.get(key)
+                    if catalog_bundle and catalog_bundle in matched_bundles:
+                        matched_bundles = {catalog_bundle}
+                        match_strategy = 'CATALOG_FILTERED'
+                        break
+                if match_strategy == 'CATALOG_FILTERED':
                     break
 
         if matched_candidate and matched_bundles:
