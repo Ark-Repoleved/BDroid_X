@@ -623,17 +623,7 @@ fun BundleScanDialog(
                         Spacer(Modifier.height(12.dp))
                         if (state.currentBundle.isNotEmpty()) {
                             Text(
-                                state.currentBundle,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center,
-                                maxLines = 1
-                            )
-                        }
-                        if (state.progressMessage.isNotEmpty()) {
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                state.progressMessage,
+                                "Scanning: ${state.currentBundle}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center,
@@ -684,27 +674,33 @@ fun BundleScanDialog(
             }
         },
         confirmButton = {
-            when (state) {
-                is BundleScanState.Confirmation -> {
-                    Button(onClick = onConfirm) {
-                        Text("Start Scan")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                if (state is BundleScanState.Confirmation) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Skip")
                     }
+                } else {
+                    Spacer(Modifier.width(1.dp))
                 }
-                is BundleScanState.Finished, is BundleScanState.Failed -> {
-                    Button(onClick = onDismiss) {
-                        Text("OK")
+                when (state) {
+                    is BundleScanState.Confirmation -> {
+                        Button(onClick = onConfirm) {
+                            Text("Start Scan")
+                        }
                     }
+                    is BundleScanState.Finished, is BundleScanState.Failed -> {
+                        Button(onClick = onDismiss) {
+                            Text("OK")
+                        }
+                    }
+                    else -> {}
                 }
-                else -> {}
             }
         },
-        dismissButton = {
-            if (state is BundleScanState.Confirmation) {
-                TextButton(onClick = onDismiss) {
-                    Text("Skip")
-                }
-            }
-        }
+        dismissButton = null
     )
 }
 
