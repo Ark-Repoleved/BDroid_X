@@ -24,9 +24,13 @@ def resolve_mod_folder(mod_file_names, local_index):
     Finds which bundle(s) contain the target assets, then identifies
     the single common bundle that all mod files belong to.
 
+    Uses the catalog-based authoritative mapping (catalogAssetToBundle)
+    as primary lookup. Falls back to scan-based assetToBundles if the
+    catalog doesn't have a mapping for a given asset.
+
     Args:
         mod_file_names: list of mod file paths/names
-        local_index: dict with 'assetToBundles' key
+        local_index: dict with 'assetToBundles' and 'catalogAssetToBundle' keys
 
     Returns:
         A resolution result dict compatible with the Kotlin layer:
@@ -40,18 +44,7 @@ def resolve_mod_folder(mod_file_names, local_index):
         }
     """
     asset_to_bundles = (local_index or {}).get("assetToBundles", {})
-    scanned_bundles = (local_index or {}).get("scannedBundles", {})
-
-    def bundle_priority_key(bundle_name):
-        info = scanned_bundles.get(bundle_name, {})
-        download_name = info.get("downloadName", "")
-        # Priority 0 is highest
-        match = re.search(r'common-ui-prefabs-group(\d+)_assets_all', download_name)
-        if match:
-            # Sort by priority 0 (highest), then by group number (smaller is better), then alphabetically
-            return (0, int(match.group(1)), bundle_name)
-        return (1, float('inf'), bundle_name)
-
+    catalog_asset_to_bundle = (local_index or {}).get("catalogAssetToBundle", {})
 
     unresolved = []
     file_matches = []
@@ -62,8 +55,18 @@ def resolve_mod_folder(mod_file_names, local_index):
 
         matched_candidate = None
         matched_bundles = set()
+        match_strategy = 'LOCAL_SCAN'
 
         for candidate in candidates:
+            # Check catalog first (authoritative, single bundle)
+            catalog_bundle = catalog_asset_to_bundle.get(candidate)
+            if catalog_bundle:
+                matched_candidate = candidate
+                matched_bundles = {catalog_bundle}
+                match_strategy = 'CATALOG'
+                break  # Catalog is authoritative — no need to check further
+
+            # Fall back to scan-based lookup (may have duplicates)
             bundles = asset_to_bundles.get(candidate)
             if bundles:
                 if matched_candidate is None:
@@ -76,6 +79,7 @@ def resolve_mod_folder(mod_file_names, local_index):
                 'candidates': candidates,
                 'candidate': matched_candidate,
                 'bundles': matched_bundles,
+                'matchStrategy': match_strategy,
             })
         else:
             unresolved.append(base_name)
@@ -106,8 +110,8 @@ def resolve_mod_folder(mod_file_names, local_index):
     if len(intersection) == 1:
         target_bundle = next(iter(intersection))
     elif len(intersection) > 1:
-        # Multiple common bundles — prioritize common-ui-prefabs-group...
-        target_bundle = sorted(intersection, key=bundle_priority_key)[0]
+        # Multiple common bundles — pick alphabetically
+        target_bundle = sorted(intersection)[0]
     elif len(union) == 1:
         # No strict intersection but only one bundle total
         target_bundle = next(iter(union))
@@ -118,7 +122,7 @@ def resolve_mod_folder(mod_file_names, local_index):
             'targetHash': None,
             'resolvedFamilyKey': None,
             'resolvedTargets': [
-                _build_target(entry, bundle_priority_key) for entry in file_matches
+                _build_target(entry) for entry in file_matches
             ],
             'unresolvedFiles': unresolved,
             'resolutionState': 'INVALID',
@@ -126,7 +130,7 @@ def resolve_mod_folder(mod_file_names, local_index):
         }
 
     resolved_targets = [
-        _build_target(entry, bundle_priority_key, target_bundle) for entry in file_matches
+        _build_target(entry, target_bundle) for entry in file_matches
     ]
     family_key = _compute_family_key(file_matches)
 
@@ -170,12 +174,9 @@ def _expand_candidates(base_name):
     return list(dict.fromkeys(candidates))
 
 
-def _build_target(entry, bundle_priority_key, target_bundle=None):
+def _build_target(entry, target_bundle=None):
     """Build a resolved target dict for Kotlin compatibility."""
-    bundle_name = target_bundle
-    if not bundle_name and entry['bundles']:
-        bundle_name = sorted(entry['bundles'], key=bundle_priority_key)[0]
-        
+    bundle_name = target_bundle or (sorted(entry['bundles'])[0] if entry['bundles'] else None)
     family_key = _extract_stem(entry['fileName'])
 
     return {
@@ -186,7 +187,7 @@ def _build_target(entry, bundle_priority_key, target_bundle=None):
         'assetType': _infer_asset_type(entry['fileName']),
         'targetHash': bundle_name,
         'familyKey': family_key,
-        'matchStrategy': 'LOCAL_SCAN',
+        'matchStrategy': entry.get('matchStrategy', 'LOCAL_SCAN'),
         'confidence': 1.0,
     }
 

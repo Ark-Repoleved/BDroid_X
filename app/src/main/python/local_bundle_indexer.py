@@ -20,7 +20,7 @@ import glob
 # Lazy-loaded UnityPy reference
 _UnityPy = None
 
-INDEX_SCHEMA_VERSION = 2
+INDEX_SCHEMA_VERSION = 3
 
 # Only scan object types that carry meaningful m_Name for modding.
 # Skipping Transform, GameObject, Material, Shader, Mesh, etc. avoids
@@ -224,32 +224,35 @@ def scan_single_bundle(bundle_name, bundle_hash, temp_data_path, progress_callba
         return False, 0, str(e)
 
 
-def _get_bundle_to_download_name_map(output_dir):
+def _parse_catalog_data(output_dir):
     """
-    Attempts to read the latest catalog in output_dir to extract the
-    mapping of actual bundleName to Addressables Key (downloadName).
+    Parse the catalog to extract:
+      1. bundle_name → downloadName mapping
+      2. asset_filename → bundle_name mapping (authoritative, from catalog dependency chain)
+
+    Returns:
+        Tuple (download_names: dict, catalog_asset_to_bundle: dict)
     """
     try:
         from catalog_parser import read_int32_from_byte_array, read_object_from_byte_array
     except ImportError:
-        return {}
+        return {}, {}
     import base64
 
     catalogs = glob.glob(os.path.join(output_dir, "catalog_*.json"))
     if not catalogs:
-        return {}
-    
-    # Use the most recently modified one if there are multiple
+        return {}, {}
+
     catalog_path = sorted(catalogs, key=os.path.getmtime, reverse=True)[0]
-    
+
     try:
         with open(catalog_path, 'r', encoding='utf-8') as f:
             catalog = json.load(f)
-            
+
         provider_ids = catalog.get("m_ProviderIds", [])
         bundle_provider = "UnityEngine.ResourceManagement.ResourceProviders.AssetBundleProvider"
         if bundle_provider not in provider_ids:
-            return {}
+            return {}, {}
         bundle_provider_index = provider_ids.index(bundle_provider)
 
         bucket_array = base64.b64decode(catalog["m_BucketDataString"])
@@ -257,51 +260,118 @@ def _get_bundle_to_download_name_map(output_dir):
         extra_data = base64.b64decode(catalog["m_ExtraDataString"])
         entry_data = base64.b64decode(catalog["m_EntryDataString"])
 
+        # --- Parse buckets ---
         num_buckets = read_int32_from_byte_array(bucket_array, 0)
+        dependency_map = [None] * num_buckets
         data_offsets = []
-        index = 4
-        for _ in range(num_buckets):
-            data_offsets.append(read_int32_from_byte_array(bucket_array, index))
-            index += 4
-            num_entries = read_int32_from_byte_array(bucket_array, index)
-            index += 4
-            index += 4 * num_entries
+        idx = 4
+        for i in range(num_buckets):
+            data_offsets.append(read_int32_from_byte_array(bucket_array, idx))
+            idx += 4
+            num_entries = read_int32_from_byte_array(bucket_array, idx)
+            idx += 4
+            entries_list = []
+            for _ in range(num_entries):
+                entries_list.append(read_int32_from_byte_array(bucket_array, idx))
+                idx += 4
+            dependency_map[i] = entries_list
 
         keys = [read_object_from_byte_array(key_array, offset) for offset in data_offsets]
 
-        mapping = {}
+        # --- Parse entries ---
         number_of_entries = read_int32_from_byte_array(entry_data, 0)
-        index = 4
-        for _ in range(number_of_entries):
+        idx = 4
+        bundle_entries = {}       # entry_index → bundle_name
+        download_names = {}       # bundle_name → downloadName
+        all_entries = []
+
+        for m in range(number_of_entries):
             # internal_id
-            index += 4
+            idx += 4
             # provider_index
-            provider_index = read_int32_from_byte_array(entry_data, index)
-            index += 4
+            provider_index = read_int32_from_byte_array(entry_data, idx)
+            idx += 4
             # dependency_key_index
-            index += 4
+            dependency_key_index = read_int32_from_byte_array(entry_data, idx)
+            idx += 4
             # dependency_hash
-            index += 4
-            # data_index (extra_data offset)
-            data_index = read_int32_from_byte_array(entry_data, index)
-            index += 4
+            idx += 4
+            # data_index
+            data_index = read_int32_from_byte_array(entry_data, idx)
+            idx += 4
             # primary_key_index
-            primary_key_index = read_int32_from_byte_array(entry_data, index)
-            index += 4
+            primary_key_index = read_int32_from_byte_array(entry_data, idx)
+            idx += 4
             # resource_type
-            index += 4
+            idx += 4
+
+            all_entries.append({
+                'dependency_index': dependency_key_index,
+                'primary_key_index': primary_key_index,
+            })
 
             if provider_index == bundle_provider_index and data_index >= 0:
                 bundle_info = read_object_from_byte_array(extra_data, data_index)
                 if bundle_info and bundle_info.get("m_BundleName"):
                     bundle_name = str(bundle_info["m_BundleName"])
-                    download_name = str(keys[primary_key_index]) if primary_key_index < len(keys) else ""
-                    mapping[bundle_name] = download_name
+                    bundle_entries[m] = bundle_name
+                    dn = str(keys[primary_key_index]) if primary_key_index < len(keys) else ""
+                    download_names[bundle_name] = dn
 
-        return mapping
+        # --- Resolve asset → bundle via dependency chain ---
+        def resolve_bundle(entry_index):
+            if entry_index in bundle_entries:
+                return bundle_entries[entry_index]
+            if entry_index < 0 or entry_index >= len(all_entries):
+                return None
+            dep_idx = all_entries[entry_index]['dependency_index']
+            if dep_idx < 0 or dep_idx >= len(dependency_map):
+                return None
+            deps = dependency_map[dep_idx] or []
+            for dep_entry in deps:
+                if dep_entry in bundle_entries:
+                    return bundle_entries[dep_entry]
+            return None
+
+        # --- Build asset filename → bundle mapping ---
+        catalog_asset_to_bundle = {}
+        for i in range(len(all_entries)):
+            if i in bundle_entries:
+                continue  # Skip bundle entries themselves
+
+            pki = all_entries[i]['primary_key_index']
+            if pki < 0 or pki >= len(keys):
+                continue
+            asset_key = keys[pki]
+            if not isinstance(asset_key, str):
+                continue
+
+            bundle_name = resolve_bundle(i)
+            if not bundle_name:
+                continue
+
+            # Extract filename from full path and normalize
+            filename = asset_key.rsplit('/', 1)[-1].strip().lower()
+            if not filename:
+                continue
+
+            # Normalize extensions to match scanner m_Name conventions:
+            #   .skel.bytes → .skel
+            #   .atlas.txt  → .atlas
+            if filename.endswith('.skel.bytes'):
+                filename = filename[:-6]  # remove '.bytes'
+            elif filename.endswith('.atlas.txt'):
+                filename = filename[:-4]  # remove '.txt'
+
+            # First occurrence wins (primary asset entry)
+            if filename not in catalog_asset_to_bundle:
+                catalog_asset_to_bundle[filename] = bundle_name
+
+        return download_names, catalog_asset_to_bundle
+
     except Exception as e:
-        print(f"Error extracting downloadNames: {e}")
-        return {}
+        print(f"Error parsing catalog data: {e}")
+        return {}, {}
 
 
 def finalize_scan(output_dir, progress_callback=None):
@@ -340,7 +410,7 @@ def finalize_scan(output_dir, progress_callback=None):
             1 for info in _scan_state["scanned"].values() if info.get("error")
         )
 
-        # Build the assetToBundles lookup table
+        # Build the assetToBundles lookup table (scan-based, may have duplicates)
         asset_to_bundles = {}
         for bundle_name, info in all_bundles.items():
             for asset_name in info.get("assets", []):
@@ -349,10 +419,12 @@ def finalize_scan(output_dir, progress_callback=None):
                 if bundle_name not in asset_to_bundles[asset_name]:
                     asset_to_bundles[asset_name].append(bundle_name)
 
-        # Enhance with downloadNames using the catalog mapping
-        download_names = _get_bundle_to_download_name_map(output_dir)
+        # Parse catalog for downloadNames and authoritative asset→bundle mapping
+        download_names, catalog_asset_to_bundle = _parse_catalog_data(output_dir)
         for b_name, b_info in all_bundles.items():
             b_info["downloadName"] = download_names.get(b_name, "")
+
+        report(f"Catalog: {len(download_names)} downloadNames, {len(catalog_asset_to_bundle)} asset mappings")
 
         # Save index to disk
         os.makedirs(output_dir, exist_ok=True)
@@ -362,6 +434,7 @@ def finalize_scan(output_dir, progress_callback=None):
             "bundleCount": len(all_bundles),
             "assetCount": len(asset_to_bundles),
             "assetToBundles": asset_to_bundles,
+            "catalogAssetToBundle": catalog_asset_to_bundle,
             "scannedBundles": all_bundles,
         }
 
