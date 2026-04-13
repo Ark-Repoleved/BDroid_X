@@ -15,11 +15,12 @@ while Python handles only the UnityPy parsing.
 import json
 import os
 import time
+import glob
 
 # Lazy-loaded UnityPy reference
 _UnityPy = None
 
-INDEX_SCHEMA_VERSION = 1
+INDEX_SCHEMA_VERSION = 2
 
 # Only scan object types that carry meaningful m_Name for modding.
 # Skipping Transform, GameObject, Material, Shader, Mesh, etc. avoids
@@ -223,6 +224,86 @@ def scan_single_bundle(bundle_name, bundle_hash, temp_data_path, progress_callba
         return False, 0, str(e)
 
 
+def _get_bundle_to_download_name_map(output_dir):
+    """
+    Attempts to read the latest catalog in output_dir to extract the
+    mapping of actual bundleName to Addressables Key (downloadName).
+    """
+    try:
+        from catalog_parser import read_int32_from_byte_array, read_object_from_byte_array
+    except ImportError:
+        return {}
+    import base64
+
+    catalogs = glob.glob(os.path.join(output_dir, "catalog_*.json"))
+    if not catalogs:
+        return {}
+    
+    # Use the most recently modified one if there are multiple
+    catalog_path = sorted(catalogs, key=os.path.getmtime, reverse=True)[0]
+    
+    try:
+        with open(catalog_path, 'r', encoding='utf-8') as f:
+            catalog = json.load(f)
+            
+        provider_ids = catalog.get("m_ProviderIds", [])
+        bundle_provider = "UnityEngine.ResourceManagement.ResourceProviders.AssetBundleProvider"
+        if bundle_provider not in provider_ids:
+            return {}
+        bundle_provider_index = provider_ids.index(bundle_provider)
+
+        bucket_array = base64.b64decode(catalog["m_BucketDataString"])
+        key_array = base64.b64decode(catalog["m_KeyDataString"])
+        extra_data = base64.b64decode(catalog["m_ExtraDataString"])
+        entry_data = base64.b64decode(catalog["m_EntryDataString"])
+
+        num_buckets = read_int32_from_byte_array(bucket_array, 0)
+        data_offsets = []
+        index = 4
+        for _ in range(num_buckets):
+            data_offsets.append(read_int32_from_byte_array(bucket_array, index))
+            index += 4
+            num_entries = read_int32_from_byte_array(bucket_array, index)
+            index += 4
+            index += 4 * num_entries
+
+        keys = [read_object_from_byte_array(key_array, offset) for offset in data_offsets]
+
+        mapping = {}
+        number_of_entries = read_int32_from_byte_array(entry_data, 0)
+        index = 4
+        for _ in range(number_of_entries):
+            # internal_id
+            index += 4
+            # provider_index
+            provider_index = read_int32_from_byte_array(entry_data, index)
+            index += 4
+            # dependency_key_index
+            index += 4
+            # dependency_hash
+            index += 4
+            # data_index (extra_data offset)
+            data_index = read_int32_from_byte_array(entry_data, index)
+            index += 4
+            # primary_key_index
+            primary_key_index = read_int32_from_byte_array(entry_data, index)
+            index += 4
+            # resource_type
+            index += 4
+
+            if provider_index == bundle_provider_index and data_index >= 0:
+                bundle_info = read_object_from_byte_array(extra_data, data_index)
+                if bundle_info and bundle_info.get("m_BundleName"):
+                    bundle_name = str(bundle_info["m_BundleName"])
+                    download_name = str(keys[primary_key_index]) if primary_key_index < len(keys) else ""
+                    mapping[bundle_name] = download_name
+
+        return mapping
+    except Exception as e:
+        print(f"Error extracting downloadNames: {e}")
+        return {}
+
+
 def finalize_scan(output_dir, progress_callback=None):
     """
     Step 3: Merge cached + newly scanned results and save the final index.
@@ -267,6 +348,11 @@ def finalize_scan(output_dir, progress_callback=None):
                     asset_to_bundles[asset_name] = []
                 if bundle_name not in asset_to_bundles[asset_name]:
                     asset_to_bundles[asset_name].append(bundle_name)
+
+        # Enhance with downloadNames using the catalog mapping
+        download_names = _get_bundle_to_download_name_map(output_dir)
+        for b_name, b_info in all_bundles.items():
+            b_info["downloadName"] = download_names.get(b_name, "")
 
         # Save index to disk
         os.makedirs(output_dir, exist_ok=True)
