@@ -46,9 +46,11 @@ def resolve_mod_folder(mod_file_names, local_index):
         info = scanned_bundles.get(bundle_name, {})
         download_name = info.get("downloadName", "")
         # Priority 0 is highest
-        if re.search(r'common-ui-prefabs-group\d+_assets_all', download_name):
-            return (0, bundle_name)
-        return (1, bundle_name)
+        match = re.search(r'common-ui-prefabs-group(\d+)_assets_all', download_name)
+        if match:
+            # Sort by priority 0 (highest), then by group number (smaller is better), then alphabetically
+            return (0, int(match.group(1)), bundle_name)
+        return (1, float('inf'), bundle_name)
 
 
     unresolved = []
