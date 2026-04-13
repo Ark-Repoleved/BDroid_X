@@ -17,9 +17,15 @@ class CharacterRepository(private val context: Context) {
 
     private var characterLut: Map<String, List<CharacterInfo>> = emptyMap()
 
-    suspend fun updateCharacterData(): Boolean {
+    /**
+     * Returns the update status: "SUCCESS", "SKIPPED", or "FAILED".
+     * - "SUCCESS" means characters.json was regenerated with a new version.
+     * - "SKIPPED" means the local version was already up to date.
+     * - "FAILED" means the update attempt failed.
+     */
+    suspend fun updateCharacterData(): String {
         return withContext(Dispatchers.IO) {
-            var success = false
+            var status = "FAILED"
             try {
                 if (!Python.isStarted()) {
                     Python.start(com.chaquo.python.android.AndroidPlatform(context))
@@ -27,10 +33,10 @@ class CharacterRepository(private val context: Context) {
                 val py = Python.getInstance()
                 val mainScript = py.getModule("main_script")
                 val result = mainScript.callAttr("update_character_data", context.filesDir.absolutePath).asList()
-                val status = result[0].toString() // SUCCESS, SKIPPED, FAILED
+                val resultStatus = result[0].toString() // SUCCESS, SKIPPED, FAILED
                 val message = result[1].toString()
 
-                when (status) {
+                when (resultStatus) {
                     "SUCCESS" -> {
                         println("Successfully ran scraper and saved characters.json: $message")
                         // When a new characters.json is generated, the mod cache becomes invalid.
@@ -39,25 +45,29 @@ class CharacterRepository(private val context: Context) {
                             cacheFile.delete()
                             println("Deleted mod cache to force re-scan.")
                         }
-                        success = true
+                        status = "SUCCESS"
                     }
                     "SKIPPED" -> {
                         println("Scraper skipped: $message")
-                        success = true
+                        status = "SKIPPED"
                     }
                     "FAILED" -> {
                         println("Scraper script failed: $message. Will use local version if available.")
-                        success = false
+                        status = "FAILED"
                     }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
                 println("Failed to execute scraper python script, will use local version. Error: ${e.message}")
-                success = false
+                status = "FAILED"
             }
             characterLut = parseCharacterJson()
-            success
+            status
         }
+    }
+
+    fun hasLocalCharactersJson(): Boolean {
+        return File(context.filesDir, CHARACTERS_JSON_FILENAME).exists()
     }
 
     private suspend fun parseCharacterJson(): Map<String, List<CharacterInfo>> {

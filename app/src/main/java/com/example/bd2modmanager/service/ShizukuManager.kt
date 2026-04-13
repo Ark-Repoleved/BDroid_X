@@ -5,6 +5,7 @@ import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.IBinder
 import com.example.bd2modmanager.IFileService
+import com.example.bd2modmanager.data.model.BundleCheckResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -173,30 +174,28 @@ object ShizukuManager {
     }
 
     /**
-     * 掃描遊戲本地快取的 bundle，建立 asset-to-bundle 索引。
-     *
-     * 三步驟流程：
-     * 1. 透過 Shizuku 列舉 Shared/ 目錄取得 bundle 列表
-     * 2. 比對快取，只掃描新增/更新的 bundle（逐一複製到 temp → Python 解析 → 刪除 temp）
-     * 3. 合併快取與新掃描結果，儲存最終索引
+     * Phase 1: 列舉遊戲目錄並檢查哪些 bundle 需要掃描。
+     * 不執行實際掃描，只回傳結果讓呼叫端決定是否繼續。
      *
      * @param outputDir  App 可寫入的目錄（通常是 context.filesDir）
-     * @param cacheDir   App 的暫存目錄（通常是 context.cacheDir）
      * @param onProgress 進度回報
-     * @return Pair<成功, 訊息>
+     * @return BundleCheckResult? — null 表示失敗或無 bundle
      */
-    suspend fun scanLocalBundles(
+    suspend fun checkLocalBundles(
         outputDir: String,
-        cacheDir: String,
         onProgress: (String) -> Unit
-    ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+    ): BundleCheckResult? = withContext(Dispatchers.IO) {
         try {
             if (!isAvailable()) {
-                return@withContext Pair(false, "Shizuku is not available. Skipping local bundle scan.")
+                onProgress("Shizuku is not available. Skipping local bundle scan.")
+                return@withContext null
             }
 
             val service = ensureServiceBound()
-                ?: return@withContext Pair(false, "Failed to connect to Shizuku file service.")
+            if (service == null) {
+                onProgress("Failed to connect to Shizuku file service.")
+                return@withContext null
+            }
 
             // Step 1: List bundles via Shizuku
             onProgress("Listing local game bundles...")
@@ -205,7 +204,7 @@ object ShizukuManager {
             val bundleList = JSONArray(bundleListJson)
             if (bundleList.length() == 0) {
                 onProgress("No bundles found in game directory.")
-                return@withContext Pair(false, "No bundles found. Is the game installed and has been played?")
+                return@withContext null
             }
 
             onProgress("Found ${bundleList.length()} bundles. Checking cache...")
@@ -214,14 +213,6 @@ object ShizukuManager {
             val needsScanJson = ModdingService.checkScanNeeded(outputDir, bundleListJson, onProgress)
             val needsScan = JSONArray(needsScanJson)
 
-            if (needsScan.length() == 0) {
-                onProgress("All bundles are up to date. Finalizing...")
-                val (finalSuccess, finalMsg) = ModdingService.finalizeScan(outputDir, onProgress)
-                return@withContext Pair(finalSuccess, finalMsg)
-            }
-
-            onProgress("${needsScan.length()} bundles need scanning...")
-
             // Build hash lookup from the full bundle list
             val hashMap = mutableMapOf<String, String>()
             for (i in 0 until bundleList.length()) {
@@ -229,7 +220,48 @@ object ShizukuManager {
                 hashMap[obj.getString("name")] = obj.getString("hash")
             }
 
-            // Step 3: Scan each bundle one at a time
+            BundleCheckResult(
+                bundleListJson = bundleListJson,
+                needsScanJson = needsScanJson,
+                hashMap = hashMap,
+                needsScanCount = needsScan.length()
+            )
+        } catch (e: Exception) {
+            Log.e("ShizukuManager", "Error checking local bundles", e)
+            onProgress("Error: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Phase 2: 執行實際的 bundle 掃描並儲存索引。
+     * 應在使用者確認後呼叫。
+     *
+     * @param outputDir         App 可寫入的目錄
+     * @param cacheDir          App 的暫存目錄
+     * @param checkResult       Phase 1 回傳的結果
+     * @param onBundleProgress  每個 bundle 掃描時的進度 callback
+     * @return Triple<成功, 掃描數量, 失敗數量>
+     */
+    suspend fun executeBundleScan(
+        outputDir: String,
+        cacheDir: String,
+        checkResult: BundleCheckResult,
+        onBundleProgress: (currentIndex: Int, total: Int, bundleName: String, message: String) -> Unit
+    ): Triple<Boolean, Int, Int> = withContext(Dispatchers.IO) {
+        try {
+            val service = ensureServiceBound()
+                ?: return@withContext Triple(false, 0, 0)
+
+            val needsScan = JSONArray(checkResult.needsScanJson)
+            val total = needsScan.length()
+
+            if (total == 0) {
+                // Nothing to scan, just finalize with cached data
+                ModdingService.finalizeScan(outputDir) { }
+                return@withContext Triple(true, 0, 0)
+            }
+
             val tempDir = File(cacheDir, "scan_temp")
             tempDir.mkdirs()
             val tempDataFile = File(tempDir, "__data")
@@ -237,11 +269,11 @@ object ShizukuManager {
             var scannedCount = 0
             var failedCount = 0
 
-            for (i in 0 until needsScan.length()) {
+            for (i in 0 until total) {
                 val bundleName = needsScan.getString(i)
-                val bundleHash = hashMap[bundleName] ?: continue
+                val bundleHash = checkResult.hashMap[bundleName] ?: continue
 
-                onProgress("Scanning ${i + 1}/${needsScan.length()}: $bundleName")
+                onBundleProgress(i, total, bundleName, "Copying $bundleName...")
 
                 // Copy __data from game dir to temp via Shizuku
                 val gamePath = "$GAME_SHARED_PATH/$bundleName/$bundleHash/__data"
@@ -253,10 +285,12 @@ object ShizukuManager {
                     continue
                 }
 
+                onBundleProgress(i, total, bundleName, "Scanning $bundleName...")
+
                 // Scan via Python
                 val (scanSuccess, _, _) = ModdingService.scanSingleBundle(
-                    bundleName, bundleHash, tempDataFile.absolutePath, onProgress
-                )
+                    bundleName, bundleHash, tempDataFile.absolutePath
+                ) { msg -> onBundleProgress(i, total, bundleName, msg) }
 
                 if (scanSuccess) scannedCount++ else failedCount++
 
@@ -267,15 +301,42 @@ object ShizukuManager {
             // Clean up temp directory
             tempDir.deleteRecursively()
 
-            // Step 4: Finalize and save index
-            onProgress("Saving index... (scanned: $scannedCount, failed: $failedCount)")
-            val (finalSuccess, finalMsg) = ModdingService.finalizeScan(outputDir, onProgress)
-            Pair(finalSuccess, finalMsg)
+            // Finalize and save index
+            onBundleProgress(total, total, "", "Saving index...")
+            val (finalSuccess, _) = ModdingService.finalizeScan(outputDir) { msg ->
+                onBundleProgress(total, total, "", msg)
+            }
 
+            Triple(finalSuccess, scannedCount, failedCount)
         } catch (e: Exception) {
             Log.e("ShizukuManager", "Error scanning local bundles", e)
-            Pair(false, "Error: ${e.message}")
+            Triple(false, 0, 0)
         }
+    }
+
+    /**
+     * 便捷方法：一次完成列舉 + 掃描 + 儲存。
+     * 保留向後兼容，內部使用分段 API。
+     */
+    suspend fun scanLocalBundles(
+        outputDir: String,
+        cacheDir: String,
+        onProgress: (String) -> Unit
+    ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val checkResult = checkLocalBundles(outputDir, onProgress)
+            ?: return@withContext Pair(false, "Failed to check local bundles.")
+
+        if (checkResult.needsScanCount == 0) {
+            onProgress("All bundles are up to date. Finalizing...")
+            return@withContext ModdingService.finalizeScan(outputDir, onProgress)
+        }
+
+        onProgress("${checkResult.needsScanCount} bundles need scanning...")
+        val (success, scanned, failed) = executeBundleScan(outputDir, cacheDir, checkResult) { idx, total, name, msg ->
+            onProgress("Scanning ${idx + 1}/$total: $name - $msg")
+        }
+
+        Pair(success, "Scanned: $scanned, Failed: $failed")
     }
 
     /**

@@ -124,3 +124,27 @@ sealed class MergeState {
     data class Finished(val message: String) : MergeState()
     data class Failed(val error: String) : MergeState()
 }
+
+sealed class BundleScanState {
+    object Idle : BundleScanState()
+    data class Confirmation(val bundleCount: Int) : BundleScanState()
+    data class Scanning(
+        val currentIndex: Int,
+        val totalCount: Int,
+        val currentBundle: String,
+        val progressMessage: String = ""
+    ) : BundleScanState()
+    data class Finished(
+        val scannedCount: Int,
+        val failedCount: Int,
+        val message: String
+    ) : BundleScanState()
+    data class Failed(val error: String) : BundleScanState()
+}
+
+data class BundleCheckResult(
+    val bundleListJson: String,
+    val needsScanJson: String,
+    val hashMap: Map<String, String>,
+    val needsScanCount: Int
+)

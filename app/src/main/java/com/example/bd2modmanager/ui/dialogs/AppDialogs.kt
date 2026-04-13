@@ -525,3 +525,186 @@ fun MergeSpineDialog(state: MergeState, onDismiss: () -> Unit) {
         dismissButton = null
     )
 }
+
+@Composable
+fun VersionMismatchWarningDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Warning, contentDescription = "Warning", tint = MaterialTheme.colorScheme.error) },
+        title = { Text("Game Resources Need Update") },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    "A new game version has been detected, but the local game resources have not been updated yet.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    "Please update the game and launch it at least once to download the latest resources, then restart this app.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("OK")
+            }
+        },
+        dismissButton = null
+    )
+}
+
+@Composable
+fun BundleScanDialog(
+    state: BundleScanState,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    if (state is BundleScanState.Idle) return
+
+    AlertDialog(
+        onDismissRequest = {
+            if (state !is BundleScanState.Scanning) {
+                onDismiss()
+            }
+        },
+        icon = {
+            when (state) {
+                is BundleScanState.Confirmation -> Icon(Icons.Default.FindInPage, contentDescription = "Scan")
+                is BundleScanState.Scanning -> Icon(Icons.Default.Search, contentDescription = "Scanning")
+                is BundleScanState.Finished -> Icon(Icons.Default.CheckCircle, contentDescription = "Done")
+                is BundleScanState.Failed -> Icon(Icons.Default.Error, contentDescription = "Error")
+                else -> {}
+            }
+        },
+        title = {
+            val text = when (state) {
+                is BundleScanState.Confirmation -> "Bundle Scan Required"
+                is BundleScanState.Scanning -> "Scanning Bundles..."
+                is BundleScanState.Finished -> "Scan Complete"
+                is BundleScanState.Failed -> "Scan Failed"
+                else -> ""
+            }
+            Text(text)
+        },
+        text = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                when (state) {
+                    is BundleScanState.Confirmation -> {
+                        Text(
+                            "${state.bundleCount} new or updated bundles have been detected and need to be scanned.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            "This process may take a while depending on the number of bundles. You can skip this and use the cached index instead.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                    is BundleScanState.Scanning -> {
+                        Text(
+                            "Scanning ${state.currentIndex + 1} of ${state.totalCount}",
+                            style = MaterialTheme.typography.titleMedium,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        LinearProgressIndicator(
+                            progress = { (state.currentIndex.toFloat()) / state.totalCount.toFloat() },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        if (state.currentBundle.isNotEmpty()) {
+                            Text(
+                                state.currentBundle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1
+                            )
+                        }
+                        if (state.progressMessage.isNotEmpty()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                state.progressMessage,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                    is BundleScanState.Finished -> {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = "Success",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            state.message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center
+                        )
+                        if (state.failedCount > 0) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "${state.failedCount} bundle(s) failed to scan.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                    is BundleScanState.Failed -> {
+                        Icon(
+                            Icons.Default.Error,
+                            contentDescription = "Failed",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            state.error,
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    else -> {}
+                }
+            }
+        },
+        confirmButton = {
+            when (state) {
+                is BundleScanState.Confirmation -> {
+                    Button(onClick = onConfirm) {
+                        Text("Start Scan")
+                    }
+                }
+                is BundleScanState.Finished, is BundleScanState.Failed -> {
+                    Button(onClick = onDismiss) {
+                        Text("OK")
+                    }
+                }
+                else -> {}
+            }
+        },
+        dismissButton = {
+            if (state is BundleScanState.Confirmation) {
+                TextButton(onClick = onDismiss) {
+                    Text("Skip")
+                }
+            }
+        }
+    )
+}
+
