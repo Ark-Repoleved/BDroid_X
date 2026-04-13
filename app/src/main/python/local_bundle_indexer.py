@@ -56,12 +56,34 @@ def _get_asset_extension(type_name):
     return _EXTENSION_MAP.get(type_name, "")
 
 
+def _read_name_fast(obj):
+    """Read m_Name directly from raw object data, skipping full deserialization.
+
+    For Texture2D, TextAsset, and Sprite, m_Name is the first serialized field.
+    Unity string format: [int32 length][UTF-8 bytes][padding to 4-byte align]
+
+    By reading only the name, we skip parsing texture image data, script content,
+    sprite meshes, etc. — which is the vast majority of the data.
+    """
+    try:
+        obj.reset()  # seek reader to object's byte_start
+        return obj.reader.read_aligned_string()
+    except Exception:
+        # Fallback: full deserialization (slow but guaranteed correct)
+        try:
+            data = obj.read()
+            return getattr(data, "m_Name", None)
+        except Exception:
+            return None
+
+
 def _scan_bundle_file(file_path):
     """
     Scan a single bundle file and return a sorted list of unique asset names.
 
     Only reads objects of types in SCAN_TYPES to minimize parsing overhead.
-    Asset names are normalized to lowercase with appropriate file extensions.
+    Uses fast name extraction (raw binary read) instead of full object
+    deserialization to avoid loading texture data, scripts, etc.
     """
     unitypy = _ensure_unitypy()
     env = unitypy.load(file_path)
@@ -70,12 +92,8 @@ def _scan_bundle_file(file_path):
     for obj in env.objects:
         if obj.type.name not in SCAN_TYPES:
             continue
-        try:
-            data = obj.read()
-        except Exception:
-            continue
 
-        raw_name = getattr(data, "m_Name", None)
+        raw_name = _read_name_fast(obj)
         if not raw_name:
             continue
 
