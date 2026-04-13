@@ -132,6 +132,14 @@ class MainActivity : ComponentActivity() {
                         onDismiss = { viewModel.resetMergeState() }
                     )
                 }
+
+                val bundleScanState by viewModel.bundleScanState.collectAsState()
+                BundleScanDialog(
+                    state = bundleScanState,
+                    onConfirm = { viewModel.confirmBundleScan(this@MainActivity) },
+                    onSkip = { viewModel.skipBundleScan() },
+                    onDismiss = { viewModel.dismissBundleScanDialog() }
+                )
             }
         }
     }

@@ -124,3 +124,20 @@ sealed class MergeState {
     data class Finished(val message: String) : MergeState()
     data class Failed(val error: String) : MergeState()
 }
+
+sealed class BundleScanState {
+    /** 初始狀態：等待使用者確認是否已更新遊戲 */
+    object AwaitingConfirmation : BundleScanState()
+    /** 掃描中，帶有進度訊息和數值進度 */
+    data class Scanning(
+        val progressMessage: String = "Initializing...",
+        val current: Int = 0,
+        val total: Int = 0
+    ) : BundleScanState()
+    /** 掃描成功完成 */
+    data class Finished(val message: String) : BundleScanState()
+    /** 掃描失敗 */
+    data class Failed(val error: String) : BundleScanState()
+    /** 使用者選擇跳過或 Shizuku 不可用 */
+    object Skipped : BundleScanState()
+}

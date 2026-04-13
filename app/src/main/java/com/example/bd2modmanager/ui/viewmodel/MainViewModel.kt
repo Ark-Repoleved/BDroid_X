@@ -118,6 +118,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _moveState = MutableStateFlow<MoveState>(MoveState.Idle)
     val moveState: StateFlow<MoveState> = _moveState.asStateFlow()
 
+    private val _bundleScanState = MutableStateFlow<BundleScanState>(BundleScanState.Skipped)
+    val bundleScanState: StateFlow<BundleScanState> = _bundleScanState.asStateFlow()
+
     private var initialized = false
     private var scanJob: Job? = null
     private var pendingScanUri: Uri? = null
@@ -129,36 +132,36 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         characterRepository = CharacterRepository(context)
         modRepository = ModRepository(context, characterRepository)
 
+        // 先更新角色資料，再根據結果決定是否需要掃描 bundle
         viewModelScope.launch {
+            var updateResult: CharacterRepository.CharacterUpdateResult
             try {
                 _isUpdatingCharacters.value = true
-
                 // Step 1: Update characters.json from CDN
-                characterRepository.updateCharacterData()
-
-                // Step 2: Scan local bundles via Shizuku (incremental, fast if cache is up to date)
-                // This must complete before mod scanning so the asset index is available.
-                if (ShizukuManager.isAvailable()) {
-                    withContext(Dispatchers.IO) {
-                        // Use externalCacheDir for temp files because Shizuku service runs
-                        // as shell UID and cannot write to app's internal cacheDir (/data/data/...)
-                        val shizukuCacheDir = (context.externalCacheDir ?: context.cacheDir).absolutePath
-                        ShizukuManager.scanLocalBundles(
-                            outputDir = context.filesDir.absolutePath,
-                            cacheDir = shizukuCacheDir
-                        ) { progress ->
-                            Log.d("MainViewModel", "Bundle scan: $progress")
-                        }
-                    }
-                } else {
-                    Log.d("MainViewModel", "Shizuku not available, skipping local bundle scan. Using cached index if available.")
-                }
+                updateResult = characterRepository.updateCharacterData()
+            } catch (e: Exception) {
+                updateResult = CharacterRepository.CharacterUpdateResult.FAILED
             } finally {
                 _isUpdatingCharacters.value = false
             }
 
-            // Step 3: Scan mod source directory (uses the local bundle index for resolution)
-            modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
+            // Step 2: 判斷是否需要掃描本地 bundle
+            // 條件: Shizuku 可用 + (CDN 有新版本 或 本地 index 不存在)
+            val indexFile = java.io.File(context.filesDir, "local_bundle_index.json")
+            val needsScan = updateResult == CharacterRepository.CharacterUpdateResult.UPDATED || !indexFile.exists()
+
+            if (ShizukuManager.isAvailable() && needsScan) {
+                _bundleScanState.value = BundleScanState.AwaitingConfirmation
+            } else {
+                if (!ShizukuManager.isAvailable()) {
+                    Log.d("MainViewModel", "Shizuku not available, skipping local bundle scan. Using cached index if available.")
+                } else {
+                    Log.d("MainViewModel", "No game update detected and index exists. Skipping bundle scan.")
+                }
+                _bundleScanState.value = BundleScanState.Skipped
+                // 直接掃描 mod 目錄
+                modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
+            }
         }
 
         viewModelScope.launch {
@@ -167,6 +170,61 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     summarizeResults()
                 }
             }
+        }
+    }
+
+    /**
+     * 使用者確認已更新遊戲後，開始掃描本地 bundle
+     */
+    fun confirmBundleScan(context: Context) {
+        viewModelScope.launch {
+            _bundleScanState.value = BundleScanState.Scanning("Preparing scan...")
+            _isUpdatingCharacters.value = true
+
+            try {
+                if (ShizukuManager.isAvailable()) {
+                    withContext(Dispatchers.IO) {
+                        val shizukuCacheDir = (context.externalCacheDir ?: context.cacheDir).absolutePath
+                        ShizukuManager.scanLocalBundlesWithProgress(
+                            outputDir = context.filesDir.absolutePath,
+                            cacheDir = shizukuCacheDir
+                        ) { message, current, total ->
+                            viewModelScope.launch(Dispatchers.Main) {
+                                _bundleScanState.value = BundleScanState.Scanning(message, current, total)
+                            }
+                        }
+                    }
+                    _bundleScanState.value = BundleScanState.Finished("Bundle scan completed!")
+                } else {
+                    _bundleScanState.value = BundleScanState.Failed("Shizuku is not available.")
+                }
+            } catch (e: Exception) {
+                _bundleScanState.value = BundleScanState.Failed(e.message ?: "Unknown error during bundle scan.")
+            } finally {
+                _isUpdatingCharacters.value = false
+            }
+
+            // 掃描完成後自動掃描 mod 目錄
+            modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
+        }
+    }
+
+    /**
+     * 使用者選擇跳過 bundle 掃描
+     */
+    fun skipBundleScan() {
+        _bundleScanState.value = BundleScanState.Skipped
+        // 直接掃描 mod 目錄（使用 cached index）
+        modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
+    }
+
+    /**
+     * 關閉 bundle 掃描對話框
+     */
+    fun dismissBundleScanDialog() {
+        val currentState = _bundleScanState.value
+        if (currentState is BundleScanState.Finished || currentState is BundleScanState.Failed) {
+            _bundleScanState.value = BundleScanState.Skipped
         }
     }
 

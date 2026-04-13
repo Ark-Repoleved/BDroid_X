@@ -15,20 +15,29 @@ class CharacterRepository(private val context: Context) {
         private const val MOD_CACHE_FILENAME = "mod_cache.json"
     }
 
+    enum class CharacterUpdateResult {
+        /** CDN 有新版本，characters.json 已更新 */
+        UPDATED,
+        /** CDN 版本與本地相同，無需更新 */
+        UP_TO_DATE,
+        /** 更新失敗 */
+        FAILED
+    }
+
     private var characterLut: Map<String, List<CharacterInfo>> = emptyMap()
 
-    suspend fun updateCharacterData(): Boolean {
+    suspend fun updateCharacterData(): CharacterUpdateResult {
         return withContext(Dispatchers.IO) {
-            var success = false
+            var result = CharacterUpdateResult.FAILED
             try {
                 if (!Python.isStarted()) {
                     Python.start(com.chaquo.python.android.AndroidPlatform(context))
                 }
                 val py = Python.getInstance()
                 val mainScript = py.getModule("main_script")
-                val result = mainScript.callAttr("update_character_data", context.filesDir.absolutePath).asList()
-                val status = result[0].toString() // SUCCESS, SKIPPED, FAILED
-                val message = result[1].toString()
+                val pyResult = mainScript.callAttr("update_character_data", context.filesDir.absolutePath).asList()
+                val status = pyResult[0].toString() // SUCCESS, SKIPPED, FAILED
+                val message = pyResult[1].toString()
 
                 when (status) {
                     "SUCCESS" -> {
@@ -39,24 +48,24 @@ class CharacterRepository(private val context: Context) {
                             cacheFile.delete()
                             println("Deleted mod cache to force re-scan.")
                         }
-                        success = true
+                        result = CharacterUpdateResult.UPDATED
                     }
                     "SKIPPED" -> {
                         println("Scraper skipped: $message")
-                        success = true
+                        result = CharacterUpdateResult.UP_TO_DATE
                     }
                     "FAILED" -> {
                         println("Scraper script failed: $message. Will use local version if available.")
-                        success = false
+                        result = CharacterUpdateResult.FAILED
                     }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
                 println("Failed to execute scraper python script, will use local version. Error: ${e.message}")
-                success = false
+                result = CharacterUpdateResult.FAILED
             }
             characterLut = parseCharacterJson()
-            success
+            result
         }
     }
 
