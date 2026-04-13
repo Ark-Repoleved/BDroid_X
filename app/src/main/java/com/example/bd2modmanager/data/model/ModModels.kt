@@ -13,6 +13,7 @@ enum class MatchStrategy {
     EXACT,
     NORMALIZED,
     EXTENSION_MAPPING,
+    LOCAL_SCAN,
     FALLBACK,
     NONE
 }

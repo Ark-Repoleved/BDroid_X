@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -131,11 +132,29 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         viewModelScope.launch {
             try {
                 _isUpdatingCharacters.value = true
+
+                // Step 1: Update characters.json from CDN
                 characterRepository.updateCharacterData()
+
+                // Step 2: Scan local bundles via Shizuku (incremental, fast if cache is up to date)
+                // This must complete before mod scanning so the asset index is available.
+                if (ShizukuManager.isAvailable()) {
+                    withContext(Dispatchers.IO) {
+                        ShizukuManager.scanLocalBundles(
+                            outputDir = context.filesDir.absolutePath,
+                            cacheDir = context.cacheDir.absolutePath
+                        ) { progress ->
+                            Log.d("MainViewModel", "Bundle scan: $progress")
+                        }
+                    }
+                } else {
+                    Log.d("MainViewModel", "Shizuku not available, skipping local bundle scan. Using cached index if available.")
+                }
             } finally {
                 _isUpdatingCharacters.value = false
             }
 
+            // Step 3: Scan mod source directory (uses the local bundle index for resolution)
             modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
         }
 
