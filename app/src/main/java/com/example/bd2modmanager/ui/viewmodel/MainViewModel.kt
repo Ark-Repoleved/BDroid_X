@@ -140,9 +140,12 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 // This must complete before mod scanning so the asset index is available.
                 if (ShizukuManager.isAvailable()) {
                     withContext(Dispatchers.IO) {
+                        // Use externalCacheDir for temp files because Shizuku service runs
+                        // as shell UID and cannot write to app's internal cacheDir (/data/data/...)
+                        val shizukuCacheDir = (context.externalCacheDir ?: context.cacheDir).absolutePath
                         ShizukuManager.scanLocalBundles(
                             outputDir = context.filesDir.absolutePath,
-                            cacheDir = context.cacheDir.absolutePath
+                            cacheDir = shizukuCacheDir
                         ) { progress ->
                             Log.d("MainViewModel", "Bundle scan: $progress")
                         }
