@@ -40,6 +40,16 @@ def resolve_mod_folder(mod_file_names, local_index):
         }
     """
     asset_to_bundles = (local_index or {}).get("assetToBundles", {})
+    scanned_bundles = (local_index or {}).get("scannedBundles", {})
+
+    def bundle_priority_key(bundle_name):
+        info = scanned_bundles.get(bundle_name, {})
+        download_name = info.get("downloadName", "")
+        # Priority 0 is highest
+        if re.search(r'common-ui-prefabs-group\d+_assets_all', download_name):
+            return (0, bundle_name)
+        return (1, bundle_name)
+
 
     unresolved = []
     file_matches = []
@@ -94,8 +104,8 @@ def resolve_mod_folder(mod_file_names, local_index):
     if len(intersection) == 1:
         target_bundle = next(iter(intersection))
     elif len(intersection) > 1:
-        # Multiple common bundles — pick the first alphabetically
-        target_bundle = sorted(intersection)[0]
+        # Multiple common bundles — prioritize common-ui-prefabs-group...
+        target_bundle = sorted(intersection, key=bundle_priority_key)[0]
     elif len(union) == 1:
         # No strict intersection but only one bundle total
         target_bundle = next(iter(union))
@@ -106,7 +116,7 @@ def resolve_mod_folder(mod_file_names, local_index):
             'targetHash': None,
             'resolvedFamilyKey': None,
             'resolvedTargets': [
-                _build_target(entry) for entry in file_matches
+                _build_target(entry, bundle_priority_key) for entry in file_matches
             ],
             'unresolvedFiles': unresolved,
             'resolutionState': 'INVALID',
@@ -114,7 +124,7 @@ def resolve_mod_folder(mod_file_names, local_index):
         }
 
     resolved_targets = [
-        _build_target(entry, target_bundle) for entry in file_matches
+        _build_target(entry, bundle_priority_key, target_bundle) for entry in file_matches
     ]
     family_key = _compute_family_key(file_matches)
 
@@ -158,9 +168,12 @@ def _expand_candidates(base_name):
     return list(dict.fromkeys(candidates))
 
 
-def _build_target(entry, target_bundle=None):
+def _build_target(entry, bundle_priority_key, target_bundle=None):
     """Build a resolved target dict for Kotlin compatibility."""
-    bundle_name = target_bundle or (sorted(entry['bundles'])[0] if entry['bundles'] else None)
+    bundle_name = target_bundle
+    if not bundle_name and entry['bundles']:
+        bundle_name = sorted(entry['bundles'], key=bundle_priority_key)[0]
+        
     family_key = _extract_stem(entry['fileName'])
 
     return {
