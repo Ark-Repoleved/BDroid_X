@@ -55,13 +55,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _isUpdatingCharacters = MutableStateFlow(false)
     val isUpdatingCharacters: StateFlow<Boolean> = _isUpdatingCharacters.asStateFlow()
 
-    private val _bundleScanState = MutableStateFlow<BundleScanState>(BundleScanState.Skipped)
-    val bundleScanState: StateFlow<BundleScanState> = _bundleScanState.asStateFlow()
-
     val showShimmer: StateFlow<Boolean> =
-        combine(_modsList, _isLoading, _isUpdatingCharacters, _bundleScanState) { mods, isScanning, isUpdating, scanState ->
-            val isBundleScanning = scanState is BundleScanState.AwaitingConfirmation || scanState is BundleScanState.Scanning
-            (isScanning || isUpdating || isBundleScanning) && mods.isEmpty()
+        combine(_modsList, _isLoading, _isUpdatingCharacters) { mods, isScanning, isUpdating ->
+            (isScanning || isUpdating) && mods.isEmpty()
         }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), false)
 
     private val _selectedMods = MutableStateFlow<Set<Uri>>(emptySet())
@@ -122,7 +118,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _moveState = MutableStateFlow<MoveState>(MoveState.Idle)
     val moveState: StateFlow<MoveState> = _moveState.asStateFlow()
 
-
+    private val _bundleScanState = MutableStateFlow<BundleScanState>(BundleScanState.Skipped)
+    val bundleScanState: StateFlow<BundleScanState> = _bundleScanState.asStateFlow()
 
     private var initialized = false
     private var scanJob: Job? = null

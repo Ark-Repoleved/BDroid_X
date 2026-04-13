@@ -573,14 +573,14 @@ fun BundleScanDialog(
                             Row(verticalAlignment = Alignment.Top) {
                                 Text("1. ", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
                                 Text(
-                                    "Updated BrownDust 2 to the latest version",
+                                    "Opened Brown Dust 2 and updated to the latest version",
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }
                             Row(verticalAlignment = Alignment.Top) {
                                 Text("2. ", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
                                 Text(
-                                    "Open BrownDust 2 and let the game fully download all the latest resources",
+                                    "Let the game fully download all the latest resources",
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }
@@ -602,22 +602,17 @@ fun BundleScanDialog(
                     }
                 },
                 confirmButton = {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Button(onClick = onConfirm) {
-                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("I've Updated, Start Scan")
-                        }
-                        TextButton(onClick = onSkip) {
-                            Text("Skip")
-                        }
+                    Button(onClick = onConfirm) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("I've Updated, Start Scan")
                     }
                 },
-                dismissButton = null
+                dismissButton = {
+                    TextButton(onClick = onSkip) {
+                        Text("Skip")
+                    }
+                }
             )
         }
 
