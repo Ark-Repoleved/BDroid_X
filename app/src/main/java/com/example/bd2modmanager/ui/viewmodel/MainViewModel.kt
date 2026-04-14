@@ -63,7 +63,11 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _selectedMods = MutableStateFlow<Set<Uri>>(emptySet())
     val selectedMods: StateFlow<Set<Uri>> = _selectedMods.asStateFlow()
 
-    val useAstc: StateFlow<Boolean> = savedStateHandle.getStateFlow("use_astc", false)
+    private val _useAstc = MutableStateFlow(false)
+    val useAstc: StateFlow<Boolean> = _useAstc.asStateFlow()
+
+    private val _selectedQuality = MutableStateFlow("HD")
+    val selectedQuality: StateFlow<String> = _selectedQuality.asStateFlow()
 
     private val _isSearchActive = MutableStateFlow(false)
     val isSearchActive: StateFlow<Boolean> = _isSearchActive.asStateFlow()
@@ -137,6 +141,10 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         initialized = true
 
         appContext = context.applicationContext
+        val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        _useAstc.value = prefs.getBoolean("use_astc", false)
+        _selectedQuality.value = prefs.getString("selected_quality", "HD") ?: "HD"
+
         characterRepository = CharacterRepository(context)
         modRepository = ModRepository(context, characterRepository)
 
@@ -149,7 +157,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 val hadLocalCharacters = characterRepository.hasLocalCharactersJson()
 
                 // Step 1: Update characters.json from CDN (also starts Python runtime)
-                val updateStatus = characterRepository.updateCharacterData()
+                val updateStatus = characterRepository.updateCharacterData(_selectedQuality.value)
                 val charactersWereRefreshed = (updateStatus == "SUCCESS" && hadLocalCharacters)
 
                 // Step 2: Check local bundles via Shizuku
@@ -212,7 +220,13 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     fun setUseAstc(useAstc: Boolean) {
-        savedStateHandle["use_astc"] = useAstc
+        _useAstc.value = useAstc
+        appContext?.getSharedPreferences("app_settings", Context.MODE_PRIVATE)?.edit()?.putBoolean("use_astc", useAstc)?.apply()
+    }
+
+    fun setSelectedQuality(quality: String) {
+        _selectedQuality.value = quality
+        appContext?.getSharedPreferences("app_settings", Context.MODE_PRIVATE)?.edit()?.putString("selected_quality", quality)?.apply()
     }
 
     // --- Bundle Scan Dialog Actions ---
@@ -386,7 +400,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
         try {
             updateJobStatus(hashedName, JobStatus.Downloading("Starting download..."))
-            val (downloadSuccess, messageOrPath) = ModdingService.downloadBundle(hashedName, "HD", context.cacheDir.absolutePath, cacheKey) { progress ->
+            val (downloadSuccess, messageOrPath) = ModdingService.downloadBundle(hashedName, selectedQuality.value, context.cacheDir.absolutePath, cacheKey) { progress ->
                 updateJobStatus(hashedName, JobStatus.Downloading(progress))
             }
 
@@ -540,7 +554,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     Python.start(com.chaquo.python.android.AndroidPlatform(context))
                 }
                 val cacheKey = "uninstall_${System.currentTimeMillis()}"
-                ModdingService.downloadBundle(hashedName, "HD", context.cacheDir.absolutePath, cacheKey) { progress ->
+                ModdingService.downloadBundle(hashedName, selectedQuality.value, context.cacheDir.absolutePath, cacheKey) { progress ->
                     viewModelScope.launch(Dispatchers.Main) {
                         _uninstallState.value = UninstallState.Downloading(hashedName, progress)
                     }

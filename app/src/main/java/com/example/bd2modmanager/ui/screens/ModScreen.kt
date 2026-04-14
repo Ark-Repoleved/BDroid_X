@@ -82,6 +82,35 @@ fun ModScreen(
     Scaffold(
         floatingActionButton = {
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val selectedQuality by viewModel.selectedQuality.collectAsState()
+                var qualityExpanded by remember { mutableStateOf(false) }
+                
+                AnimatedVisibility(visible = selectedMods.isNotEmpty()) {
+                    Box {
+                        ExtendedFloatingActionButton(
+                            onClick = { qualityExpanded = true },
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            icon = { Icon(Icons.Default.HighQuality, contentDescription = "Quality") },
+                            text = { Text("Quality: $selectedQuality") }
+                        )
+                        DropdownMenu(
+                            expanded = qualityExpanded,
+                            onDismissRequest = { qualityExpanded = false }
+                        ) {
+                            listOf("SD", "HD", "FHD").forEach { q ->
+                                DropdownMenuItem(
+                                    text = { Text(q, fontWeight = if (selectedQuality == q) FontWeight.Bold else FontWeight.Normal) },
+                                    onClick = {
+                                        viewModel.setSelectedQuality(q)
+                                        qualityExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                
                 AnimatedVisibility(visible = selectedMods.size == 1) {
                     ExtendedFloatingActionButton(
                         onClick = onMergeRequest,

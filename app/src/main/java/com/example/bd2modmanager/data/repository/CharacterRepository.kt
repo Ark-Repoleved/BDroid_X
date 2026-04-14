@@ -23,7 +23,7 @@ class CharacterRepository(private val context: Context) {
      * - "SKIPPED" means the local version was already up to date.
      * - "FAILED" means the update attempt failed.
      */
-    suspend fun updateCharacterData(): String {
+    suspend fun updateCharacterData(quality: String): String {
         return withContext(Dispatchers.IO) {
             var status = "FAILED"
             try {
@@ -32,7 +32,7 @@ class CharacterRepository(private val context: Context) {
                 }
                 val py = Python.getInstance()
                 val mainScript = py.getModule("main_script")
-                val result = mainScript.callAttr("update_character_data", context.filesDir.absolutePath).asList()
+                val result = mainScript.callAttr("update_character_data", context.filesDir.absolutePath, quality).asList()
                 val resultStatus = result[0].toString() // SUCCESS, SKIPPED, FAILED
                 val message = result[1].toString()
 

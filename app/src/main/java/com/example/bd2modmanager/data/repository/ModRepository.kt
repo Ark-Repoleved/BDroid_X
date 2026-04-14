@@ -137,10 +137,13 @@ class ModRepository(
                     }
                 }
 
+                val prefs = context.getSharedPreferences("app_settings", android.content.Context.MODE_PRIVATE)
+                val selectedQuality = prefs.getString("selected_quality", "HD") ?: "HD"
+
                 val (batchSuccess, batchResults) = ModdingService.resolveModBatch(
                     batchPayload.toString(),
                     context.filesDir.absolutePath,
-                    "HD"
+                    selectedQuality
                 ) { }
 
                 val resultsById = mutableMapOf<Int, JSONObject>()

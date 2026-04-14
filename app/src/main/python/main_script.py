@@ -91,14 +91,14 @@ def _refresh_character_data(output_dir, quality="HD", progress_callback=None):
         return False, error_message, None
 
 
-def update_character_data(output_dir):
+def update_character_data(output_dir, quality="HD"):
     """
     Entry point for Kotlin to refresh character metadata (characters.json).
     Returns a tuple: (status: String, message: String)
     Status can be "SUCCESS", "SKIPPED", "FAILED"
     """
     try:
-        success, status, version = _refresh_character_data(output_dir, "HD")
+        success, status, version = _refresh_character_data(output_dir, quality)
         if success:
             if status == "SKIPPED":
                 return "SKIPPED", "characters.json is already up to date."
