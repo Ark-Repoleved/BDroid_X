@@ -217,6 +217,12 @@ class ModRepository(
         val cacheFile = getModCacheFile()
         if (!cacheFile.exists()) return emptyMap()
 
+        val indexFile = File(context.filesDir, "local_bundle_index.json")
+        if (indexFile.exists() && indexFile.lastModified() > cacheFile.lastModified()) {
+            // Unify: If the bundle index updated, all mod cache entries are potentially stale
+            return emptyMap()
+        }
+
         return try {
             val json = cacheFile.readText()
             val type = object : TypeToken<Map<String, ModCacheInfo>>() {}.type
