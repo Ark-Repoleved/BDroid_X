@@ -139,4 +139,68 @@ object ModdingService {
             Pair(false, e.message ?: "An unknown error occurred in Kotlin during spine merge.")
         }
     }
+
+    // --- Local bundle scanning (three-step API) ---
+
+    fun checkScanNeeded(outputDir: String, bundleListJson: String, onProgress: (String) -> Unit): String {
+        return try {
+            val py = Python.getInstance()
+            val mainScript = py.getModule("main_script")
+
+            val result = mainScript.callAttr(
+                "check_scan_needed",
+                outputDir,
+                bundleListJson,
+                PyObject.fromJava(onProgress)
+            ).toString()
+
+            result
+        } catch (e: Exception) {
+            e.printStackTrace()
+            "[]"
+        }
+    }
+
+    fun scanSingleBundle(bundleName: String, bundleHash: String, tempDataPath: String, onProgress: (String) -> Unit): Triple<Boolean, Int, String> {
+        return try {
+            val py = Python.getInstance()
+            val mainScript = py.getModule("main_script")
+
+            val result = mainScript.callAttr(
+                "scan_single_bundle",
+                bundleName,
+                bundleHash,
+                tempDataPath,
+                PyObject.fromJava(onProgress)
+            ).asList()
+
+            val success = result[0].toBoolean()
+            val assetCount = result[1].toInt()
+            val message = result[2].toString()
+            Triple(success, assetCount, message)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Triple(false, 0, e.message ?: "Unknown error during bundle scan.")
+        }
+    }
+
+    fun finalizeScan(outputDir: String, onProgress: (String) -> Unit): Pair<Boolean, String> {
+        return try {
+            val py = Python.getInstance()
+            val mainScript = py.getModule("main_script")
+
+            val result = mainScript.callAttr(
+                "finalize_scan",
+                outputDir,
+                PyObject.fromJava(onProgress)
+            ).asList()
+
+            val success = result[0].toBoolean()
+            val message = result[1].toString()
+            Pair(success, message)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Pair(false, e.message ?: "Unknown error during scan finalization.")
+        }
+    }
 }

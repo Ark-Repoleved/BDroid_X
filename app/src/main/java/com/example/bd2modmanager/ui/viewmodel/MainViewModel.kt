@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -62,7 +63,11 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _selectedMods = MutableStateFlow<Set<Uri>>(emptySet())
     val selectedMods: StateFlow<Set<Uri>> = _selectedMods.asStateFlow()
 
-    val useAstc: StateFlow<Boolean> = savedStateHandle.getStateFlow("use_astc", false)
+    private val _useAstc = MutableStateFlow(false)
+    val useAstc: StateFlow<Boolean> = _useAstc.asStateFlow()
+
+    private val _selectedQuality = MutableStateFlow("HD")
+    val selectedQuality: StateFlow<String> = _selectedQuality.asStateFlow()
 
     private val _isSearchActive = MutableStateFlow(false)
     val isSearchActive: StateFlow<Boolean> = _isSearchActive.asStateFlow()
@@ -117,6 +122,16 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _moveState = MutableStateFlow<MoveState>(MoveState.Idle)
     val moveState: StateFlow<MoveState> = _moveState.asStateFlow()
 
+    private val _bundleScanState = MutableStateFlow<BundleScanState>(BundleScanState.Idle)
+    val bundleScanState: StateFlow<BundleScanState> = _bundleScanState.asStateFlow()
+
+    private val _showVersionMismatchWarning = MutableStateFlow(false)
+    val showVersionMismatchWarning: StateFlow<Boolean> = _showVersionMismatchWarning.asStateFlow()
+
+    // Stored for deferred scan execution after user confirmation
+    private var pendingCheckResult: BundleCheckResult? = null
+    private var appContext: Context? = null
+
     private var initialized = false
     private var scanJob: Job? = null
     private var pendingScanUri: Uri? = null
@@ -125,18 +140,66 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         if (initialized) return
         initialized = true
 
+        appContext = context.applicationContext
+        val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        _useAstc.value = prefs.getBoolean("use_astc", false)
+        _selectedQuality.value = prefs.getString("selected_quality", "HD") ?: "HD"
+
         characterRepository = CharacterRepository(context)
         modRepository = ModRepository(context, characterRepository)
 
         viewModelScope.launch {
+            var requiresDeferredInitialization = false
             try {
                 _isUpdatingCharacters.value = true
-                characterRepository.updateCharacterData()
-            } finally {
-                _isUpdatingCharacters.value = false
+
+                // Check if local characters.json exists before update
+                val hadLocalCharacters = characterRepository.hasLocalCharactersJson()
+
+                // Step 1: Update characters.json from CDN (also starts Python runtime)
+                val updateStatus = characterRepository.updateCharacterData(_selectedQuality.value)
+                val charactersWereRefreshed = (updateStatus == "SUCCESS" && hadLocalCharacters)
+
+                // Step 2: Check local bundles via Shizuku
+                // Must run after Step 1 because both use Python, and Python.start() is not thread-safe
+                if (ShizukuManager.isAvailable()) {
+                    val checkResult = withContext(Dispatchers.IO) {
+                        ShizukuManager.checkLocalBundles(
+                            outputDir = context.filesDir.absolutePath
+                        ) { progress ->
+                            Log.d("MainViewModel", "Bundle check: $progress")
+                        }
+                    }
+
+                    if (checkResult != null) {
+                        if (checkResult.needsScanCount > 0) {
+                            // Bundles need scanning — show confirmation dialog
+                            pendingCheckResult = checkResult
+                            _bundleScanState.value = BundleScanState.Confirmation(checkResult.needsScanCount)
+                            requiresDeferredInitialization = true
+                        } else {
+                            // No bundles need scanning — existing local_bundle_index.json
+                            // is already valid from the last session. Skip the expensive
+                            // finalizeScan() which would re-parse the catalog for nothing.
+
+                            // If characters.json was just updated but no new bundles,
+                            // the user likely hasn't updated the game yet.
+                            if (charactersWereRefreshed) {
+                                _showVersionMismatchWarning.value = true
+                            }
+                        }
+                    }
+                } else {
+                    Log.d("MainViewModel", "Shizuku not available, skipping local bundle scan. Using cached index if available.")
+                }
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Error during initialization", e)
             }
 
-            modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
+            if (!requiresDeferredInitialization) {
+                // Proceed immediately if no scan confirmation is needed
+                finishInitialization()
+            }
         }
 
         viewModelScope.launch {
@@ -157,7 +220,82 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     fun setUseAstc(useAstc: Boolean) {
-        savedStateHandle["use_astc"] = useAstc
+        _useAstc.value = useAstc
+        appContext?.getSharedPreferences("app_settings", Context.MODE_PRIVATE)?.edit()?.putBoolean("use_astc", useAstc)?.apply()
+    }
+
+    fun setSelectedQuality(quality: String) {
+        _selectedQuality.value = quality
+        appContext?.getSharedPreferences("app_settings", Context.MODE_PRIVATE)?.edit()?.putString("selected_quality", quality)?.apply()
+    }
+
+    // --- Bundle Scan Dialog Actions ---
+
+    fun confirmBundleScan() {
+        val context = appContext ?: return
+        val checkResult = pendingCheckResult ?: return
+
+        viewModelScope.launch {
+            try {
+                // Use externalCacheDir for temp files because Shizuku service runs
+                // as shell UID and cannot write to app's internal cacheDir (/data/data/...)
+                val shizukuCacheDir = (context.externalCacheDir ?: context.cacheDir).absolutePath
+
+                val (success, scanned, failed) = withContext(Dispatchers.IO) {
+                    ShizukuManager.executeBundleScan(
+                        outputDir = context.filesDir.absolutePath,
+                        cacheDir = shizukuCacheDir,
+                        checkResult = checkResult
+                    ) { currentIndex, total, bundleName, message ->
+                        viewModelScope.launch(Dispatchers.Main) {
+                            _bundleScanState.value = BundleScanState.Scanning(
+                                currentIndex = currentIndex,
+                                totalCount = total,
+                                currentBundle = bundleName,
+                                progressMessage = message
+                            )
+                        }
+                    }
+                }
+
+                if (success) {
+                    _bundleScanState.value = BundleScanState.Finished(
+                        scannedCount = scanned,
+                        failedCount = failed,
+                        message = "Scan complete. $scanned scanned, $failed failed."
+                    )
+                } else {
+                    _bundleScanState.value = BundleScanState.Failed("Bundle scan failed.")
+                }
+            } catch (e: Exception) {
+                _bundleScanState.value = BundleScanState.Failed(e.message ?: "Unknown error")
+            } finally {
+                pendingCheckResult = null
+                // Finish initialization and trigger mod rescan with new index
+                finishInitialization()
+            }
+        }
+    }
+
+    fun dismissBundleScan() {
+        // User cancelled or dismissed results — don't finalize if cancelled.
+        val wasPending = pendingCheckResult != null
+        pendingCheckResult = null
+        _bundleScanState.value = BundleScanState.Idle
+
+        // If user is skipping the confirmation dialog, we must finish initialization now 
+        if (wasPending) {
+            finishInitialization()
+        }
+    }
+
+    private fun finishInitialization() {
+        _isUpdatingCharacters.value = false
+        modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
+    }
+
+    fun dismissVersionMismatchWarning() {
+        _showVersionMismatchWarning.value = false
     }
 
     fun setSearchActive(isActive: Boolean) {
@@ -262,7 +400,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
         try {
             updateJobStatus(hashedName, JobStatus.Downloading("Starting download..."))
-            val (downloadSuccess, messageOrPath) = ModdingService.downloadBundle(hashedName, "HD", context.cacheDir.absolutePath, cacheKey) { progress ->
+            val (downloadSuccess, messageOrPath) = ModdingService.downloadBundle(hashedName, selectedQuality.value, context.cacheDir.absolutePath, cacheKey) { progress ->
                 updateJobStatus(hashedName, JobStatus.Downloading(progress))
             }
 
@@ -416,7 +554,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     Python.start(com.chaquo.python.android.AndroidPlatform(context))
                 }
                 val cacheKey = "uninstall_${System.currentTimeMillis()}"
-                ModdingService.downloadBundle(hashedName, "HD", context.cacheDir.absolutePath, cacheKey) { progress ->
+                ModdingService.downloadBundle(hashedName, selectedQuality.value, context.cacheDir.absolutePath, cacheKey) { progress ->
                     viewModelScope.launch(Dispatchers.Main) {
                         _uninstallState.value = UninstallState.Downloading(hashedName, progress)
                     }

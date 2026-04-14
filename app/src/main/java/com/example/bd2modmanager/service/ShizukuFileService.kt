@@ -4,6 +4,8 @@ import android.content.Context
 import com.example.bd2modmanager.IFileService
 import java.io.File
 import android.util.Log
+import org.json.JSONArray
+import org.json.JSONObject
 
 class ShizukuFileService(context: Context? = null) : IFileService.Stub() {
 
@@ -56,6 +58,48 @@ class ShizukuFileService(context: Context? = null) : IFileService.Stub() {
                     throw e // Re-throw to be caught by the outer catch block
                 }
             }
+        }
+    }
+
+    /**
+     * List all bundles in the game's Shared/ directory.
+     * Returns a JSON array string: [{"name":"bundleName","hash":"hashDirName"}, ...]
+     *
+     * Expected directory structure:
+     *   Shared/{bundleName}/{hash}/__data
+     */
+    override fun listBundleDirectory(sharedDirPath: String): String {
+        return try {
+            val sharedDir = File(sharedDirPath)
+            if (!sharedDir.isDirectory) {
+                Log.w("ShizukuFileService", "Shared directory does not exist: $sharedDirPath")
+                return "[]"
+            }
+
+            val result = JSONArray()
+            sharedDir.listFiles()?.forEach { bundleDir ->
+                if (!bundleDir.isDirectory) return@forEach
+                val bundleName = bundleDir.name
+
+                // Find the first hash subdirectory containing __data
+                bundleDir.listFiles()?.forEach inner@{ hashDir ->
+                    if (!hashDir.isDirectory) return@inner
+                    val dataFile = File(hashDir, "__data")
+                    if (dataFile.isFile) {
+                        result.put(JSONObject().apply {
+                            put("name", bundleName)
+                            put("hash", hashDir.name)
+                        })
+                        return@forEach // Only take the first valid hash directory
+                    }
+                }
+            }
+
+            Log.d("ShizukuFileService", "Listed ${result.length()} bundles from $sharedDirPath")
+            result.toString()
+        } catch (e: Exception) {
+            Log.e("ShizukuFileService", "Error listing bundle directory $sharedDirPath", e)
+            "[]"
         }
     }
 
