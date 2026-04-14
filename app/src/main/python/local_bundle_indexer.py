@@ -503,12 +503,33 @@ def finalize_scan(output_dir, progress_callback=None):
 # Index loading (used by resolver)
 # ---------------------------------------------------------------------------
 
+# In-memory cache: avoids re-reading and re-parsing the large JSON on every resolve call.
+_index_cache = None       # cached dict
+_index_cache_mtime = 0    # mtime of the file when it was cached
+
 def load_local_index(output_dir):
     """
-    Load the local bundle index from disk cache.
+    Load the local bundle index from disk cache, with in-memory caching.
 
     Returns:
         The index dict, or None if no valid cache exists.
     """
+    global _index_cache, _index_cache_mtime
+
     cache_path = os.path.join(output_dir, "local_bundle_index.json")
-    return _load_existing_cache(cache_path)
+
+    try:
+        current_mtime = os.path.getmtime(cache_path)
+    except OSError:
+        return None
+
+    # Return cached version if file hasn't changed
+    if _index_cache is not None and current_mtime == _index_cache_mtime:
+        return _index_cache
+
+    data = _load_existing_cache(cache_path)
+    if data is not None:
+        _index_cache = data
+        _index_cache_mtime = current_mtime
+
+    return data
