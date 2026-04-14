@@ -148,44 +148,41 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 // Check if local characters.json exists before update
                 val hadLocalCharacters = characterRepository.hasLocalCharactersJson()
 
-                // Run CDN update and Shizuku check in PARALLEL — they're independent
-                val characterUpdateJob = async(Dispatchers.IO) {
-                    characterRepository.updateCharacterData()
-                }
-                val bundleCheckJob = async(Dispatchers.IO) {
-                    if (ShizukuManager.isAvailable()) {
+                // Step 1: Update characters.json from CDN (also starts Python runtime)
+                val updateStatus = characterRepository.updateCharacterData()
+                val charactersWereRefreshed = (updateStatus == "SUCCESS" && hadLocalCharacters)
+
+                // Step 2: Check local bundles via Shizuku
+                // Must run after Step 1 because both use Python, and Python.start() is not thread-safe
+                if (ShizukuManager.isAvailable()) {
+                    val checkResult = withContext(Dispatchers.IO) {
                         ShizukuManager.checkLocalBundles(
                             outputDir = context.filesDir.absolutePath
                         ) { progress ->
                             Log.d("MainViewModel", "Bundle check: $progress")
                         }
-                    } else {
-                        Log.d("MainViewModel", "Shizuku not available, skipping local bundle scan. Using cached index if available.")
-                        null
                     }
-                }
 
-                val updateStatus = characterUpdateJob.await()
-                val charactersWereRefreshed = (updateStatus == "SUCCESS" && hadLocalCharacters)
-                val checkResult = bundleCheckJob.await()
+                    if (checkResult != null) {
+                        if (checkResult.needsScanCount > 0) {
+                            // Bundles need scanning — show confirmation dialog
+                            pendingCheckResult = checkResult
+                            _bundleScanState.value = BundleScanState.Confirmation(checkResult.needsScanCount)
+                            requiresDeferredInitialization = true
+                        } else {
+                            // No bundles need scanning — existing local_bundle_index.json
+                            // is already valid from the last session. Skip the expensive
+                            // finalizeScan() which would re-parse the catalog for nothing.
 
-                if (checkResult != null) {
-                    if (checkResult.needsScanCount > 0) {
-                        // Bundles need scanning — show confirmation dialog
-                        pendingCheckResult = checkResult
-                        _bundleScanState.value = BundleScanState.Confirmation(checkResult.needsScanCount)
-                        requiresDeferredInitialization = true
-                    } else {
-                        // No bundles need scanning — existing local_bundle_index.json
-                        // is already valid from the last session. Skip the expensive
-                        // finalizeScan() which would re-parse the catalog for nothing.
-
-                        // If characters.json was just updated but no new bundles,
-                        // the user likely hasn't updated the game yet.
-                        if (charactersWereRefreshed) {
-                            _showVersionMismatchWarning.value = true
+                            // If characters.json was just updated but no new bundles,
+                            // the user likely hasn't updated the game yet.
+                            if (charactersWereRefreshed) {
+                                _showVersionMismatchWarning.value = true
+                            }
                         }
                     }
+                } else {
+                    Log.d("MainViewModel", "Shizuku not available, skipping local bundle scan. Using cached index if available.")
                 }
             } catch (e: Exception) {
                 Log.e("MainViewModel", "Error during initialization", e)
