@@ -132,6 +132,20 @@ class MainActivity : ComponentActivity() {
                         onDismiss = { viewModel.resetMergeState() }
                     )
                 }
+
+                val showVersionMismatch by viewModel.showVersionMismatchWarning.collectAsState()
+                if (showVersionMismatch) {
+                    VersionMismatchWarningDialog(
+                        onDismiss = { viewModel.dismissVersionMismatchWarning() }
+                    )
+                }
+
+                val bundleScanState by viewModel.bundleScanState.collectAsState()
+                BundleScanDialog(
+                    state = bundleScanState,
+                    onConfirm = { viewModel.confirmBundleScan() },
+                    onDismiss = { viewModel.dismissBundleScan() }
+                )
             }
         }
     }

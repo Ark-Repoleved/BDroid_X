@@ -1,450 +1,247 @@
 # -*- coding: utf-8 -*-
+"""
+Resolves mod file names against the local bundle index.
+
+This is a simplified replacement for the catalog-based resolver. Instead of
+parsing catalog addressable keys and using complex bridge/prefab strategies,
+it directly looks up asset names (m_Name) in the local bundle index.
+
+The matching is straightforward:
+  - Mod file "char000104.png" → looks up "char000104.png" in index
+  - Mod file "char000104.json" → also tries "char000104.skel" (JSON→skel conversion)
+  - Mod file "char000104.atlas.txt" → also tries "char000104.atlas"
+
+The return format is kept compatible with the Kotlin layer.
+"""
 import re
 from pathlib import Path
 
-from catalog_indexer import normalize_filename
 
+def resolve_mod_folder(mod_file_names, local_index):
+    """
+    Resolve a list of mod file names against the local bundle index.
 
-def resolve_mod_folder(mod_file_names, asset_index):
-    unresolved_files = []
+    Finds which bundle(s) contain the target assets, then identifies
+    the single common bundle that all mod files belong to.
+
+    Uses the catalog-based authoritative mapping (catalogAssetToBundle)
+    as primary lookup. Falls back to scan-based assetToBundles if the
+    catalog doesn't have a mapping for a given asset.
+
+    Args:
+        mod_file_names: list of mod file paths/names
+        local_index: dict with 'assetToBundles' and 'catalogAssetToBundle' keys
+
+    Returns:
+        A resolution result dict compatible with the Kotlin layer:
+        {
+            'targetHash': str or None (bundle name),
+            'resolvedFamilyKey': str or None,
+            'resolvedTargets': list of match dicts,
+            'unresolvedFiles': list of unmatched file names,
+            'resolutionState': 'KNOWN' | 'UNKNOWN' | 'INVALID',
+            'errorReason': str or None
+        }
+    """
+    asset_to_bundles = (local_index or {}).get("assetToBundles", {})
+    catalog_asset_to_bundle = (local_index or {}).get("catalogAssetToBundle", {})
+
+    unresolved = []
     file_matches = []
-
-    assets_by_base = (asset_index or {}).get('assetsByBaseName', {})
-    assets_by_exact = (asset_index or {}).get('assetsByExactKey', {})
 
     for file_name in mod_file_names or []:
         base_name = Path(file_name).name
-        lowered_full = (file_name or '').replace('\\', '/').lower()
         candidates = _expand_candidates(base_name)
-        matches = []
 
-        exact_match = assets_by_exact.get(lowered_full)
-        if exact_match:
-            exact_hits = _decode_hits(asset_index, exact_match)
-            exact_hits = _prefer_primary_hits(exact_hits)
-            for hit in exact_hits:
-                matches.append(_build_match(base_name, candidates, hit, 'EXACT', 1.0))
+        matched_candidate = None
+        matched_bundles = set()
+        match_strategy = 'LOCAL_SCAN'
 
         for candidate in candidates:
-            hits = assets_by_base.get(candidate.lower()) or []
-            hits = _decode_hits(asset_index, hits)
-            hits = _prefer_primary_hits(hits)
-            strategy = 'EXACT' if candidate.lower() == base_name.lower() else 'EXTENSION_MAPPING'
-            confidence = 1.0 if strategy == 'EXACT' else 0.9
-            for hit in hits:
-                matches.append(_build_match(base_name, candidates, hit, strategy, confidence))
+            bundles = asset_to_bundles.get(candidate)
+            if bundles:
+                if matched_candidate is None:
+                    matched_candidate = candidate
+                matched_bundles.update(bundles)
 
-        matches = _dedupe_matches(matches)
-        matches = _filter_bridge_noise(base_name, matches)
+        # Use catalog to narrow down if multiple bundles matched
+        if len(matched_bundles) > 1:
+            for candidate in candidates:
+                catalog_bundle = catalog_asset_to_bundle.get(candidate)
+                if catalog_bundle and catalog_bundle in matched_bundles:
+                    matched_bundles = {catalog_bundle}
+                    match_strategy = 'CATALOG_FILTERED'
+                    break
 
-        if matches:
+        if matched_candidate and matched_bundles:
             file_matches.append({
                 'fileName': base_name,
                 'candidates': candidates,
-                'matches': matches,
-                'targetHashes': {m.get('targetHash') for m in matches if m.get('targetHash')}
+                'candidate': matched_candidate,
+                'bundles': matched_bundles,
+                'matchStrategy': match_strategy,
             })
         else:
-            unresolved_files.append(base_name)
+            unresolved.append(base_name)
 
-    _inherit_png_targets_from_spine_pairs(file_matches)
-
-    candidate_sets = [entry['targetHashes'] for entry in file_matches if entry['targetHashes']]
-
-    if not candidate_sets:
+    # No matches at all
+    if not file_matches:
         return {
             'targetHash': None,
             'resolvedFamilyKey': None,
             'resolvedTargets': [],
-            'unresolvedFiles': unresolved_files,
+            'unresolvedFiles': unresolved,
             'resolutionState': 'UNKNOWN',
-            'errorReason': 'No matching target could be resolved'
+            'errorReason': 'No matching bundle found in local index'
         }
 
+    # Find common bundle across all matched files
+    candidate_sets = [entry['bundles'] for entry in file_matches]
+
     intersection = set(candidate_sets[0])
-    for target_set in candidate_sets[1:]:
-        intersection &= target_set
+    for s in candidate_sets[1:]:
+        intersection &= s
 
     union = set()
-    for target_set in candidate_sets:
-        union |= target_set
+    for s in candidate_sets:
+        union |= s
 
+    target_bundle = None
     if len(intersection) == 1:
-        target_hash = next(iter(intersection))
+        target_bundle = next(iter(intersection))
+    elif len(intersection) > 1:
+        # Multiple common bundles — pick alphabetically
+        target_bundle = sorted(intersection)[0]
     elif len(union) == 1:
-        target_hash = next(iter(union))
-    else:
+        # No strict intersection but only one bundle total
+        target_bundle = next(iter(union))
+
+    if target_bundle is None:
+        # Files point to different bundles — can't determine a single target
         return {
             'targetHash': None,
             'resolvedFamilyKey': None,
-            'resolvedTargets': _select_representative_matches(file_matches, None),
-            'unresolvedFiles': unresolved_files,
+            'resolvedTargets': [
+                _build_target(entry) for entry in file_matches
+            ],
+            'unresolvedFiles': unresolved,
             'resolutionState': 'INVALID',
-            'errorReason': 'Multiple targets detected in one mod folder'
+            'errorReason': 'Mod files map to different bundles'
         }
 
-    resolved_targets = _select_representative_matches(file_matches, target_hash)
-    family_keys = {
-        _normalize_family_key(match.get('familyKey'))
-        for match in resolved_targets
-        if _normalize_family_key(match.get('familyKey'))
-    }
+    resolved_targets = [
+        _build_target(entry, target_bundle) for entry in file_matches
+    ]
+    family_key = _compute_family_key(file_matches)
 
     return {
-        'targetHash': target_hash,
-        'resolvedFamilyKey': next(iter(family_keys)) if len(family_keys) == 1 else None,
+        'targetHash': target_bundle,
+        'resolvedFamilyKey': family_key,
         'resolvedTargets': resolved_targets,
-        'unresolvedFiles': unresolved_files,
+        'unresolvedFiles': unresolved,
         'resolutionState': 'KNOWN',
         'errorReason': None
     }
 
 
-def _expand_candidates(base_name: str):
-    candidates = list(dict.fromkeys(normalize_filename(base_name)))
+def _expand_candidates(base_name):
+    """
+    Expand a mod filename to possible asset names in the bundle.
 
-    lowered_base = (base_name or '').strip().lower()
-    stem = _mod_asset_stem(lowered_base)
-    if stem:
-        if re.fullmatch(r'illust_dating\d+', stem, re.IGNORECASE):
-            candidates.extend([
-                f'{stem}.prefab',
-                f'char/datingillust/{stem}.prefab',
-            ])
+    Handles extension mappings:
+      .json       → also try .skel    (mod JSON animation → bundle skel TextAsset)
+      .skel.bytes → also try .skel    (catalog convention → actual m_Name)
+      .atlas.txt  → also try .atlas   (catalog convention → actual m_Name)
+    """
+    lowered = (base_name or "").strip().lower()
+    if not lowered:
+        return []
 
-        if re.fullmatch(r'char\d{6}', stem, re.IGNORECASE):
-            candidates.extend([
-                f'illust_{stem}_01.prefab',
-                f'illust_{stem}_1.prefab',
-            ])
+    candidates = [lowered]
 
-        if re.fullmatch(r'npc\d{6}', stem, re.IGNORECASE):
-            candidates.extend([
-                f'illust_{stem}_01.prefab',
-                f'illust_{stem}_1.prefab',
-                f'illust_{stem}_2.prefab',
-            ])
+    # JSON animation → skel (user provides .json, bundle has .skel TextAsset)
+    if lowered.endswith('.json'):
+        candidates.append(lowered[:-5] + '.skel')
 
-        if _is_rhythm_hit_anim_stem(stem):
-            candidates.extend(_rhythm_bridge_candidates())
+    # .skel.bytes → .skel (catalog uses .skel.bytes, bundle m_Name is .skel)
+    if lowered.endswith('.skel.bytes'):
+        candidates.append(lowered[:-6])  # strip '.bytes'
 
-    bridge_key = _extract_sactx_bridge_key(base_name)
-    if bridge_key:
-        lowered = bridge_key.lower()
-        candidates.extend([
-            lowered,
-            f"{lowered}.spriteatlasv2"
-        ])
+    # .atlas.txt → .atlas
+    if lowered.endswith('.atlas.txt'):
+        candidates.append(lowered[:-4])  # strip '.txt'
 
     return list(dict.fromkeys(candidates))
 
 
-def _mod_asset_stem(asset_name: str):
-    lowered = (asset_name or '').strip().lower()
-    if not lowered:
-        return None
-
-    for suffix in ('.skel.bytes', '.atlas.txt'):
-        if lowered.endswith(suffix):
-            return lowered[:-len(suffix)]
-
-    return Path(lowered).stem
-
-
-
-def _extract_sactx_bridge_key(file_name: str):
-    lowered = (file_name or '').strip().lower()
-    if not lowered.startswith('sactx-'):
-        return None
-
-    stem = Path(lowered).stem
-    match = re.search(r'-(localpacktitle\d+_[a-z0-9]+)-[0-9a-f]{6,}$', stem, re.IGNORECASE)
-    if not match:
-        return None
-
-    return match.group(1)
-
-
-def _is_rhythm_hit_anim_stem(stem: str):
-    if not stem:
-        return False
-    return re.fullmatch(r'rhythmhitanim(?:_\d+)?', stem, re.IGNORECASE) is not None
-
-
-def _rhythm_bridge_candidates():
-    return [
-        f'rhythm_char{n:03d}.prefab'
-        for n in range(1, 6)
-    ]
-
-
-def _decode_hits(asset_index, raw_hits):
-    if raw_hits is None:
-        return []
-    if not isinstance(raw_hits, list):
-        raw_hits = [raw_hits]
-
-    decoded = []
-    for item in raw_hits:
-        hit = _decode_hit(asset_index, item)
-        if hit:
-            decoded.append(hit)
-    return decoded
-
-
-def _decode_hit(asset_index, raw_hit):
-    if isinstance(raw_hit, dict):
-        return raw_hit
-    if not isinstance(raw_hit, int):
-        return None
-
-    records = (asset_index or {}).get('records') or []
-    strings = (asset_index or {}).get('strings') or []
-    if raw_hit < 0 or raw_hit >= len(records):
-        return None
-
-    record = records[raw_hit]
-    if not isinstance(record, list) or len(record) < 3:
-        return None
-
-    asset_key = _string_at(strings, record[0])
-    target_hash = _string_at(strings, record[1])
-    family_key = _string_at(strings, record[2])
+def _build_target(entry, target_bundle=None):
+    """Build a resolved target dict for Kotlin compatibility."""
+    bundle_name = target_bundle or (sorted(entry['bundles'])[0] if entry['bundles'] else None)
+    family_key = _extract_stem(entry['fileName'])
 
     return {
-        'assetKey': asset_key,
-        'bundleName': None,
-        'targetHash': target_hash,
-        'familyKey': family_key
-    }
-
-
-def _string_at(strings, index):
-    if index is None or index < 0 or index >= len(strings):
-        return None
-    return strings[index]
-
-
-def _prefer_primary_hits(hits):
-    if not hits:
-        return []
-
-    primary_hits = [hit for hit in hits if '/censorship/' not in (hit.get('assetKey') or '')]
-    return primary_hits if primary_hits else hits
-
-
-def _build_match(base_name: str, candidates, matched, strategy: str, confidence: float):
-    target_hash = matched.get('targetHash')
-    family_key = _normalize_family_key(matched.get('familyKey'))
-    return {
-        'originalFileName': base_name,
-        'normalizedCandidates': candidates,
-        'resolvedAssetKey': matched.get('assetKey'),
-        'resolvedBundleName': matched.get('bundleName'),
-        'resolvedBundlePath': None,
-        'assetType': _infer_asset_type(base_name),
-        'targetHash': target_hash,
+        'originalFileName': entry['fileName'],
+        'normalizedCandidates': entry.get('candidates', []),
+        'resolvedAssetKey': entry['candidate'],
+        'resolvedBundleName': bundle_name,
+        'assetType': _infer_asset_type(entry['fileName']),
+        'targetHash': bundle_name,
         'familyKey': family_key,
-        'matchStrategy': strategy,
-        'confidence': confidence
+        'matchStrategy': entry.get('matchStrategy', 'LOCAL_SCAN'),
+        'confidence': 1.0,
     }
 
 
-def _dedupe_matches(matches):
-    deduped = []
-    seen = set()
-    for match in matches:
-        key = (
-            match.get('resolvedAssetKey'),
-            match.get('targetHash'),
-            match.get('familyKey'),
-            match.get('matchStrategy')
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(match)
-    return deduped
-
-
-def _filter_bridge_noise(base_name: str, matches):
-    if not matches:
-        return matches
-
-    lowered = (base_name or '').strip().lower()
-    stem = _mod_asset_stem(lowered)
-    if not stem:
-        return matches
-
-    if _is_rhythm_hit_anim_stem(stem):
-        pattern = re.compile(r'(^|.*/)rhythm_char\d{3}\.prefab$', re.IGNORECASE)
-        rhythm_matches = []
-        for match in matches:
-            asset_key = (match.get('resolvedAssetKey') or '').lower()
-            if pattern.search(asset_key):
-                rhythm_matches.append(match)
-
-        if not rhythm_matches:
-            return matches
-
-        exact_char001 = [
-            match for match in rhythm_matches
-            if (match.get('resolvedAssetKey') or '').lower().endswith('rhythm_char001.prefab')
-        ]
-        if exact_char001:
-            return exact_char001
-
-        return sorted(
-            rhythm_matches,
-            key=lambda match: (match.get('resolvedAssetKey') or '').lower()
-        )[:1]
-
-    if not (
-        lowered.endswith('.skel')
-        or lowered.endswith('.skel.bytes')
-        or lowered.endswith('.json')
-        or lowered.endswith('.atlas')
-        or lowered.endswith('.atlas.txt')
-    ):
-        return matches
-
-    preferred = []
-
-    if re.fullmatch(r'char\d{6}', stem, re.IGNORECASE):
-        pattern = re.compile(rf'(^|.*/)illust_{re.escape(stem)}_\d+\.prefab$', re.IGNORECASE)
-        for match in matches:
-            asset_key = (match.get('resolvedAssetKey') or '').lower()
-            if pattern.search(asset_key):
-                preferred.append(match)
-        return preferred if preferred else matches
-
-    if re.fullmatch(r'npc\d{6}', stem, re.IGNORECASE):
-        pattern = re.compile(rf'(^|.*/)illust_{re.escape(stem)}_\d+\.prefab$', re.IGNORECASE)
-        for match in matches:
-            asset_key = (match.get('resolvedAssetKey') or '').lower()
-            if pattern.search(asset_key):
-                preferred.append(match)
-        return preferred if preferred else matches
-
-    return matches
-
-
-def _inherit_png_targets_from_spine_pairs(file_matches):
-    if not file_matches:
-        return
-
-    anchor_by_stem = {}
-    for entry in file_matches:
-        file_name = entry.get('fileName') or ''
-        lowered = file_name.lower()
-        if lowered.endswith('.png'):
-            continue
-        if not (
-            lowered.endswith('.skel')
-            or lowered.endswith('.skel.bytes')
-            or lowered.endswith('.json')
-            or lowered.endswith('.atlas')
-            or lowered.endswith('.atlas.txt')
-        ):
-            continue
-
-        target_hashes = list(entry.get('targetHashes') or [])
-        if len(target_hashes) != 1:
-            continue
-
-        representative = _prefer_best_match(entry.get('matches') or [])
-        if not representative:
-            continue
-
-        stem = _mod_asset_stem(lowered)
-        if not stem:
-            continue
-
-        anchor_by_stem[stem] = {
-            'targetHash': target_hashes[0],
-            'match': representative,
-        }
-
-    for entry in file_matches:
-        file_name = entry.get('fileName') or ''
-        lowered = file_name.lower()
-        if not lowered.endswith('.png'):
-            continue
-
-        stem = _mod_asset_stem(lowered)
-        anchor = anchor_by_stem.get(stem)
-        if not anchor:
-            continue
-
-        anchor_target_hash = anchor['targetHash']
-        existing_matches = entry.get('matches') or []
-        matching_target = [m for m in existing_matches if m.get('targetHash') == anchor_target_hash]
-        if matching_target:
-            entry['matches'] = matching_target
-            entry['targetHashes'] = {anchor_target_hash}
-            continue
-
-        inherited = dict(anchor['match'])
-        inherited['originalFileName'] = file_name
-        inherited['assetType'] = _infer_asset_type(file_name)
-        inherited['matchStrategy'] = 'EXTENSION_MAPPING'
-        inherited['confidence'] = min(float(inherited.get('confidence') or 0.9), 0.9)
-        entry['matches'] = [inherited]
-        entry['targetHashes'] = {anchor_target_hash}
-
-
-
-def _select_representative_matches(file_matches, target_hash):
-    resolved_targets = []
-    for entry in file_matches:
-        matches = entry['matches']
-        chosen = None
-
-        if target_hash:
-            matching_target = [m for m in matches if m.get('targetHash') == target_hash]
-            chosen = _prefer_best_match(matching_target)
-        else:
-            chosen = _prefer_best_match(matches)
-
-        if chosen:
-            resolved_targets.append(chosen)
-
-    return resolved_targets
-
-
-def _prefer_best_match(matches):
-    if not matches:
-        return None
-
-    strategy_rank = {
-        'EXACT': 0,
-        'EXTENSION_MAPPING': 1,
-        'NONE': 2
-    }
-
-    return sorted(
-        matches,
-        key=lambda m: (
-            strategy_rank.get(m.get('matchStrategy'), 99),
-            m.get('resolvedAssetKey') or ''
-        )
-    )[0]
-
-
-def _infer_asset_type(file_name: str):
-    lowered = (file_name or '').lower()
+def _infer_asset_type(file_name):
+    """Infer the asset type from a mod file extension."""
+    lowered = (file_name or "").lower()
     if lowered.endswith('.png'):
         return 'Texture2D'
     if lowered.endswith('.json'):
         return 'JsonSkeleton'
-    if lowered.endswith('.atlas') or lowered.endswith('.atlas.txt') or lowered.endswith('.skel') or lowered.endswith('.skel.txt') or lowered.endswith('.skel.bytes'):
+    if any(lowered.endswith(ext) for ext in ('.atlas', '.atlas.txt', '.skel', '.skel.txt', '.skel.bytes')):
         return 'TextAsset'
     return 'Unknown'
 
 
-def _normalize_family_key(value: str):
-    if not value:
+def _compute_family_key(file_matches):
+    """
+    Compute a family key from the matched files.
+    The family key groups related assets (e.g., "char000104").
+    """
+    stems = set()
+    for entry in file_matches:
+        stem = _extract_stem(entry['fileName'])
+        if stem:
+            stems.add(stem)
+
+    if len(stems) == 1:
+        return next(iter(stems))
+    return None
+
+
+def _extract_stem(file_name):
+    """
+    Extract the base stem from a filename, removing extensions and numbered suffixes.
+    Examples:
+        "char000104.png"        → "char000104"
+        "char000104_2.png"      → "char000104"
+        "char000104.skel"       → "char000104"
+        "char000104.skel.bytes" → "char000104"
+        "cutscene_char061002.atlas" → "cutscene_char061002"
+    """
+    lowered = (file_name or "").strip().lower()
+    if not lowered:
         return None
-    lowered = value.lower()
-    lowered = re.sub(r'_(\d+)$', '', lowered)
-    return lowered
+
+    # Remove known compound extensions first
+    for ext in ('.skel.bytes', '.atlas.txt', '.skel.txt'):
+        if lowered.endswith(ext):
+            lowered = lowered[:-len(ext)]
+            break
+    else:
+        lowered = Path(lowered).stem
+
+    # Remove numbered suffix like _2, _3
+    stem = re.sub(r'_\d+$', '', lowered)
+    return stem if stem else None
