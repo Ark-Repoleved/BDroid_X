@@ -2,7 +2,7 @@ package com.example.bd2modmanager.data.repository
 
 import android.content.Context
 import android.net.Uri
-import androidx.documentfile.provider.DocumentFile
+import android.provider.DocumentsContract
 import com.chaquo.python.Python
 import com.example.bd2modmanager.data.model.MatchStrategy
 import com.example.bd2modmanager.data.model.ModCacheInfo
@@ -51,12 +51,36 @@ class ModRepository(
             val newCache = mutableMapOf<String, ModCacheInfo>()
             val tempModsList = mutableListOf<ModInfo>()
             val candidates = mutableListOf<ScannedModCandidate>()
-            val files = DocumentFile.fromTreeUri(context, dirUri)?.listFiles() ?: emptyArray()
 
-            files.filter { it.isDirectory || it.name?.endsWith(".zip", ignoreCase = true) == true }
-                .forEach { file ->
-                    val uriString = file.uri.toString()
-                    val lastModified = file.lastModified()
+            // Single ContentResolver query replaces DocumentFile.listFiles() + per-file queries.
+            // DocumentFile does O(n*k) queries; this does O(1) regardless of file count.
+            val treeDocId = DocumentsContract.getTreeDocumentId(dirUri)
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(dirUri, treeDocId)
+            val projection = arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED
+            )
+
+            context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mimeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                val modifiedCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+
+                while (cursor.moveToNext()) {
+                    val documentId = cursor.getString(idCol) ?: continue
+                    val displayName = cursor.getString(nameCol) ?: continue
+                    val mimeType = cursor.getString(mimeCol) ?: ""
+                    val lastModified = cursor.getLong(modifiedCol)
+
+                    val isDirectory = mimeType == DocumentsContract.Document.MIME_TYPE_DIR
+                    val isZip = displayName.endsWith(".zip", ignoreCase = true)
+                    if (!isDirectory && !isZip) continue
+
+                    val fileUri = DocumentsContract.buildDocumentUriUsingTree(dirUri, documentId)
+                    val uriString = fileUri.toString()
                     val cachedInfo = existingCache[uriString]
 
                     if (cachedInfo != null && cachedInfo.lastModified == lastModified) {
@@ -68,7 +92,7 @@ class ModRepository(
                                 costume = cachedInfo.costume,
                                 type = cachedInfo.type,
                                 isEnabled = false,
-                                uri = file.uri,
+                                uri = fileUri,
                                 targetHashedName = cachedInfo.targetHashedName,
                                 isDirectory = cachedInfo.isDirectory,
                                 resolutionState = cachedInfo.resolutionState,
@@ -79,25 +103,25 @@ class ModRepository(
                             )
                         )
                     } else {
-                        val modName = file.name?.removeSuffix(".zip") ?: ""
-                        val isDirectory = file.isDirectory
+                        val modName = displayName.removeSuffix(".zip")
                         val modDetails = if (isDirectory) {
-                            extractModDetailsFromDirectory(file.uri)
+                            extractModDetailsFromDirectory(fileUri)
                         } else {
-                            extractModDetailsFromUri(file.uri)
+                            extractModDetailsFromUri(fileUri)
                         }
                         candidates.add(
                             ScannedModCandidate(
                                 uriString = uriString,
                                 lastModified = lastModified,
                                 name = modName,
-                                uri = file.uri,
+                                uri = fileUri,
                                 isDirectory = isDirectory,
                                 modDetails = modDetails
                             )
                         )
                     }
                 }
+            }
 
             if (candidates.isNotEmpty()) {
                 if (!Python.isStarted()) {
@@ -269,12 +293,24 @@ class ModRepository(
         val fileNames = mutableListOf<String>()
         var fileId: String? = null
         try {
-            DocumentFile.fromTreeUri(context, dirUri)?.listFiles()?.forEach { file ->
-                val entryName = file.name ?: ""
-                if (shouldIgnoreModEntry(entryName)) return@forEach
-                fileNames.add(entryName)
-                if (file.isFile) {
-                    if (fileId == null) fileId = characterRepository.extractFileId(entryName)
+            val docId = DocumentsContract.getDocumentId(dirUri)
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(dirUri, docId)
+            val projection = arrayOf(
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE
+            )
+            context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                val nameCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mimeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                while (cursor.moveToNext()) {
+                    val entryName = cursor.getString(nameCol) ?: continue
+                    val mimeType = cursor.getString(mimeCol) ?: ""
+                    if (shouldIgnoreModEntry(entryName)) continue
+                    fileNames.add(entryName)
+                    val isFile = mimeType != DocumentsContract.Document.MIME_TYPE_DIR
+                    if (isFile && fileId == null) {
+                        fileId = characterRepository.extractFileId(entryName)
+                    }
                 }
             }
         } catch (e: Exception) {
