@@ -23,25 +23,68 @@ class SerializationUtilities:
         JsonObject = 7
 
 def get_cdn_version(quality):
-    url = "https://mt.bd2.pmang.cloud/MaintenanceInfo"
-    headers = {
-        'accept': '*/*',
-        'accept-encoding': 'gzip',
-        'connection': 'close',
-        'content-type': 'multipart/form-data',
-        'host': 'mt.bd2.pmang.cloud',
-        'user-agent': 'UnityPlayer/2022.3.22f1 (UnityWebRequest/1.0, libcurl/8.5.0-DEV)',
-    }
-    data = 'EAQ='
-    response = requests.put(url, headers=headers, data=data)
+    try:
+        from java.net import URL
+        from java.lang import String
 
-    base64_data = response.json()['data']
-    binary_data = base64.b64decode(base64_data)
+        url = URL("https://mt.bd2.pmang.cloud/MaintenanceInfo")
+        conn = url.openConnection()
+        conn.setRequestMethod("PUT")
+        conn.setRequestProperty("accept", "*/*")
+        conn.setRequestProperty("accept-encoding", "gzip")
+        conn.setRequestProperty("connection", "close")
+        conn.setRequestProperty("content-type", "multipart/form-data")
+        conn.setRequestProperty("host", "mt.bd2.pmang.cloud")
+        conn.setRequestProperty("user-agent", "UnityPlayer/2022.3.22f1 (UnityWebRequest/1.0, libcurl/8.5.0-DEV)")
+        conn.setDoOutput(True)
 
-    maintenance_response = maintenance_info_pb2.MaintenanceInfoResponse()
-    maintenance_response.ParseFromString(binary_data)
+        # Write data 'EAQ='
+        out = conn.getOutputStream()
+        data_bytes = b"EAQ="
+        out.write(data_bytes)
+        out.flush()
+        out.close()
 
-    return maintenance_response.market_info.bundle_version if quality == 'HD' else maintenance_response.market_info.bundle_version_sd
+        # Read JSON response
+        response_code = conn.getResponseCode()
+        if response_code == 200:
+            input_stream = conn.getInputStream()
+            
+            # Use gzip stream if the response is gzipped
+            # Actually HttpURLConnection handles gzip transparently in Android usually, but just in case:
+            content_encoding = conn.getContentEncoding()
+            if content_encoding and "gzip" in content_encoding.lower():
+                from java.util.zip import GZIPInputStream
+                input_stream = GZIPInputStream(input_stream)
+                
+            from java.io import BufferedReader, InputStreamReader
+            reader = BufferedReader(InputStreamReader(input_stream))
+            
+            response_string = ""
+            while True:
+                line = reader.readLine()
+                if line is None:
+                    break
+                response_string += line
+                
+            reader.close()
+            
+            response_json = json.loads(str(response_string))
+            base64_data = response_json['data']
+            binary_data = base64.b64decode(base64_data)
+
+            maintenance_response = maintenance_info_pb2.MaintenanceInfoResponse()
+            maintenance_response.ParseFromString(binary_data)
+
+            return maintenance_response.market_info.bundle_version if quality == 'HD' else maintenance_response.market_info.bundle_version_sd
+        else:
+            print(f"Failed to get CDN version. HTTP Code: {response_code}")
+    except Exception as e:
+        print(f"Native HttpURLConnection failed in get_cdn_version: {e}")
+        import traceback
+        traceback.print_exc()
+        
+    return None
 
 def download_catalog(output_dir, quality, version, cache, lock, progress_callback=None):
     # Check the in-memory cache first
