@@ -26,7 +26,7 @@
 ### Requirements
 *   Android 8 or higher.
 *   The latest official version of BrownDust 2 installed.
-*   [Shizuku](https://shizuku.rikka.app/) for bundles scan and one-tap file transfer to the game directory, you need this for the app to work.
+*   [Shizuku](https://shizuku.rikka.app/) for bundles scan and one-tap file transfer, you need this for the app to work.
 
 ### Installation & Setup
 
