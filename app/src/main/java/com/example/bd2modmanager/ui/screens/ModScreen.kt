@@ -92,7 +92,7 @@ fun ModScreen(
                             containerColor = MaterialTheme.colorScheme.secondaryContainer,
                             contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                             icon = { Icon(Icons.Default.HighQuality, contentDescription = "Quality") },
-                            text = { Text("Quality: $selectedQuality") }
+                            text = { Text(selectedQuality) }
                         )
                         DropdownMenu(
                             expanded = qualityExpanded,
