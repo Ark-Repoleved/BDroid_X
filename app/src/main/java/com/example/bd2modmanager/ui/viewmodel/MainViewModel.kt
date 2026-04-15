@@ -225,8 +225,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     fun setSelectedQuality(quality: String) {
-        _selectedQuality.value = quality
-        appContext?.getSharedPreferences("app_settings", Context.MODE_PRIVATE)?.edit()?.putString("selected_quality", quality)?.apply()
+        val mappedQuality = if (quality == "FHD") "HD" else quality
+        _selectedQuality.value = mappedQuality
+        appContext?.getSharedPreferences("app_settings", Context.MODE_PRIVATE)?.edit()?.putString("selected_quality", mappedQuality)?.apply()
     }
 
     // --- Bundle Scan Dialog Actions ---
