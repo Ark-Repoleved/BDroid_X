@@ -304,6 +304,9 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
     """
     global current_cache_key
 
+    # FHD 選項在下載時仍使用 HD 資源（CDN 無獨立 FHD 路徑）
+    download_quality = "HD" if quality == "FHD" else quality
+
     def report_progress(message):
         if progress_callback:
             progress_callback(message)
@@ -316,8 +319,8 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
                 catalog_cache.clear()
                 current_cache_key = cache_key
 
-        report_progress(f"Fetching CDN version for {quality} quality...")
-        version = cdn_downloader.get_cdn_version(quality)
+        report_progress(f"Fetching CDN version for {download_quality} quality...")
+        version = cdn_downloader.get_cdn_version(download_quality)
         if not version:
             return False, "Failed to get CDN version."
 
@@ -325,7 +328,7 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
         with catalog_cache_lock:
             _prune_catalog_cache(version)
         catalog_content, error = cdn_downloader.download_catalog(
-            output_dir, quality, version, catalog_cache, catalog_cache_lock, progress_callback
+            output_dir, download_quality, version, catalog_cache, catalog_cache_lock, progress_callback
         )
         if error:
             return False, error
@@ -334,7 +337,7 @@ def download_bundle(hashed_name, quality, output_dir, cache_key, progress_callba
         output_file_path, error = cdn_downloader.find_and_download_bundle(
             catalog_content=catalog_content,
             version=version,
-            quality=quality,
+            quality=download_quality,
             hashed_name=hashed_name,
             output_dir=output_dir,
             progress_callback=progress_callback
