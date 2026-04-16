@@ -804,45 +804,66 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
         val relativePathWithSlash = File(Environment.DIRECTORY_DOWNLOADS, finalRelativePath.parent).path + File.separator
 
-        // Check if file exists and delete it first to ensure overwrite
         val queryUri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
         val projection = arrayOf(MediaStore.MediaColumns._ID)
         val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
         val selectionArgs = arrayOf(relativePathWithSlash, finalRelativePath.name)
 
-        resolver.query(queryUri, projection, selection, selectionArgs, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val idColumn = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
-                if (idColumn != -1) {
-                    val id = cursor.getLong(idColumn)
-                    val existingUri = ContentUris.withAppendedId(queryUri, id)
-                    try {
-                        resolver.delete(existingUri, null, null)
-                    } catch (e: Exception) {
-                        // Ignore deletion errors, e.g., file is locked
-                        e.printStackTrace()
+        // Helper: find existing MediaStore entry for this path
+        fun findExistingUri(): Uri? {
+            resolver.query(queryUri, projection, selection, selectionArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idColumn = cursor.getColumnIndex(MediaStore.MediaColumns._ID)
+                    if (idColumn != -1) {
+                        return ContentUris.withAppendedId(queryUri, cursor.getLong(idColumn))
                     }
                 }
             }
+            return null
         }
 
+        // Helper: write file content to a MediaStore URI
+        fun writeToUri(targetUri: Uri): Boolean {
+            return try {
+                resolver.openOutputStream(targetUri, "wt")?.use { outputStream ->
+                    file.inputStream().use { inputStream -> inputStream.copyTo(outputStream) }
+                }
+                true
+            } catch (e: Exception) {
+                e.printStackTrace()
+                false
+            }
+        }
+
+        // Strategy 1: Try to overwrite an existing entry directly
+        findExistingUri()?.let { existingUri ->
+            if (writeToUri(existingUri)) return existingUri
+            // If write failed, try deleting and re-inserting
+            try { resolver.delete(existingUri, null, null) } catch (_: Exception) {}
+        }
+
+        // Strategy 2: Insert a new entry
         val contentValues = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, finalRelativePath.name)
             put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
             put(MediaStore.MediaColumns.RELATIVE_PATH, relativePathWithSlash)
         }
 
-        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-        uri?.let {
-            try {
-                resolver.openOutputStream(it)?.use { outputStream -> file.inputStream().use { inputStream -> inputStream.copyTo(outputStream) } }
-                return it
-            } catch (e: Exception) {
-                e.printStackTrace()
-                // Clean up the new entry if writing fails
-                resolver.delete(it, null, null)
+        try {
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            if (uri != null) {
+                if (writeToUri(uri)) return uri
+                // Clean up if write fails
+                try { resolver.delete(uri, null, null) } catch (_: Exception) {}
+            }
+        } catch (e: Exception) {
+            // UNIQUE constraint failure from a concurrent insert — fall back to overwrite
+            Log.w("MainViewModel", "MediaStore insert conflict, falling back to overwrite: ${e.message}")
+            findExistingUri()?.let { existingUri ->
+                if (writeToUri(existingUri)) return existingUri
             }
         }
+
         return null
     }
 
