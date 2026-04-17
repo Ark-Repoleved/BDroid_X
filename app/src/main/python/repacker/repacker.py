@@ -154,22 +154,10 @@ def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
         # This case should be handled by the calling function, but as a safeguard:
         return "Merge not needed, texture count is already at or below target."
 
-    from PIL import ImageFile
-    ImageFile.LOAD_TRUNCATED_IMAGES = True
-
     report_progress(f"Merging {len(original_png_files)} textures down to {target_count}.")
 
-    images = {}
-    for p in original_png_files:
-        try:
-            img = Image.open(p)
-            img.load()  # Force reading the entire image immediately to catch corruption early
-            images[os.path.basename(p)] = img
-        except OSError as e:
-            # Clean up what we opened so far
-            for opened_img in images.values():
-                opened_img.close()
-            return f"FAILED: Could not decode image file '{os.path.basename(p)}'. The PNG stream might be corrupted or in an unsupported format. Error: {e}"
+    images = {os.path.basename(p): Image.open(p) for p in original_png_files}
+    
     merging_plan = {i: [] for i in range(target_count)}
     for i, png_path in enumerate(original_png_files):
         merging_plan[i % target_count].append(os.path.basename(png_path))
