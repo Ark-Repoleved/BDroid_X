@@ -133,7 +133,11 @@ from utils.atlas_operations import parse_atlas_file
 def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress):
     report_progress(f"Starting Spine asset merge for '{base_name}' in temporary directory.")
 
-    original_png_files = sorted(glob.glob(os.path.join(mod_dir_path, f'{base_name}*.png')))
+    _png_pattern = re.compile(rf'^{re.escape(base_name)}(_\d+)?\.png$', re.IGNORECASE)
+    original_png_files = sorted([
+        os.path.join(mod_dir_path, f) for f in os.listdir(mod_dir_path)
+        if _png_pattern.match(f)
+    ])
     original_atlas_path = os.path.join(mod_dir_path, f"{base_name}.atlas")
 
     if not original_png_files or not os.path.exists(original_atlas_path):
@@ -447,7 +451,8 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
 
                 report_progress(f"Found {original_texture_count} matching textures in the original game file for {spine_base_name}.")
 
-                mod_texture_count = len(glob.glob(os.path.join(mod_dir_path, f'{spine_base_name}*.png')))
+                _mod_png_pattern = re.compile(rf'^{re.escape(spine_base_name)}(_\d+)?\.png$', re.IGNORECASE)
+                mod_texture_count = sum(1 for f in os.listdir(mod_dir_path) if _mod_png_pattern.match(f))
                 report_progress(f"Mod has {mod_texture_count} textures for {spine_base_name}.")
 
                 if mod_texture_count > original_texture_count and original_texture_count > 0:

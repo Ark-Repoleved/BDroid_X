@@ -388,6 +388,65 @@ def _score_bundle_for_asset(asset_name, catalog_keys):
     return best_score
 
 
+def _get_latest_catalog_mtime(output_dir):
+    """Return the mtime of the newest catalog_*.json file, or 0 if none exists."""
+    catalogs = glob.glob(os.path.join(output_dir, "catalog_*.json"))
+    if not catalogs:
+        return 0
+    latest = max(catalogs, key=os.path.getmtime)
+    try:
+        return os.path.getmtime(latest)
+    except OSError:
+        return 0
+
+
+def _apply_catalog_disambiguation(index_data, output_dir):
+    """
+    (Re-)compute catalogAssetToBundle from the current catalog on disk.
+
+    Called at load time to ensure the disambiguation always reflects the
+    latest available catalog, even if it was missing during the original scan.
+
+    Returns:
+        Tuple (ambiguous_count, resolved_count) for logging.
+    """
+    asset_to_bundles = index_data.get("assetToBundles", {})
+
+    download_names, catalog_bundle_to_keys = _parse_catalog_data(output_dir)
+
+    # Update downloadNames on scanned bundles
+    scanned_bundles = index_data.get("scannedBundles", {})
+    for b_name, b_info in scanned_bundles.items():
+        b_info["downloadName"] = download_names.get(b_name, "")
+
+    # Build catalogAssetToBundle by cross-referencing:
+    # For each ambiguous asset (multiple bundles), score each bundle's
+    # catalog asset keys against the m_Name and pick the best match.
+    catalog_asset_to_bundle = {}
+    ambiguous_count = 0
+    resolved_count = 0
+    for asset_name, bundle_list in asset_to_bundles.items():
+        if len(bundle_list) <= 1:
+            continue  # Only one bundle — no ambiguity
+        ambiguous_count += 1
+
+        best_bundle = None
+        best_score = 0
+        for bundle_name in bundle_list:
+            cat_keys = catalog_bundle_to_keys.get(bundle_name, [])
+            score = _score_bundle_for_asset(asset_name, cat_keys)
+            if score > best_score:
+                best_score = score
+                best_bundle = bundle_name
+
+        if best_bundle:
+            catalog_asset_to_bundle[asset_name] = best_bundle
+            resolved_count += 1
+
+    index_data["catalogAssetToBundle"] = catalog_asset_to_bundle
+    return ambiguous_count, resolved_count
+
+
 def finalize_scan(output_dir, progress_callback=None):
     """
     Step 3: Merge cached + newly scanned results and save the final index.
@@ -433,39 +492,9 @@ def finalize_scan(output_dir, progress_callback=None):
                 if bundle_name not in asset_to_bundles[asset_name]:
                     asset_to_bundles[asset_name].append(bundle_name)
 
-        # Parse catalog for downloadNames and bundle→keys mapping
-        download_names, catalog_bundle_to_keys = _parse_catalog_data(output_dir)
-        for b_name, b_info in all_bundles.items():
-            b_info["downloadName"] = download_names.get(b_name, "")
-
-        # Build catalogAssetToBundle by cross-referencing:
-        # For each ambiguous asset (multiple bundles), score each bundle's
-        # catalog asset keys against the m_Name and pick the best match.
-        catalog_asset_to_bundle = {}
-        ambiguous_count = 0
-        resolved_count = 0
-        for asset_name, bundle_list in asset_to_bundles.items():
-            if len(bundle_list) <= 1:
-                continue  # Only one bundle — no ambiguity
-            ambiguous_count += 1
-
-            best_bundle = None
-            best_score = 0
-            for bundle_name in bundle_list:
-                cat_keys = catalog_bundle_to_keys.get(bundle_name, [])
-                score = _score_bundle_for_asset(asset_name, cat_keys)
-                if score > best_score:
-                    best_score = score
-                    best_bundle = bundle_name
-
-            if best_bundle:
-                catalog_asset_to_bundle[asset_name] = best_bundle
-                resolved_count += 1
-
-        report(f"Catalog: {len(download_names)} downloadNames, "
-               f"{ambiguous_count} ambiguous assets, {resolved_count} resolved")
-
-        # Save index to disk
+        # Save index to disk (catalogAssetToBundle is NOT persisted here;
+        # it will be recomputed from the current catalog at load time by
+        # _apply_catalog_disambiguation() to guarantee freshness.)
         os.makedirs(output_dir, exist_ok=True)
         index = {
             "schemaVersion": INDEX_SCHEMA_VERSION,
@@ -473,9 +502,14 @@ def finalize_scan(output_dir, progress_callback=None):
             "bundleCount": len(all_bundles),
             "assetCount": len(asset_to_bundles),
             "assetToBundles": asset_to_bundles,
-            "catalogAssetToBundle": catalog_asset_to_bundle,
+            "catalogAssetToBundle": {},
             "scannedBundles": all_bundles,
         }
+
+        # Apply catalog disambiguation for logging purposes
+        ambiguous_count, resolved_count = _apply_catalog_disambiguation(index, output_dir)
+        report(f"Catalog disambiguation: "
+               f"{ambiguous_count} ambiguous assets, {resolved_count} resolved")
 
         cache_path = os.path.join(output_dir, "local_bundle_index.json")
         with open(cache_path, "w", encoding="utf-8") as f:
@@ -504,17 +538,25 @@ def finalize_scan(output_dir, progress_callback=None):
 # ---------------------------------------------------------------------------
 
 # In-memory cache: avoids re-reading and re-parsing the large JSON on every resolve call.
-_index_cache = None       # cached dict
-_index_cache_mtime = 0    # mtime of the file when it was cached
+_index_cache = None            # cached dict
+_index_cache_mtime = 0         # mtime of the index file when it was cached
+_catalog_cache_mtime = 0       # mtime of the catalog file when disambiguation was last applied
 
 def load_local_index(output_dir):
     """
     Load the local bundle index from disk cache, with in-memory caching.
 
+    catalogAssetToBundle is always re-derived from the latest catalog_*.json
+    on disk so that disambiguation stays correct regardless of whether the
+    catalog was available at the time of the original scan.
+
+    The cache is invalidated when either the index file or the catalog file
+    changes on disk.
+
     Returns:
         The index dict, or None if no valid cache exists.
     """
-    global _index_cache, _index_cache_mtime
+    global _index_cache, _index_cache_mtime, _catalog_cache_mtime
 
     cache_path = os.path.join(output_dir, "local_bundle_index.json")
 
@@ -523,13 +565,21 @@ def load_local_index(output_dir):
     except OSError:
         return None
 
-    # Return cached version if file hasn't changed
-    if _index_cache is not None and current_mtime == _index_cache_mtime:
+    current_catalog_mtime = _get_latest_catalog_mtime(output_dir)
+
+    # Return cached version if neither the index nor the catalog has changed
+    if (_index_cache is not None
+            and current_mtime == _index_cache_mtime
+            and current_catalog_mtime == _catalog_cache_mtime):
         return _index_cache
 
     data = _load_existing_cache(cache_path)
     if data is not None:
+        # (Re-)derive catalogAssetToBundle from the current catalog on disk.
+        _apply_catalog_disambiguation(data, output_dir)
+
         _index_cache = data
         _index_cache_mtime = current_mtime
+        _catalog_cache_mtime = current_catalog_mtime
 
     return data
