@@ -6,7 +6,6 @@ import re
 import requests
 import struct
 from pathlib import Path
-from tqdm import tqdm
 
 import maintenance_info_pb2
 
@@ -190,47 +189,83 @@ def _try_download_bundle(url, output_file_path, bundle_size, progress_callback=N
         return False, str(e)
 
 
-def _generate_download_urls(base_url, download_name, bundle_name, bundle_hash):
-    """
-    Generate a list of possible download URLs to try.
-    Handles cases where the CDN file may or may not include the hash in the filename.
+def _generate_download_urls(base_url, download_name, bundle_name, bundle_hash, internal_id=None):
+    """Generate CDN URLs, preferring the actual path recorded in the catalog.
+
+    Addressables primary keys may include a content hash that is not part of the
+    object path on the CDN. The catalog's internal ID records that canonical path;
+    guessing from the key or opaque bundle identity fails for such bundles.
+
+    ``bundle_hash`` is retained for compatibility with legacy catalogs and call
+    sites; current catalog download paths generally use ``m_BundleName`` instead.
     """
     urls = []
-    
-    # 1. Primary: use raw download_name from catalog
-    urls.append(f"{base_url}/{download_name}")
-    
-    # 2. If download_name doesn't contain hash, try adding it
-    #    e.g., common-skeleton-data_assets_all.bundle -> common-skeleton-data_assets_all_{hash}.bundle
-    if bundle_hash and bundle_hash not in download_name:
-        if download_name.endswith('.bundle'):
-            name_with_hash = download_name[:-7] + f"_{bundle_hash}.bundle"
-            urls.append(f"{base_url}/{name_with_hash}")
-    
-    # 3. If download_name contains hash but CDN expects without hash, try removing it
-    #    e.g., common-skeleton-data_assets_all_{hash}.bundle -> common-skeleton-data_assets_all.bundle
-    if bundle_hash and bundle_hash in download_name:
-        name_without_hash = download_name.replace(f"_{bundle_hash}", "")
-        if name_without_hash != download_name:
-            urls.append(f"{base_url}/{name_without_hash}")
-    
-    # 4. Use bundle_name directly if different from download_name
-    if bundle_name and bundle_name != download_name:
-        urls.append(f"{base_url}/{bundle_name}")
-        # Also try bundle_name with hash
-        if bundle_hash and bundle_name.endswith('.bundle'):
-            name_with_hash = bundle_name[:-7] + f"_{bundle_hash}.bundle"
-            urls.append(f"{base_url}/{name_with_hash}")
-    
-    # Remove duplicates while preserving order
-    seen = set()
-    unique_urls = []
-    for url in urls:
-        if url not in seen:
-            seen.add(url)
-            unique_urls.append(url)
-    
-    return unique_urls
+
+    if isinstance(internal_id, str) and internal_id:
+        # Current catalogs use tokenized IDs such as
+        # {BDNetwork.CdnInfo.Info}/Android/{BDNetwork.CdnInfo.Resolution}/
+        # {BDNetwork.CdnInfo.Version}/bundle/path.bundle. Resolve these using
+        # the versioned CDN root already selected for this catalog.
+        cdn_path_marker = "/ServerData/Android/"
+        cdn_root = (
+            base_url.split(cdn_path_marker, 1)[0] + "/ServerData"
+            if cdn_path_marker in base_url
+            else None
+        )
+        if cdn_root:
+            # base_url is .../Android/{quality}/{version}
+            cdn_quality, cdn_version = base_url.rstrip("/").split("/Android/", 1)[1].split("/", 1)
+            resolved_internal_id = re.sub(
+                r"\{BDNetwork\.CdnInfo\.Info\}", cdn_root,
+                internal_id, flags=re.IGNORECASE,
+            )
+            resolved_internal_id = re.sub(
+                r"\{BDNetwork\.CdnInfo\.Resolution\}", cdn_quality,
+                resolved_internal_id, flags=re.IGNORECASE,
+            )
+            resolved_internal_id = re.sub(
+                r"\{BDNetwork\.CdnInfo\.Version\}", cdn_version,
+                resolved_internal_id, flags=re.IGNORECASE,
+            )
+            resolved_internal_id = re.sub(
+                r"\{UnityEngine\.AddressableAssets\.Addressables\.RuntimePath\}",
+                base_url,
+                resolved_internal_id,
+                flags=re.IGNORECASE,
+            )
+            if "{" not in resolved_internal_id:
+                parsed_internal_id = requests.compat.urlparse(resolved_internal_id)
+                if parsed_internal_id.scheme in ("http", "https"):
+                    urls.append(resolved_internal_id)
+                elif not parsed_internal_id.scheme and not parsed_internal_id.netloc:
+                    # Some catalog versions store a relative or absolute path
+                    # rather than the standard CDN tokenized URL.
+                    path = parsed_internal_id.path.lstrip("/")
+                    if path.startswith("Android/"):
+                        urls.append(f"{cdn_root}/{path}")
+                    else:
+                        urls.append(f"{base_url}/{path}")
+                elif parsed_internal_id.netloc:
+                    relative_path = resolved_internal_id.split("}", 1)[-1].lstrip("/")
+                    if relative_path:
+                        urls.append(f"{base_url}/{relative_path}")
+
+    # Legacy catalogs may not have a usable internal ID. Keep their filename
+    # conventions as fallbacks, but do not prefer guessed names over the ID.
+    if download_name:
+        urls.append(f"{base_url}/{download_name.lstrip('/')}")
+        if bundle_hash and bundle_hash not in download_name and download_name.endswith(".bundle"):
+            urls.append(f"{base_url}/{download_name[:-7]}_{bundle_hash}.bundle")
+        if bundle_hash and bundle_hash in download_name:
+            urls.append(f"{base_url}/{download_name.replace(f'_{bundle_hash}', '')}")
+
+    if bundle_name:
+        urls.append(f"{base_url}/{bundle_name.lstrip('/')}")
+        if bundle_hash and bundle_name.endswith(".bundle"):
+            urls.append(f"{base_url}/{bundle_name[:-7]}_{bundle_hash}.bundle")
+
+    # Remove duplicates while preserving order.
+    return list(dict.fromkeys(urls))
 
 
 def find_and_download_bundle(catalog_content, version, quality, hashed_name, output_dir, progress_callback=None):
@@ -246,6 +281,7 @@ def find_and_download_bundle(catalog_content, version, quality, hashed_name, out
     key_array = base64.b64decode(catalog_content['m_KeyDataString'])
     extra_data = base64.b64decode(catalog_content['m_ExtraDataString'])
     entry_data = base64.b64decode(catalog_content['m_EntryDataString'])
+    internal_ids = catalog_content.get('m_InternalIds') or []
 
     num_buckets = struct.unpack_from('<i', bucket_array, 0)[0]
     data_offsets = []
@@ -262,6 +298,7 @@ def find_and_download_bundle(catalog_content, version, quality, hashed_name, out
     number_of_entries = read_int32_from_byte_array(entry_data, 0)
     index = 4
     for _ in range(number_of_entries):
+        internal_id_index = read_int32_from_byte_array(entry_data, index)
         index += 4 # internal_id
         provider_index = read_int32_from_byte_array(entry_data, index)
         index += 4 # provider_index
@@ -276,18 +313,26 @@ def find_and_download_bundle(catalog_content, version, quality, hashed_name, out
         if provider_index == bundle_provider_index and data_index >= 0:
             bundle_info = read_object_from_byte_array(extra_data, data_index)
             if bundle_info and bundle_info.get('m_BundleName') == hashed_name:
-                raw_key = keys[primary_key_index] if primary_key_index < len(keys) else ''
-                download_name = str(raw_key)
-
-                if not download_name:
-                    continue
+                raw_key = keys[primary_key_index] if 0 <= primary_key_index < len(keys) else ''
+                download_name = str(raw_key) if isinstance(raw_key, str) else ''
+                internal_id = (
+                    internal_ids[internal_id_index]
+                    if 0 <= internal_id_index < len(internal_ids)
+                    else None
+                )
 
                 bundle_size = bundle_info.get('m_BundleSize', 0)
                 bundle_name = bundle_info.get('m_BundleName')
                 bundle_hash = bundle_info.get('m_Hash')
-                
+                if not isinstance(bundle_name, str) or not bundle_name:
+                    return None, f"Catalog entry for bundle {hashed_name} has no valid bundle name."
+
                 base_url = f"https://cdn.bd2.pmang.cloud/ServerData/Android/{quality}/{version}"
-                urls_to_try = _generate_download_urls(base_url, download_name, bundle_name, bundle_hash)
+                urls_to_try = _generate_download_urls(
+                    base_url, download_name, bundle_name, bundle_hash, internal_id
+                )
+                if not urls_to_try:
+                    return None, f"No CDN download path found for bundle {hashed_name}."
                 
                 output_file_path = Path(output_dir).joinpath(bundle_name, bundle_hash, "__data")
                 output_file_path.parent.mkdir(parents=True, exist_ok=True)
