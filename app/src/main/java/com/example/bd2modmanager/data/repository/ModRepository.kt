@@ -26,7 +26,8 @@ class ModRepository(
 ) {
 
     companion object {
-        private const val MOD_CACHE_FILENAME = "mod_cache.json"
+        // Bumped when the cached ModCacheInfo schema changes.
+        private const val MOD_CACHE_FILENAME = "mod_cache_v2.json"
     }
 
     private fun shouldIgnoreModEntry(entryName: String?): Boolean {
@@ -99,7 +100,8 @@ class ModRepository(
                                 targetHash = cachedInfo.targetHash,
                                 resolvedFamilyKey = cachedInfo.resolvedFamilyKey,
                                 unresolvedFiles = cachedInfo.unresolvedFiles,
-                                errorReason = cachedInfo.errorReason
+                                errorReason = cachedInfo.errorReason,
+                                alternativeHashes = cachedInfo.alternativeHashes
                             )
                         )
                     } else {
@@ -164,6 +166,8 @@ class ModRepository(
                     val unresolvedFiles = jsonArrayToStringList(resolvePayload.optJSONArray("unresolvedFiles"))
                     val errorReason = resolvePayload.optString("errorReason").ifBlank { null }
                     val resolvedTargets = parseResolvedTargets(resolvePayload.optJSONArray("resolvedTargets"))
+                    val alternativeHashes = jsonArrayToStringList(resolvePayload.optJSONArray("candidateHashes"))
+                        .filter { it != resolvedHashSafe(resolvePayload) }
                     val bestMatch = characterRepository.findBestMatch(candidate.modDetails.fileId, candidate.modDetails.fileNames)
 
                     val displayCharacter: String
@@ -206,7 +210,8 @@ class ModRepository(
                         targetHash = resolvedHash,
                         resolvedFamilyKey = resolvedFamilyKey,
                         unresolvedFiles = unresolvedFiles,
-                        errorReason = errorReason
+                        errorReason = errorReason,
+                        alternativeHashes = alternativeHashes
                     )
                     newCache[candidate.uriString] = newCacheInfo
 
@@ -225,7 +230,8 @@ class ModRepository(
                             resolvedFamilyKey = resolvedFamilyKey,
                             resolvedTargets = resolvedTargets,
                             unresolvedFiles = unresolvedFiles,
-                            errorReason = errorReason
+                            errorReason = errorReason,
+                            alternativeHashes = alternativeHashes
                         )
                     )
                 }
@@ -240,13 +246,18 @@ class ModRepository(
         return File(context.filesDir, MOD_CACHE_FILENAME)
     }
 
+    private fun resolvedHashSafe(payload: JSONObject): String? =
+        payload.optString("targetHash").ifBlank { null }
+
     private fun loadModCache(): Map<String, ModCacheInfo> {
         val cacheFile = getModCacheFile()
         if (!cacheFile.exists()) return emptyMap()
 
-        val indexFile = File(context.filesDir, "local_bundle_index.json")
-        if (indexFile.exists() && indexFile.lastModified() > cacheFile.lastModified()) {
-            // Unify: If the bundle index updated, all mod cache entries are potentially stale
+        // If the catalog index was rebuilt (game update), cached resolutions are stale.
+        val indexFile = context.filesDir.listFiles { file ->
+            file.name.startsWith("catalog_index_") && file.name.endsWith(".json")
+        }?.maxByOrNull { it.lastModified() }
+        if (indexFile != null && indexFile.lastModified() > cacheFile.lastModified()) {
             return emptyMap()
         }
 

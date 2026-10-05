@@ -8,7 +8,7 @@ import org.json.JSONObject
 
 object ModdingService {
 
-    fun downloadBundle(hashedName: String, quality: String, outputDir: String, cacheKey: String, onProgress: (String) -> Unit): Pair<Boolean, String> {
+    fun downloadBundle(hashedName: String, quality: String, outputDir: String, cacheKey: String, indexDir: String, onProgress: (String) -> Unit): Pair<Boolean, String> {
         return try {
             val py = Python.getInstance()
             val mainScript = py.getModule("main_script")
@@ -19,7 +19,8 @@ object ModdingService {
                 quality,
                 outputDir,
                 cacheKey,
-                PyObject.fromJava(onProgress)
+                PyObject.fromJava(onProgress),
+                indexDir
             ).asList()
 
             val success = result[0].toBoolean()
@@ -31,7 +32,7 @@ object ModdingService {
         }
     }
 
-    fun repackBundle(originalBundlePath: String, moddedAssetsFolder: String, outputPath: String, useAstc: Boolean, onProgress: (String) -> Unit): Pair<Boolean, String> {
+    fun repackBundle(originalBundlePath: String, moddedAssetsFolder: String, outputPath: String, useAstc: Boolean, onProgress: (String) -> Unit): Triple<Boolean, String, List<String>> {
         return try {
             val py = Python.getInstance()
             val mainScript = py.getModule("main_script")
@@ -48,10 +49,14 @@ object ModdingService {
 
             val success = result[0].toBoolean()
             val message = result[1].toString()
-            Pair(success, message)
+            val unmatched = if (result.size > 2) {
+                val array = JSONArray(result[2].toString())
+                buildList { for (i in 0 until array.length()) add(array.optString(i)) }
+            } else emptyList()
+            Triple(success, message, unmatched)
         } catch (e: Exception) {
             e.printStackTrace()
-            Pair(false, e.message ?: "An unknown error occurred in Kotlin.")
+            Triple(false, e.message ?: "An unknown error occurred in Kotlin.", emptyList())
         }
     }
 
@@ -140,67 +145,5 @@ object ModdingService {
         }
     }
 
-    // --- Local bundle scanning (three-step API) ---
-
-    fun checkScanNeeded(outputDir: String, bundleListJson: String, onProgress: (String) -> Unit): String {
-        return try {
-            val py = Python.getInstance()
-            val mainScript = py.getModule("main_script")
-
-            val result = mainScript.callAttr(
-                "check_scan_needed",
-                outputDir,
-                bundleListJson,
-                PyObject.fromJava(onProgress)
-            ).toString()
-
-            result
-        } catch (e: Exception) {
-            e.printStackTrace()
-            "[]"
-        }
-    }
-
-    fun scanSingleBundle(bundleName: String, bundleHash: String, tempDataPath: String, onProgress: (String) -> Unit): Triple<Boolean, Int, String> {
-        return try {
-            val py = Python.getInstance()
-            val mainScript = py.getModule("main_script")
-
-            val result = mainScript.callAttr(
-                "scan_single_bundle",
-                bundleName,
-                bundleHash,
-                tempDataPath,
-                PyObject.fromJava(onProgress)
-            ).asList()
-
-            val success = result[0].toBoolean()
-            val assetCount = result[1].toInt()
-            val message = result[2].toString()
-            Triple(success, assetCount, message)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Triple(false, 0, e.message ?: "Unknown error during bundle scan.")
-        }
-    }
-
-    fun finalizeScan(outputDir: String, onProgress: (String) -> Unit): Pair<Boolean, String> {
-        return try {
-            val py = Python.getInstance()
-            val mainScript = py.getModule("main_script")
-
-            val result = mainScript.callAttr(
-                "finalize_scan",
-                outputDir,
-                PyObject.fromJava(onProgress)
-            ).asList()
-
-            val success = result[0].toBoolean()
-            val message = result[1].toString()
-            Pair(success, message)
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Pair(false, e.message ?: "Unknown error during scan finalization.")
-        }
-    }
 }
+

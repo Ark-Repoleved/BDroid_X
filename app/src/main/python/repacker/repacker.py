@@ -493,6 +493,7 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
         png_astc_files = []  # PNG -> ASTC 壓縮 (需平行處理)
         png_rgba_files = []  # PNG -> RGBA32 (不需壓縮)
         text_files = []      # TextAsset 替換
+        unmatched_mod_files = []  # 在此 bundle 中找不到對應資產的檔案
         
         for mod_filepath in mod_files:
             mod_filename = os.path.basename(mod_filepath)
@@ -502,6 +503,8 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                 target_asset_name = (base_name + ".skel").lower()
                 if _asset_objects(asset_map, target_asset_name, "TextAsset"):
                     json_files.append((mod_filepath, target_asset_name))
+                else:
+                    unmatched_mod_files.append(mod_filename)
                     
             elif mod_filename.lower().endswith('.png'):
                 target_asset_name = os.path.splitext(mod_filename)[0].lower()
@@ -510,10 +513,18 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                         png_astc_files.append((mod_filepath, target_asset_name))
                     else:
                         png_rgba_files.append((mod_filepath, target_asset_name))
+                else:
+                    unmatched_mod_files.append(mod_filename)
             else:
                 target_asset_name = mod_filename.lower()
                 if _asset_objects(asset_map, target_asset_name, "TextAsset"):
                     text_files.append((mod_filepath, target_asset_name))
+                else:
+                    unmatched_mod_files.append(mod_filename)
+
+        if unmatched_mod_files:
+            report_progress("WARNING: {} file(s) did not match any asset in this bundle: {}".format(
+                len(unmatched_mod_files), ', '.join(sorted(unmatched_mod_files)[:8])))
         
         report_progress(f"  - JSON animations: {len(json_files)}")
         report_progress(f"  - ASTC textures: {len(png_astc_files)}")
@@ -754,21 +765,21 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                 with open(output_path, "wb") as f:
                     env.file.save(f, packer="lz4")
                 report_progress("Saved successfully!")
-                return True, "Repack completed successfully."
+                return True, "Repack completed successfully.", unmatched_mod_files
             except Exception as e:
                 error_msg = f"Error saving bundle: {e}"
                 report_progress(error_msg)
-                return False, error_msg
+                return False, error_msg, unmatched_mod_files
         else:
             error_msg = "No modifications were made. Check if your mod files match any assets in the bundle."
             report_progress(error_msg)
-            return False, error_msg
+            return False, error_msg, unmatched_mod_files
 
     except Exception as e:
         import traceback
         error_message = traceback.format_exc()
         report_progress(f"Error processing bundle: {error_message}")
-        return False, error_message
+        return False, error_message, []
     finally:
         if env is not None:
             del env
