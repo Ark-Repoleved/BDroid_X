@@ -95,6 +95,9 @@ this.PIXI.spine = this.PIXI.spine || {};
                     return "";
             }
             byteCount--;
+            if (byteCount < 0 || this.index + byteCount > this.buffer.byteLength) {
+                throw new Error("Invalid string length in binary data.");
+            }
             var chars = "";
             for (var i = 0; i < byteCount;) {
                 var b = this.readUnsignedByte();
