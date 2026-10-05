@@ -143,4 +143,11 @@ This tool was made possible by these incredible open-source projects:
 ---
 
 ## ⭐ Stars over time
-[![Stars over time]([https://starchart.cc/Ark-Repoleved/BDroid_X.svg?variant=adaptive)](https://starchart.cc/Ark-Repoleved/BDroid_X](https://www.star-history.com/?repos=ark-repoleved%2Fbdroid_x&type=date&legend=top-left))
+
+<a href="https://www.star-history.com/?repos=ark-repoleved%2Fbdroid_x&type=date&legend=top-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ark-repoleved/bdroid_x&type=date&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ark-repoleved/bdroid_x&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ark-repoleved/bdroid_x&type=date&legend=bottom-right" />
+ </picture>
+</a>
