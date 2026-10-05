@@ -142,5 +142,5 @@ This tool was made possible by these incredible open-source projects:
 
 ---
 
-## ⭐ Stargazers over time
-[![Stargazers over time](https://starchart.cc/Ark-Repoleved/BDroid_X.svg?variant=adaptive)](https://starchart.cc/Ark-Repoleved/BDroid_X)
+## ⭐ Stars over time
+[![Stars over time]([https://starchart.cc/Ark-Repoleved/BDroid_X.svg?variant=adaptive)](https://starchart.cc/Ark-Repoleved/BDroid_X](https://www.star-history.com/?repos=ark-repoleved%2Fbdroid_x&type=date&legend=top-left))
