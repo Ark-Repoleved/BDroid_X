@@ -143,7 +143,6 @@ This tool was made possible by these incredible open-source projects:
 ---
 
 ## ⭐ Stars over time
-
 <a href="https://www.star-history.com/?repos=ark-repoleved%2Fbdroid_x&type=date&legend=bottom-right">
  <picture>
    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ark-repoleved/bdroid_x&type=date&theme=dark&legend=bottom-right" />
