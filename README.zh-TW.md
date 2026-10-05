@@ -26,7 +26,7 @@
 ### 系統需求
 *   Android 8 或更高版本。
 *   已安裝最新版的《棕色塵埃2》官方遊戲。
-*   [Shizuku](https://shizuku.rikka.app/)：資源包掃描和一鍵將檔案搬到遊戲目錄，這是必要條件。
+*   [Shizuku](https://shizuku.rikka.app/)：一鍵將檔案搬到遊戲目錄（建議使用，也可手動搬移）。
 
 ### 安裝與設定
 
@@ -142,5 +142,11 @@ App 會在打包過程中自動偵測並合併圖檔，這能解決大部分的�
 
 ---
 
-## ⭐ Stargazers over time
-[![Stargazers over time](https://starchart.cc/Ark-Repoleved/BDroid_X.svg?variant=adaptive)](https://starchart.cc/Ark-Repoleved/BDroid_X)
+## ⭐ Stars over time
+<a href="https://www.star-history.com/?repos=ark-repoleved%2Fbdroid_x&type=date&legend=bottom-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ark-repoleved/bdroid_x&type=date&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ark-repoleved/bdroid_x&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ark-repoleved/bdroid_x&type=date&legend=bottom-right" />
+ </picture>
+</a>

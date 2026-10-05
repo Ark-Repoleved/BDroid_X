@@ -26,7 +26,7 @@
 ### Requirements
 *   Android 8 or higher.
 *   The latest official version of BrownDust 2 installed.
-*   [Shizuku](https://shizuku.rikka.app/) for bundles scan and one-tap file transfer, you need this for the app to work.
+*   [Shizuku](https://shizuku.rikka.app/) for one-tap file transfer (recommended, but the mods can also be moved manually).
 
 ### Installation & Setup
 
@@ -142,5 +142,11 @@ This tool was made possible by these incredible open-source projects:
 
 ---
 
-## ⭐ Stargazers over time
-[![Stargazers over time](https://starchart.cc/Ark-Repoleved/BDroid_X.svg?variant=adaptive)](https://starchart.cc/Ark-Repoleved/BDroid_X)
+## ⭐ Stars over time
+<a href="https://www.star-history.com/?repos=ark-repoleved%2Fbdroid_x&type=date&legend=bottom-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ark-repoleved/bdroid_x&type=date&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ark-repoleved/bdroid_x&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ark-repoleved/bdroid_x&type=date&legend=bottom-right" />
+ </picture>
+</a>

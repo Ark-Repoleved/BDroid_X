@@ -45,7 +45,8 @@ data class ModInfo(
     val resolvedFamilyKey: String? = null,
     val resolvedTargets: List<ResolvedTarget> = emptyList(),
     val unresolvedFiles: List<String> = emptyList(),
-    val errorReason: String? = null
+    val errorReason: String? = null,
+    val alternativeHashes: List<String> = emptyList()
 )
 
 data class ModCacheInfo(
@@ -61,7 +62,8 @@ data class ModCacheInfo(
     val targetHash: String? = targetHashedName,
     val resolvedFamilyKey: String? = null,
     val unresolvedFiles: List<String> = emptyList(),
-    val errorReason: String? = null
+    val errorReason: String? = null,
+    val alternativeHashes: List<String> = emptyList()
 )
 
 data class CharacterInfo(val character: String, val costume: String, val type: String, val hashedName: String)
@@ -69,7 +71,6 @@ data class CharacterInfo(val character: String, val costume: String, val type: S
 data class ModDetails(val fileId: String?, val fileNames: List<String>)
 
 data class RepackJob(val hashedName: String, val modsToInstall: List<ModInfo>)
-
 sealed class JobStatus {
     object Pending : JobStatus()
     data class Downloading(val progressMessage: String = "Waiting...") : JobStatus()
@@ -124,27 +125,3 @@ sealed class MergeState {
     data class Finished(val message: String) : MergeState()
     data class Failed(val error: String) : MergeState()
 }
-
-sealed class BundleScanState {
-    object Idle : BundleScanState()
-    data class Confirmation(val bundleCount: Int) : BundleScanState()
-    data class Scanning(
-        val currentIndex: Int,
-        val totalCount: Int,
-        val currentBundle: String,
-        val progressMessage: String = ""
-    ) : BundleScanState()
-    data class Finished(
-        val scannedCount: Int,
-        val failedCount: Int,
-        val message: String
-    ) : BundleScanState()
-    data class Failed(val error: String) : BundleScanState()
-}
-
-data class BundleCheckResult(
-    val bundleListJson: String,
-    val needsScanJson: String,
-    val hashMap: Map<String, String>,
-    val needsScanCount: Int
-)

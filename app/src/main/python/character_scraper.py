@@ -1,134 +1,174 @@
+# -*- coding: utf-8 -*-
+"""Builds characters.json (display metadata) and bundle_hints.json.
+
+Display names/costumes come from the community metadata page; bundle targets
+come from the catalog index (and, for families the catalog cannot bridge, from
+the page's own bundle column as a last-resort hint).
+"""
+import json
+import re
+import sys
+from pathlib import Path
+
 import requests
 from bs4 import BeautifulSoup
-import json
-import sys
-import os
-import catalog_parser
+
+METADATA_URL = 'https://browndust2modding.pages.dev/characters'
+
+_HASH_RE = re.compile(r'^[0-9a-f]{32}$', re.IGNORECASE)
+_CHAR_ID_RE = re.compile(r'^char(\d{6})$', re.IGNORECASE)
+_FAMILY_RE = re.compile(
+    r'^(char\d{6}|npc\w+|illust_dating\w+|illust_talk\w+|illust_special\w+|specialillust\w+)$',
+    re.IGNORECASE,
+)
 
 
 def _fetch_character_metadata_map():
-    url = "https://browndust2modding.pages.dev/characters"
-
-    print("[Python] Fetching character list from website...")
+    """Return (metadata_map, hint_map) scraped from the community page."""
+    print('[Python] Fetching character list from website...')
     try:
-        response = requests.get(url, timeout=15)
+        response = requests.get(METADATA_URL, timeout=20)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
-        print(f"[Python] Error: Failed to retrieve the webpage. {e}", file=sys.stderr)
-        return False, f"Failed to retrieve webpage: {e}", None
+        return False, 'Failed to retrieve webpage: {}'.format(e), None, None
 
-    print("[Python] Parsing HTML content...")
     soup = BeautifulSoup(response.text, 'html.parser')
     table_body = soup.find('tbody')
     if not table_body:
-        print("[Python] Error: Could not find the data table (tbody) in the HTML.", file=sys.stderr)
-        return False, "Could not find data table in HTML", None
+        return False, 'Could not find data table in HTML', None, None
 
-    print("[Python] Scraping website for character metadata...")
     metadata_map = {}
-    rows = table_body.find_all('tr')
-    last_character = ""
-    for row in rows:
-        cells = row.find_all('td')
-        character, file_id, costume = "", "", ""
+    hint_map = {}
+    last_character = ''
+
+    for row in table_body.find_all('tr'):
+        cells = [c.get_text(strip=True) for c in row.find_all('td')]
+        hashes = [c.lower() for c in cells if _HASH_RE.match(c)]
         if len(cells) == 5:
-            character = cells[0].get_text(strip=True)
+            character = cells[0]
             last_character = character
-            file_id = cells[1].get_text(strip=True).lower()
-            costume = cells[2].get_text(strip=True)
+            file_id = cells[1].lower()
+            costume = cells[2]
         elif len(cells) == 4:
             character = last_character
-            file_id = cells[0].get_text(strip=True).lower()
-            costume = cells[1].get_text(strip=True)
+            file_id = cells[0].lower()
+            costume = cells[1]
+        else:
+            continue
+        if not file_id or not costume:
+            continue
+        metadata_map[file_id] = {'character': character or 'Unknown Character', 'costume': costume}
+        if hashes:
+            hint_map[file_id] = hashes[-1]
 
-        if file_id and character and costume:
-            metadata_map[file_id] = {"character": character, "costume": costume}
-
-    print(f"[Python] Found metadata for {len(metadata_map)} file_ids from the website.")
-
-    del soup
-    import gc
-    gc.collect()
-    return True, "OK", metadata_map
+    print('[Python] Metadata for {} file ids ({} bundle hints).'.format(
+        len(metadata_map), len(hint_map)))
+    return True, 'OK', metadata_map, hint_map
 
 
-def scrape_and_save_from_catalog(output_dir, version, catalog_content):
-    """
-    Builds characters.json using scraped website metadata plus a caller-provided
-    game catalog payload. This function never downloads the catalog itself.
-    """
-    output_filename = "characters.json"
-    output_path = os.path.join(output_dir, output_filename)
+def _best_family_bundle(index, stem, censored):
+    """Pick the strongest non-censored bundle for a family stem."""
+    scores = (index.get('family') or {}).get((stem or '').lower())
+    if not scores:
+        return None
+    blocked = set(censored.get((stem or '').lower(), ()))
+    candidates = [(bundle, score) for bundle, score in scores.items() if bundle not in blocked]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (-item[1], item[0]))
+    return candidates[0][0]
 
+
+def build_character_data(index, metadata_map, hint_map):
+    """Assemble characters.json entries + resolver hints from the index."""
+    index = index or {}
+    bundles = index.get('bundles') or {}
+    censored = index.get('censored') or {}
+
+    file_ids = set(metadata_map) | set(index.get('family') or {})
+    entries = []
+    hints = {}
+
+    for file_id in sorted(file_ids):
+        lowered = file_id.lower()
+        if not _FAMILY_RE.match(lowered):
+            continue
+        metadata = metadata_map.get(lowered) or {}
+        if not metadata:
+            continue
+
+        base = {
+            'character': metadata.get('character', 'Unknown Character'),
+            'file_id': lowered,
+            'costume': metadata.get('costume', 'Unknown ({})'.format(lowered)),
+        }
+
+        idle_bundle = _best_family_bundle(index, lowered, censored)
+        if idle_bundle:
+            idle_entry = dict(base)
+            idle_entry['type'] = 'idle'
+            idle_entry['hashed_name'] = idle_bundle
+            entries.append(idle_entry)
+
+        char_match = _CHAR_ID_RE.match(lowered)
+        if char_match:
+            cutscene_bundle = _best_family_bundle(
+                index, 'cutscene_char{}'.format(char_match.group(1)), censored)
+            if cutscene_bundle:
+                cutscene_entry = dict(base)
+                cutscene_entry['type'] = 'cutscene'
+                cutscene_entry['hashed_name'] = cutscene_bundle
+                entries.append(cutscene_entry)
+
+        hint = hint_map.get(lowered)
+        if hint and hint in bundles:
+            hints[lowered] = hint
+            if not idle_bundle:
+                hint_entry = dict(base)
+                hint_entry['type'] = 'idle'
+                hint_entry['hashed_name'] = hint
+                entries.append(hint_entry)
+
+    return entries, hints
+
+
+def scrape_and_save_from_index(output_dir, version, index):
+    """Write characters.json and bundle_hints.json. Returns (success, message)."""
     if not version:
-        return False, "Version not provided to scraper."
-    if not catalog_content:
-        return False, "Catalog content is missing."
+        return False, 'Version not provided to scraper.'
+    if not index:
+        return False, 'Catalog index is missing.'
 
-    success, message, metadata_map = _fetch_character_metadata_map()
+    success, message, metadata_map, hint_map = _fetch_character_metadata_map()
     if not success:
         return False, message
 
-    print("[Python] Parsing provided catalog to build asset map...")
+    entries, hints = build_character_data(index, metadata_map, hint_map)
+    if not entries:
+        return False, 'No character data could be generated from the catalog.'
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    with open(output_path / 'characters.json', 'w', encoding='utf-8') as handle:
+        json.dump({'version': version, 'characters': entries}, handle,
+                  indent=4, ensure_ascii=False)
+
+    with open(output_path / 'bundle_hints.json', 'w', encoding='utf-8') as handle:
+        json.dump(hints, handle, ensure_ascii=False, separators=(',', ':'))
+
+    print('[Python] Saved {} character entries and {} hints.'.format(len(entries), len(hints)))
+    return True, 'Scraper completed successfully.'
+
+
+def load_bundle_hints(output_dir):
     try:
-        asset_map = catalog_parser.parse_catalog_for_bundle_names(catalog_content)
-        if not asset_map:
-            raise Exception("Failed to parse catalog or catalog is empty.")
-    except Exception as e:
-        print(f"[Python] Error processing game catalog: {e}", file=sys.stderr)
-        return False, f"Error processing game catalog: {e}"
-
-    print("[Python] Asset map built successfully.")
-    all_characters_data = []
-    print(f"[Python] Generating character list based on {len(asset_map)} file_ids from the game catalog...")
-
-    for file_id, bundles in asset_map.items():
-        metadata = metadata_map.get(file_id, {
-            "character": "Unknown Character",
-            "costume": f"Unknown ({file_id})"
-        })
-
-        base_entry = {
-            "character": metadata["character"],
-            "file_id": file_id,
-            "costume": metadata["costume"],
-        }
-
-        if "idle" in bundles and bundles["idle"]:
-            idle_entry = base_entry.copy()
-            idle_entry["type"] = "idle"
-            idle_entry["hashed_name"] = bundles["idle"]
-            all_characters_data.append(idle_entry)
-
-        if "cutscene" in bundles and bundles["cutscene"]:
-            cutscene_entry = base_entry.copy()
-            cutscene_entry["type"] = "cutscene"
-            cutscene_entry["hashed_name"] = bundles["cutscene"]
-            all_characters_data.append(cutscene_entry)
-
-    if not all_characters_data:
-        print("[Python] Warning: No character data could be generated from the catalog.", file=sys.stderr)
-
-    print(f"[Python] Saving {len(all_characters_data)} total entries to {output_path}...")
-    final_data = {
-        "version": version,
-        "characters": all_characters_data
-    }
-
-    try:
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(final_data, f, indent=4, ensure_ascii=False)
-    except IOError as e:
-        print(f"[Python] Error: Failed to write to file {output_path}. {e}", file=sys.stderr)
-        return False, f"Failed to write to file: {e}"
-
-    print(f"[Python] Success! Data saved to {output_path}")
-    return True, "Scraper completed successfully."
+        with open(Path(output_dir) / 'bundle_hints.json', 'r', encoding='utf-8') as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
 def scrape_and_save(output_dir, version):
-    """
-    Backward-compatible wrapper. Downloads are handled externally in the new
-    metadata refresh flow, so this path should be avoided by new callers.
-    """
-    return False, "scrape_and_save without provided catalog_content is deprecated."
+    """Deprecated wrapper kept for backward compatibility."""
+    return False, 'scrape_and_save without an index is deprecated.'

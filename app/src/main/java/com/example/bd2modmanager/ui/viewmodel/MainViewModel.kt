@@ -36,6 +36,11 @@ import java.util.zip.ZipInputStream
 
 class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel() {
 
+    companion object {
+        // Upper bound for install-time bundle fallback attempts.
+        private const val MAX_BUNDLE_CANDIDATES = 3
+    }
+
     private fun shouldIgnoreModEntry(entryName: String?): Boolean {
         val name = entryName?.substringAfterLast('/')?.trim()?.lowercase() ?: return true
         return name.isEmpty() || name == ".modfile" || name.endsWith(".modfile")
@@ -122,14 +127,6 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _moveState = MutableStateFlow<MoveState>(MoveState.Idle)
     val moveState: StateFlow<MoveState> = _moveState.asStateFlow()
 
-    private val _bundleScanState = MutableStateFlow<BundleScanState>(BundleScanState.Idle)
-    val bundleScanState: StateFlow<BundleScanState> = _bundleScanState.asStateFlow()
-
-    private val _showVersionMismatchWarning = MutableStateFlow(false)
-    val showVersionMismatchWarning: StateFlow<Boolean> = _showVersionMismatchWarning.asStateFlow()
-
-    // Stored for deferred scan execution after user confirmation
-    private var pendingCheckResult: BundleCheckResult? = null
     private var appContext: Context? = null
 
     private var initialized = false
@@ -149,57 +146,15 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         modRepository = ModRepository(context, characterRepository)
 
         viewModelScope.launch {
-            var requiresDeferredInitialization = false
             try {
                 _isUpdatingCharacters.value = true
-
-                // Check if local characters.json exists before update
-                val hadLocalCharacters = characterRepository.hasLocalCharactersJson()
-
-                // Step 1: Update characters.json from CDN (also starts Python runtime)
-                val updateStatus = characterRepository.updateCharacterData(_selectedQuality.value)
-                val charactersWereRefreshed = (updateStatus == "SUCCESS" && hadLocalCharacters)
-
-                // Step 2: Check local bundles via Shizuku
-                // Must run after Step 1 because both use Python, and Python.start() is not thread-safe
-                if (ShizukuManager.isAvailable()) {
-                    val checkResult = withContext(Dispatchers.IO) {
-                        ShizukuManager.checkLocalBundles(
-                            outputDir = context.filesDir.absolutePath
-                        ) { progress ->
-                            Log.d("MainViewModel", "Bundle check: $progress")
-                        }
-                    }
-
-                    if (checkResult != null) {
-                        if (checkResult.needsScanCount > 0) {
-                            // Bundles need scanning — show confirmation dialog
-                            pendingCheckResult = checkResult
-                            _bundleScanState.value = BundleScanState.Confirmation(checkResult.needsScanCount)
-                            requiresDeferredInitialization = true
-                        } else {
-                            // No bundles need scanning — existing local_bundle_index.json
-                            // is already valid from the last session. Skip the expensive
-                            // finalizeScan() which would re-parse the catalog for nothing.
-
-                            // If characters.json was just updated but no new bundles,
-                            // the user likely hasn't updated the game yet.
-                            if (charactersWereRefreshed) {
-                                _showVersionMismatchWarning.value = true
-                            }
-                        }
-                    }
-                } else {
-                    Log.d("MainViewModel", "Shizuku not available, skipping local bundle scan. Using cached index if available.")
-                }
+                // Refreshes characters.json and the catalog index (the single source
+                // of truth for mod resolution) for the current game version.
+                characterRepository.updateCharacterData(_selectedQuality.value)
             } catch (e: Exception) {
                 Log.e("MainViewModel", "Error during initialization", e)
             }
-
-            if (!requiresDeferredInitialization) {
-                // Proceed immediately if no scan confirmation is needed
-                finishInitialization()
-            }
+            finishInitialization()
         }
 
         viewModelScope.launch {
@@ -229,74 +184,11 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         appContext?.getSharedPreferences("app_settings", Context.MODE_PRIVATE)?.edit()?.putString("selected_quality", quality)?.apply()
     }
 
-    // --- Bundle Scan Dialog Actions ---
-
-    fun confirmBundleScan() {
-        val context = appContext ?: return
-        val checkResult = pendingCheckResult ?: return
-
-        viewModelScope.launch {
-            try {
-                // Use externalCacheDir for temp files because Shizuku service runs
-                // as shell UID and cannot write to app's internal cacheDir (/data/data/...)
-                val shizukuCacheDir = (context.externalCacheDir ?: context.cacheDir).absolutePath
-
-                val (success, scanned, failed) = withContext(Dispatchers.IO) {
-                    ShizukuManager.executeBundleScan(
-                        outputDir = context.filesDir.absolutePath,
-                        cacheDir = shizukuCacheDir,
-                        checkResult = checkResult
-                    ) { currentIndex, total, bundleName, message ->
-                        viewModelScope.launch(Dispatchers.Main) {
-                            _bundleScanState.value = BundleScanState.Scanning(
-                                currentIndex = currentIndex,
-                                totalCount = total,
-                                currentBundle = bundleName,
-                                progressMessage = message
-                            )
-                        }
-                    }
-                }
-
-                if (success) {
-                    _bundleScanState.value = BundleScanState.Finished(
-                        scannedCount = scanned,
-                        failedCount = failed,
-                        message = "Scan complete. $scanned scanned, $failed failed."
-                    )
-                } else {
-                    _bundleScanState.value = BundleScanState.Failed("Bundle scan failed.")
-                }
-            } catch (e: Exception) {
-                _bundleScanState.value = BundleScanState.Failed(e.message ?: "Unknown error")
-            } finally {
-                pendingCheckResult = null
-                // Finish initialization and trigger mod rescan with new index
-                finishInitialization()
-            }
-        }
-    }
-
-    fun dismissBundleScan() {
-        // User cancelled or dismissed results — don't finalize if cancelled.
-        val wasPending = pendingCheckResult != null
-        pendingCheckResult = null
-        _bundleScanState.value = BundleScanState.Idle
-
-        // If user is skipping the confirmation dialog, we must finish initialization now 
-        if (wasPending) {
-            finishInitialization()
-        }
-    }
-
     private fun finishInitialization() {
         _isUpdatingCharacters.value = false
         modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
     }
 
-    fun dismissVersionMismatchWarning() {
-        _showVersionMismatchWarning.value = false
-    }
 
     fun setSearchActive(isActive: Boolean) {
         _isSearchActive.value = isActive
@@ -395,21 +287,10 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         val job = installJob.job
         val hashedName = job.hashedName
         var originalDataCache: File? = null
-        var repackedDataCache: File? = null
+        val repackedFiles = mutableListOf<File>()
         val modAssetsDir = File(context.cacheDir, "temp_mod_assets_${hashedName}")
 
         try {
-            updateJobStatus(hashedName, JobStatus.Downloading("Starting download..."))
-            val (downloadSuccess, messageOrPath) = ModdingService.downloadBundle(hashedName, selectedQuality.value, context.cacheDir.absolutePath, cacheKey) { progress ->
-                updateJobStatus(hashedName, JobStatus.Downloading(progress))
-            }
-
-            if (!downloadSuccess) {
-                throw Exception("Download failed: $messageOrPath")
-            }
-            originalDataCache = File(messageOrPath)
-            val relativePath = originalDataCache.relativeTo(context.cacheDir)
-
             updateJobStatus(hashedName, JobStatus.Installing("Extracting mod files..."))
 
             if (modAssetsDir.exists()) modAssetsDir.deleteRecursively()
@@ -435,22 +316,86 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 }
             }
 
-            updateJobStatus(hashedName, JobStatus.Installing("Repacking bundle..."))
-            repackedDataCache = File(context.cacheDir, "repacked/${relativePath.path}")
-            repackedDataCache.parentFile?.mkdirs()
+            // The catalog is authoritative, but a family can be bundled in several
+            // places. Try the best candidate first and fall back to alternatives when
+            // some mod files do not exist in the downloaded bundle.
+            val candidates = (listOf(hashedName) + job.modsToInstall.flatMap { it.alternativeHashes })
+                .distinct()
+                .take(MAX_BUNDLE_CANDIDATES)
 
-            val (repackSuccess, repackMessage) = ModdingService.repackBundle(originalDataCache.absolutePath, modAssetsDir.absolutePath, repackedDataCache.absolutePath, useAstc.value) { progress ->
-                updateJobStatus(hashedName, JobStatus.Installing(progress))
+            var chosenRepoPath: String? = null
+            var chosenRepackedFile: File? = null
+            var bestUnmatchedCount = Int.MAX_VALUE
+            var lastMessage: String? = null
+            val candidateErrors = mutableListOf<String>()
+
+            for ((index, candidate) in candidates.withIndex()) {
+                updateJobStatus(hashedName, JobStatus.Downloading(
+                    if (index == 0) "Downloading bundle..."
+                    else "Trying alternative bundle (${index + 1}/${candidates.size})..."
+                ))
+                val (downloadSuccess, messageOrPath) = ModdingService.downloadBundle(
+                    candidate, selectedQuality.value, context.cacheDir.absolutePath, cacheKey,
+                    context.filesDir.absolutePath
+                ) { progress -> updateJobStatus(hashedName, JobStatus.Downloading(progress)) }
+
+                if (!downloadSuccess) {
+                    candidateErrors.add("$candidate: $messageOrPath")
+                    continue
+                }
+                originalDataCache = File(messageOrPath)
+                val relativePath = originalDataCache.relativeTo(context.cacheDir)
+
+                updateJobStatus(hashedName, JobStatus.Installing("Repacking bundle..."))
+                val repackedFile = File(context.cacheDir, "repacked/${relativePath.path}")
+                if (repackedFile.exists()) repackedFile.delete()
+                repackedFile.parentFile?.mkdirs()
+                repackedFiles.add(repackedFile)
+
+                val (repackSuccess, repackMessage, unmatched) = ModdingService.repackBundle(
+                    originalDataCache.absolutePath,
+                    modAssetsDir.absolutePath,
+                    repackedFile.absolutePath,
+                    useAstc.value
+                ) { progress -> updateJobStatus(hashedName, JobStatus.Installing(progress)) }
+
+                lastMessage = repackMessage
+                if (repackSuccess) {
+                    if (unmatched.isEmpty()) {
+                        chosenRepoPath = relativePath.path
+                        chosenRepackedFile = repackedFile
+                        break
+                    }
+                    if (unmatched.size < bestUnmatchedCount) {
+                        bestUnmatchedCount = unmatched.size
+                        chosenRepoPath = relativePath.path
+                        chosenRepackedFile = repackedFile
+                    }
+                } else {
+                    candidateErrors.add("$candidate: $repackMessage")
+                }
+
+                try {
+                    originalDataCache.takeIf { it.exists() }?.delete()
+                } catch (_: Exception) {}
+                originalDataCache = null
             }
 
-            if (!repackSuccess) {
-                throw Exception("Repack failed: $repackMessage")
+            val repoPath = chosenRepoPath
+            val repackedOutput = chosenRepackedFile
+            if (repoPath == null || repackedOutput == null || !repackedOutput.exists()) {
+                val detail = candidateErrors.ifEmpty { listOfNotNull(lastMessage) }.joinToString("\n")
+                throw Exception("Repack failed: $detail")
             }
 
-            val publicUri = saveFileToDownloads(context, repackedDataCache, relativePath.path, "Shared")
+            if (bestUnmatchedCount != Int.MAX_VALUE && bestUnmatchedCount > 0) {
+                updateJobStatus(hashedName, JobStatus.Installing("Warning: $bestUnmatchedCount file(s) did not match this bundle."))
+            }
+
+            val publicUri = saveFileToDownloads(context, repackedOutput, repoPath, "Shared")
 
             if (publicUri != null) {
-                updateJobStatus(hashedName, JobStatus.Finished(relativePath.path))
+                updateJobStatus(hashedName, JobStatus.Finished(repoPath))
             } else {
                 throw Exception("Failed to save file to Downloads folder.")
             }
@@ -458,19 +403,16 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         } catch (e: Exception) {
             e.printStackTrace()
             val fullError = e.message ?: "An unknown error occurred."
-            val displayError = if (fullError.startsWith("Repack failed:")) {
-                "Repack failed: Repack process failed without an exception."
-            } else {
-                fullError
-            }
-            updateJobStatus(hashedName, JobStatus.Failed(displayMessage = displayError, detailedLog = fullError))
+            updateJobStatus(hashedName, JobStatus.Failed(displayMessage = fullError, detailedLog = fullError))
         } finally {
             try {
                 originalDataCache?.takeIf { it.exists() }?.delete()
             } catch (_: Exception) {}
-            try {
-                repackedDataCache?.takeIf { it.exists() }?.delete()
-            } catch (_: Exception) {}
+            repackedFiles.forEach { file ->
+                try {
+                    if (file.exists()) file.delete()
+                } catch (_: Exception) {}
+            }
             try {
                 if (modAssetsDir.exists()) modAssetsDir.deleteRecursively()
             } catch (_: Exception) {}
@@ -554,7 +496,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     Python.start(com.chaquo.python.android.AndroidPlatform(context))
                 }
                 val cacheKey = "uninstall_${System.currentTimeMillis()}"
-                ModdingService.downloadBundle(hashedName, selectedQuality.value, context.cacheDir.absolutePath, cacheKey) { progress ->
+                ModdingService.downloadBundle(hashedName, selectedQuality.value, context.cacheDir.absolutePath, cacheKey, context.filesDir.absolutePath) { progress ->
                     viewModelScope.launch(Dispatchers.Main) {
                         _uninstallState.value = UninstallState.Downloading(hashedName, progress)
                     }

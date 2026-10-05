@@ -12,7 +12,7 @@ class CharacterRepository(private val context: Context) {
 
     companion object {
         private const val CHARACTERS_JSON_FILENAME = "characters.json"
-        private const val MOD_CACHE_FILENAME = "mod_cache.json"
+        private const val MOD_CACHE_FILENAME = "mod_cache_v2.json"
     }
 
     private var characterLut: Map<String, List<CharacterInfo>> = emptyMap()
