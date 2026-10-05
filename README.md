@@ -144,10 +144,4 @@ This tool was made possible by these incredible open-source projects:
 
 ## ⭐ Stars over time
 
-<a href="https://star-history.dera.page/Ark-Repoleved/BDroid_X?type=timeline&logscale&legend=bottom-right&style=github">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=Ark-Repoleved/BDroid_X&type=timeline&theme=dark&logscale&legend=bottom-right&style=github" />
-   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=Ark-Repoleved/BDroid_X&type=timeline&logscale&legend=bottom-right&style=github" />
-   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=Ark-Repoleved/BDroid_X&type=timeline&logscale&legend=bottom-right&style=github" />
- </picture>
-</a>
+[![Star History Chart](https://star-history.dera.page/svg?repos=Ark-Repoleved/BDroid_X&type=timeline&logscale&legend=bottom-right&style=github)](https://star-history.dera.page/Ark-Repoleved/BDroid_X?type=timeline&logscale&legend=bottom-right&style=github)
