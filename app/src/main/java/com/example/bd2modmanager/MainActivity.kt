@@ -88,6 +88,7 @@ class MainActivity : ComponentActivity() {
                         finalResult = finalResult,
                         moveState = moveState,
                         onMoveToGame = { viewModel.moveFilesToGame() },
+                        onRootCopy = { viewModel.copyFilesToGameWithRoot() },
                         onDismiss = { viewModel.closeInstallDialog() }
                     )
                 }
@@ -97,6 +98,7 @@ class MainActivity : ComponentActivity() {
                     state = uninstallState,
                     moveState = moveState,
                     onMoveToGame = { viewModel.moveFilesToGame() },
+                    onRootCopy = { viewModel.copyFilesToGameWithRoot() },
                     onDismiss = { viewModel.resetUninstallState() }
                 )
 
