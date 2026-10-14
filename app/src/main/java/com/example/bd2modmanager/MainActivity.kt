@@ -41,10 +41,7 @@ class MainActivity : ComponentActivity() {
 
         try {
             Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
-            // 自動請求 Shizuku 權限
-            if (Shizuku.pingBinder() && Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-                Shizuku.requestPermission(SHIZUKU_PERMISSION_REQUEST_CODE)
-            }
+            // Request Shizuku authorization only when the fallback is needed.
         } catch (_: Exception) {
             // Shizuku not available
         }
@@ -79,6 +76,7 @@ class MainActivity : ComponentActivity() {
 
                 val showInstallDialog by viewModel.showInstallDialog.collectAsState()
                 val moveState by viewModel.moveState.collectAsState()
+                val rootAvailable by viewModel.rootAvailable.collectAsState()
 
                 if (showInstallDialog) {
                     val installJobs by viewModel.installJobs.collectAsState()
@@ -88,7 +86,7 @@ class MainActivity : ComponentActivity() {
                         finalResult = finalResult,
                         moveState = moveState,
                         onMoveToGame = { viewModel.moveFilesToGame() },
-                        onRootCopy = { viewModel.copyFilesToGameWithRoot() },
+                        rootAvailable = rootAvailable,
                         onDismiss = { viewModel.closeInstallDialog() }
                     )
                 }
@@ -98,7 +96,7 @@ class MainActivity : ComponentActivity() {
                     state = uninstallState,
                     moveState = moveState,
                     onMoveToGame = { viewModel.moveFilesToGame() },
-                    onRootCopy = { viewModel.copyFilesToGameWithRoot() },
+                    rootAvailable = rootAvailable,
                     onDismiss = { viewModel.resetUninstallState() }
                 )
 

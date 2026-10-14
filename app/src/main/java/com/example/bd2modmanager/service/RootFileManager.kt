@@ -8,89 +8,75 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 object RootFileManager {
+    suspend fun hasRootPermission(context: Context): Boolean =
+        withContext(Dispatchers.IO) {
+            val (success, output) = runRootCommand(context, "id -u", 30)
+            success && output.lineSequence().any { it.trim() == "0" }
+        }
 
-    suspend fun copyDownloadToGame(
-        context: Context
-    ): Pair<Boolean, String> = withContext(Dispatchers.IO) {
-        var logFile: File? = null
-        var process: Process? = null
-
-        try {
-            val outputFile = File.createTempFile(
-                "root-copy-",
-                ".log",
-                context.cacheDir
-            )
-            logFile = outputFile
-
-            // Keep paths fixed. Never insert untrusted input into this script.
+    suspend fun moveDownloadToGame(context: Context): Pair<Boolean, String> =
+        withContext(Dispatchers.IO) {
+            // Use fixed paths and merge files without removing unrelated game resources.
             val script = """
                 set -e
-
                 [ "${'$'}(id -u)" = "0" ] || {
                     echo "Root access was not granted."
                     exit 1
                 }
-
                 src='/storage/emulated/0/Download/Shared'
                 dst='/storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared'
-
                 [ -d "${'$'}src" ] || {
                     echo "Download/Shared directory not found."
                     exit 1
                 }
-
                 [ -d "${'$'}dst" ] || {
                     echo "Game Shared directory not found. Launch the game and download its resources first."
                     exit 1
                 }
-
                 [ -n "${'$'}(ls -A "${'$'}src")" ] || {
                     echo "Download/Shared is empty."
                     exit 1
                 }
-
-                # Merge source contents into the existing game directory.
-                # Keep the source files for retrying or manual transfer.
+                # Remove source files only after the entire copy succeeds.
                 cp -R "${'$'}src/." "${'$'}dst/"
+                rm -r "${'$'}src"
             """.trimIndent()
 
+            val (success, output) = runRootCommand(context, script, 180)
+            if (success) {
+                true to "Files moved to game directory successfully using Root."
+            } else {
+                false to "Root move failed: ${output.ifBlank { "Check root authorization and directory access." }}"
+            }
+        }
+
+    private fun runRootCommand(
+        context: Context,
+        command: String,
+        timeoutSeconds: Long
+    ): Pair<Boolean, String> {
+        var logFile: File? = null
+        var process: Process? = null
+        try {
             // Redirect output to a file to avoid blocking on a full output pipe.
-            val running = ProcessBuilder("su", "-c", script)
+            val outputFile = File.createTempFile("root-operation-", ".log", context.cacheDir)
+            logFile = outputFile
+            val running = ProcessBuilder("su", "-c", command)
                 .redirectErrorStream(true)
                 .redirectOutput(outputFile)
                 .start()
             process = running
-
-            // Allow time for root authorization and file copying.
-            if (!running.waitFor(180, TimeUnit.SECONDS)) {
+            if (!running.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
                 running.destroyForcibly()
-                return@withContext false to
-                    "Root copy timed out. Some files may have been copied. Please try again."
+                return false to "Root operation timed out. Check authorization and inspect the source and destination before retrying."
             }
-
-            val details = outputFile.readText().trim().takeLast(4000)
-
-            if (running.exitValue() == 0) {
-                true to
-                    "Files copied successfully. Source files were kept in Download/Shared."
-            } else {
-                false to "Failed to copy files using root: ${
-                    details.ifBlank {
-                        "Check root authorization and directory access."
-                    }
-                }"
-            }
+            return (running.exitValue() == 0) to outputFile.readText().trim().takeLast(4000)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            false to "Unable to run root copy: ${e.message ?: "Unknown error."}"
+            return false to "Unable to run root command: ${e.message ?: "Unknown error."}"
         } finally {
-            process?.let { running ->
-                if (running.isAlive) {
-                    running.destroyForcibly()
-                }
-            }
+            process?.let { if (it.isAlive) it.destroyForcibly() }
             logFile?.delete()
         }
     }
