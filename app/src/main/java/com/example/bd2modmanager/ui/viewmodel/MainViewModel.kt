@@ -19,6 +19,7 @@ import com.example.bd2modmanager.data.repository.CharacterRepository
 import com.example.bd2modmanager.data.repository.ModRepository
 import com.example.bd2modmanager.service.ModdingService
 import com.example.bd2modmanager.service.ShizukuManager
+import com.example.bd2modmanager.service.RootFileManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
