@@ -471,9 +471,14 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     fun moveFilesToGame() {
+        // Prevent duplicate transfers.
+        if (_moveState.value is MoveState.Moving) return
+    
+        _moveState.value = MoveState.Moving
+    
         viewModelScope.launch {
-            _moveState.value = MoveState.Moving
             val (success, message) = ShizukuManager.moveDownloadToGame()
+    
             _moveState.value = if (success) {
                 MoveState.Success(message)
             } else {
@@ -482,6 +487,26 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         }
     }
 
+    fun copyFilesToGameWithRoot() {
+        val context = appContext ?: return
+    
+        // Prevent duplicate transfers.
+        if (_moveState.value is MoveState.Moving) return
+    
+        _moveState.value = MoveState.Moving
+    
+        viewModelScope.launch {
+            val (success, message) =
+                RootFileManager.copyDownloadToGame(context)
+    
+            _moveState.value = if (success) {
+                MoveState.Success(message)
+            } else {
+                MoveState.Failed(message)
+            }
+        }
+    }
+    
     fun resetMoveState() {
         _moveState.value = MoveState.Idle
     }
