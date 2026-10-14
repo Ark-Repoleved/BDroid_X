@@ -123,6 +123,7 @@ fun ParallelInstallDialog(
     finalResult: FinalInstallResult?,
     moveState: MoveState,
     onMoveToGame: () -> Unit,
+    rootAvailable: Boolean,
     onDismiss: () -> Unit
 ) {
     val clipboardManager = LocalClipboardManager.current
@@ -151,8 +152,8 @@ fun ParallelInstallDialog(
                             modifier = Modifier.verticalScroll(rememberScrollState())
                         ) {
                             Text("Summary: ${finalResult.successfulJobs} succeeded, ${finalResult.failedJobs} failed.", style = MaterialTheme.typography.titleMedium)
-                            
-                            // 顯示總耗時
+
+                            // Display total elapsed time.
                             if (finalResult.elapsedTimeMs > 0) {
                                 val elapsedSeconds = finalResult.elapsedTimeMs / 1000.0
                                 Spacer(Modifier.height(8.dp))
@@ -162,10 +163,10 @@ fun ParallelInstallDialog(
                                     color = MaterialTheme.colorScheme.primary
                                 )
                             }
-                            
+
                             finalResult.command?.let {
                                 Spacer(Modifier.height(16.dp))
-                                
+
                                 when (moveState) {
                                     is MoveState.Success -> {
                                         Icon(Icons.Default.CheckCircle, contentDescription = "Success", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
@@ -197,17 +198,13 @@ fun ParallelInstallDialog(
                                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                                     }
                                     is MoveState.Idle -> {
-                                        if (finalResult.shizukuAvailable) {
-                                            Button(onClick = onMoveToGame) {
-                                                Icon(Icons.Default.DriveFileMove, contentDescription = null, modifier = Modifier.size(18.dp))
-                                                Spacer(Modifier.width(8.dp))
-                                                Text("Move to Game Directory")
-                                            }
-                                            Spacer(Modifier.height(8.dp))
-                                            Text("Or run this command manually in a root shell:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-                                        } else {
-                                            Text("Run this command in a root shell to move all files:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                                        Button(onClick = onMoveToGame) {
+                                            Icon(Icons.Default.DriveFileMove, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(if (rootAvailable) "Move to Game Directory (Root)" else "Move to Game Directory")
                                         }
+                                        Spacer(Modifier.height(8.dp))
+                                        Text("Or run this command manually in a root shell:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                                         Spacer(Modifier.height(8.dp))
                                         Button(
                                             onClick = {
@@ -233,8 +230,8 @@ fun ParallelInstallDialog(
                                     }
                                 }
                             }
-                            
-                            // 顯示失敗任務的詳細資訊
+
+                            // Display details of failed jobs.
                             if (finalResult.failedJobDetails.isNotEmpty()) {
                                 Spacer(Modifier.height(16.dp))
                                 Text(
@@ -332,6 +329,7 @@ fun UninstallDialog(
     state: UninstallState,
     moveState: MoveState,
     onMoveToGame: () -> Unit,
+    rootAvailable: Boolean,
     onDismiss: () -> Unit
 ) {
     if (state is UninstallState.Idle) return
@@ -378,7 +376,7 @@ fun UninstallDialog(
                     is UninstallState.Finished -> {
                         Text("Original file saved to your Downloads folder.", textAlign = TextAlign.Center)
                         Spacer(Modifier.height(16.dp))
-                        
+
                         when (moveState) {
                             is MoveState.Success -> {
                                 Icon(Icons.Default.CheckCircle, contentDescription = "Success", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(36.dp))
@@ -410,17 +408,13 @@ fun UninstallDialog(
                                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                             }
                             is MoveState.Idle -> {
-                                if (state.shizukuAvailable) {
-                                    Button(onClick = onMoveToGame) {
-                                        Icon(Icons.Default.DriveFileMove, contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Move to Game Directory")
-                                    }
-                                    Spacer(Modifier.height(8.dp))
-                                    Text("Or run this command manually in a root shell:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-                                } else {
-                                    Text("For advanced users, run this command in a root shell to move the file:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                                Button(onClick = onMoveToGame) {
+                                    Icon(Icons.Default.DriveFileMove, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(if (rootAvailable) "Move to Game Directory (Root)" else "Move to Game Directory")
                                 }
+                                Spacer(Modifier.height(8.dp))
+                                Text("Or run this command manually in a root shell:", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                                 Spacer(Modifier.height(8.dp))
                                 Button(
                                     onClick = {

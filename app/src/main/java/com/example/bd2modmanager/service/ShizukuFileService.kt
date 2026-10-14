@@ -41,8 +41,14 @@ class ShizukuFileService(context: Context? = null) : IFileService.Stub() {
     }
 
     private fun copyDirRecursive(source: File, dest: File) {
-        if (!dest.exists()) dest.mkdirs()
-        source.listFiles()?.forEach { file ->
+        check(source.isDirectory) { "Source directory not found: ${source.absolutePath}" }
+        check(dest.isDirectory || dest.mkdirs()) {
+            "Cannot create destination directory: ${dest.absolutePath}"
+        }
+        // A listing failure must not be reported as a successful copy.
+        val files = source.listFiles()
+            ?: throw java.io.IOException("Cannot list source directory: ${source.absolutePath}")
+        files.forEach { file ->
             val target = File(dest, file.name)
             if (file.isDirectory) {
                 copyDirRecursive(file, target)

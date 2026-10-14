@@ -53,7 +53,7 @@ object ShizukuManager {
     private var pendingBind: CompletableDeferred<Boolean>? = null
 
     /**
-     * 檢查 Shizuku 是否安裝且運行中，並且已授權
+     * Check whether Shizuku is running and authorized.
      */
     fun isAvailable(): Boolean {
         return try {
@@ -64,7 +64,7 @@ object ShizukuManager {
     }
 
     /**
-     * 檢查 Shizuku 是否運行中（不檢查權限）
+     * Check whether Shizuku is running without checking authorization.
      */
     fun isRunning(): Boolean {
         return try {
@@ -75,7 +75,7 @@ object ShizukuManager {
     }
 
     /**
-     * 檢查是否已取得 Shizuku 權限
+     * Check whether Shizuku authorization has been granted.
      */
     fun hasPermission(): Boolean {
         return try {
@@ -86,14 +86,14 @@ object ShizukuManager {
     }
 
     /**
-     * 請求 Shizuku 權限
+     * Request Shizuku authorization.
      */
     fun requestPermission(requestCode: Int) {
         Shizuku.requestPermission(requestCode)
     }
 
     /**
-     * 綁定 UserService，取得 IFileService 實例
+     * Bind the user service and obtain an IFileService instance.
      */
     private suspend fun ensureServiceBound(): IFileService? {
         if (fileService != null) return fileService
@@ -107,12 +107,12 @@ object ShizukuManager {
             try {
                 Log.d("ShizukuManager", "Binding user service...")
                 Shizuku.bindUserService(userServiceArgs, serviceConnection)
-                
+
                 // Add 5 second timeout to prevent hanging forever
                 val bound = withTimeoutOrNull(5000) {
                     deferred.await()
                 }
-                
+
                 if (bound == true) {
                     Log.d("ShizukuManager", "User service bound successfully")
                     fileService
@@ -130,8 +130,8 @@ object ShizukuManager {
     }
 
     /**
-     * 將 Download/Shared 目錄搬移到遊戲的 UnityCache 目錄
-     * @return Pair<成功, 錯誤訊息>
+     * Move Download/Shared into the game UnityCache directory.
+     * @return A pair containing success status and a message.
      */
     suspend fun moveDownloadToGame(): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         try {
@@ -159,7 +159,9 @@ object ShizukuManager {
 
             if (success) {
                 Log.d("ShizukuManager", "Copy successful, cleaning up source")
-                sourceDir.deleteRecursively()
+                if (!sourceDir.deleteRecursively()) {
+                    return@withContext Pair(false, "Files were copied, but Download/Shared could not be fully removed. Check the remaining source files before retrying.")
+                }
                 Pair(true, "Files moved to game directory successfully!")
             } else {
                 Log.e("ShizukuManager", "Copy failed in ShizukuFileService")
@@ -172,7 +174,7 @@ object ShizukuManager {
     }
 
     /**
-     * 解綁 UserService
+     * Unbind the user service.
      */
     fun unbindService() {
         try {

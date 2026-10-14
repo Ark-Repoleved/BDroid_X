@@ -19,6 +19,7 @@ import com.example.bd2modmanager.data.repository.CharacterRepository
 import com.example.bd2modmanager.data.repository.ModRepository
 import com.example.bd2modmanager.service.ModdingService
 import com.example.bd2modmanager.service.ShizukuManager
+import com.example.bd2modmanager.service.RootFileManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -105,8 +106,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     private val _finalInstallResult = MutableStateFlow<FinalInstallResult?>(null)
     val finalInstallResult: StateFlow<FinalInstallResult?> = _finalInstallResult.asStateFlow()
-    
-    // 批次處理開始時間（用於計算總耗時）
+
+    // Batch start time used to calculate elapsed time.
     private var batchStartTimeMs: Long = 0L
 
     private val _uninstallState = MutableStateFlow<UninstallState>(UninstallState.Idle)
@@ -127,6 +128,10 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _moveState = MutableStateFlow<MoveState>(MoveState.Idle)
     val moveState: StateFlow<MoveState> = _moveState.asStateFlow()
 
+    private val _rootAvailable = MutableStateFlow(false)
+    val rootAvailable: StateFlow<Boolean> = _rootAvailable.asStateFlow()
+    private var rootCheckJob: Job? = null
+
     private var appContext: Context? = null
 
     private var initialized = false
@@ -138,6 +143,11 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         initialized = true
 
         appContext = context.applicationContext
+        // Check actual root authorization without blocking the UI thread.
+        rootCheckJob = viewModelScope.launch {
+            _rootAvailable.value = RootFileManager.hasRootPermission(context.applicationContext)
+        }
+
         val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
         _useAstc.value = prefs.getBoolean("use_astc", false)
         _selectedQuality.value = prefs.getString("selected_quality", "HD") ?: "HD"
@@ -251,7 +261,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
         if (jobs.isNotEmpty()) {
             _moveState.value = MoveState.Idle
-            batchStartTimeMs = System.currentTimeMillis()  // 記錄開始時間
+            batchStartTimeMs = System.currentTimeMillis()  // Record the start time.
             _installJobs.value = jobs.map { InstallJob(it) }
             _finalInstallResult.value = null
             _showInstallDialog.value = true
@@ -423,11 +433,11 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         val finishedJobs = _installJobs.value
         val successfulJobs = finishedJobs.filter { it.status is JobStatus.Finished }
         val failedJobs = finishedJobs.filter { it.status is JobStatus.Failed }
-        
-        // 計算總耗時
+
+        // Calculate total elapsed time.
         val elapsedTimeMs = System.currentTimeMillis() - batchStartTimeMs
-        
-        // 收集失敗任務的詳細資訊
+
+        // Collect details of failed jobs.
         val failedJobDetails = failedJobs.map { job ->
             val failedStatus = job.status as JobStatus.Failed
             FailedJobInfo(hashedName = job.job.hashedName, error = failedStatus.detailedLog)
@@ -470,9 +480,21 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     fun moveFilesToGame() {
+        val context = appContext ?: return
+        if (_moveState.value is MoveState.Moving) return
+        _moveState.value = MoveState.Moving
+
         viewModelScope.launch {
-            _moveState.value = MoveState.Moving
-            val (success, message) = ShizukuManager.moveDownloadToGame()
+            // Wait for startup detection, then refresh authorization on user action.
+            rootCheckJob?.join()
+            _rootAvailable.value = RootFileManager.hasRootPermission(context)
+            val (success, message) = if (_rootAvailable.value) {
+                RootFileManager.moveDownloadToGame(context)
+            } else {
+                ShizukuManager.moveDownloadToGame()
+            }
+
+            // Do not retry through another backend after a transfer has started.
             _moveState.value = if (success) {
                 MoveState.Success(message)
             } else {
@@ -598,7 +620,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     tempDir.mkdirs()
 
                     if (modInfo.isDirectory) {
-                        DocumentFile.fromTreeUri(context, modInfo.uri)?.let { 
+                        DocumentFile.fromTreeUri(context, modInfo.uri)?.let {
                             copyDirectoryToCacheNonRecursive(context, it, tempDir)
                         }
                     } else {
