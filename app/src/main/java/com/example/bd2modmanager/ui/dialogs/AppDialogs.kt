@@ -123,6 +123,7 @@ fun ParallelInstallDialog(
     finalResult: FinalInstallResult?,
     moveState: MoveState,
     onMoveToGame: () -> Unit,
+    onRootCopy: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val clipboardManager = LocalClipboardManager.current
@@ -197,6 +198,10 @@ fun ParallelInstallDialog(
                                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                                     }
                                     is MoveState.Idle -> {
+                                        Button(onClick = onRootCopy) {
+                                            Text("Copy to Game Directory (Root)")
+                                        }
+                                        Spacer(Modifier.height(8.dp))
                                         if (finalResult.shizukuAvailable) {
                                             Button(onClick = onMoveToGame) {
                                                 Icon(Icons.Default.DriveFileMove, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -332,6 +337,7 @@ fun UninstallDialog(
     state: UninstallState,
     moveState: MoveState,
     onMoveToGame: () -> Unit,
+    onRootCopy: () -> Unit,
     onDismiss: () -> Unit
 ) {
     if (state is UninstallState.Idle) return
@@ -410,6 +416,11 @@ fun UninstallDialog(
                                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                             }
                             is MoveState.Idle -> {
+                                Button(onClick = onRootCopy) {
+                                    Text("Copy to Game Directory (Root)")
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                
                                 if (state.shizukuAvailable) {
                                     Button(onClick = onMoveToGame) {
                                         Icon(Icons.Default.DriveFileMove, contentDescription = null, modifier = Modifier.size(18.dp))
