@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import android.widget.Toast
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -19,17 +20,19 @@ import com.example.bd2modmanager.data.repository.CharacterRepository
 import com.example.bd2modmanager.data.repository.ModRepository
 import com.example.bd2modmanager.service.ModdingService
 import com.example.bd2modmanager.service.ShizukuManager
+import com.example.bd2modmanager.utils.ModEntryUtils
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.zip.ZipInputStream
@@ -42,8 +45,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     private fun shouldIgnoreModEntry(entryName: String?): Boolean {
-        val name = entryName?.substringAfterLast('/')?.trim()?.lowercase() ?: return true
-        return name.isEmpty() || name == ".modfile" || name.endsWith(".modfile")
+        return ModEntryUtils.shouldIgnoreModEntry(entryName)
     }
 
     private lateinit var characterRepository: CharacterRepository
@@ -169,7 +171,14 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     fun setModSourceDirectoryUri(context: Context, uri: Uri?) {
         savedStateHandle["mod_source_dir_uri"] = uri
         if (uri != null) {
-            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            } catch (e: SecurityException) {
+                Log.w("MainViewModel", "Persistable URI permission skipped: ${e.message}")
+            }
             scanModSourceDirectory(uri)
         }
     }
@@ -180,8 +189,29 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     }
 
     fun setSelectedQuality(quality: String) {
+        val previous = _selectedQuality.value
         _selectedQuality.value = quality
         appContext?.getSharedPreferences("app_settings", Context.MODE_PRIVATE)?.edit()?.putString("selected_quality", quality)?.apply()
+
+        val prevNormalized = if (previous.equals("SD", ignoreCase = true)) "SD" else "HD"
+        val nextNormalized = if (quality.equals("SD", ignoreCase = true)) "SD" else "HD"
+        if (prevNormalized != nextNormalized && ::characterRepository.isInitialized) {
+            viewModelScope.launch {
+                try {
+                    _isUpdatingCharacters.value = true
+                    appContext?.let { ctx ->
+                        val cacheFile = File(ctx.filesDir, "mod_cache_v2.json")
+                        if (cacheFile.exists()) cacheFile.delete()
+                    }
+                    characterRepository.updateCharacterData(quality)
+                } catch (e: Exception) {
+                    Log.e("MainViewModel", "Error refreshing catalog for quality $quality", e)
+                } finally {
+                    _isUpdatingCharacters.value = false
+                    modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
+                }
+            }
+        }
     }
 
     private fun finishInitialization() {
@@ -259,6 +289,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         }
     }
 
+    private val repackSemaphore = Semaphore(1)
+
     private fun processInstallJobs(context: Context) {
         viewModelScope.launch {
             if (!Python.isStarted()) {
@@ -268,15 +300,12 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             }
 
             val batchCacheKey = System.currentTimeMillis().toString()
-            val semaphore = Semaphore(5)
+            val downloadSemaphore = Semaphore(4)
 
             _installJobs.value.forEach { installJob ->
                 launch(Dispatchers.IO) {
-                    semaphore.acquire()
-                    try {
+                    downloadSemaphore.withPermit {
                         processSingleJob(context, installJob, batchCacheKey)
-                    } finally {
-                        semaphore.release()
                     }
                 }
             }
@@ -289,6 +318,15 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         var originalDataCache: File? = null
         val repackedFiles = mutableListOf<File>()
         val modAssetsDir = File(context.cacheDir, "temp_mod_assets_${hashedName}")
+        var lastProgressUpdateMs = 0L
+
+        fun updateProgressThrottled(statusFactory: (String) -> JobStatus, message: String, force: Boolean = false) {
+            val now = System.currentTimeMillis()
+            if (force || now - lastProgressUpdateMs >= 150L) {
+                lastProgressUpdateMs = now
+                updateJobStatus(hashedName, statusFactory(message))
+            }
+        }
 
         try {
             updateJobStatus(hashedName, JobStatus.Installing("Extracting mod files..."))
@@ -305,9 +343,13 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                             var entry = zis.nextEntry
                             while (entry != null) {
                                 if (!entry.isDirectory && !shouldIgnoreModEntry(entry.name)) {
-                                    val newFile = File(modAssetsDir, entry.name)
-                                    newFile.parentFile?.mkdirs()
-                                    newFile.outputStream().use { fos -> zis.copyTo(fos) }
+                                    val newFile = ModEntryUtils.resolveZipEntrySafely(modAssetsDir, entry.name)
+                                    if (newFile != null) {
+                                        newFile.parentFile?.mkdirs()
+                                        newFile.outputStream().use { fos -> zis.copyTo(fos) }
+                                    } else {
+                                        Log.w("MainViewModel", "Skipped unsafe zip entry: ${entry.name}")
+                                    }
                                 }
                                 entry = zis.nextEntry
                             }
@@ -337,7 +379,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 val (downloadSuccess, messageOrPath) = ModdingService.downloadBundle(
                     candidate, selectedQuality.value, context.cacheDir.absolutePath, cacheKey,
                     context.filesDir.absolutePath
-                ) { progress -> updateJobStatus(hashedName, JobStatus.Downloading(progress)) }
+                ) { progress -> updateProgressThrottled({ JobStatus.Downloading(it) }, progress) }
 
                 if (!downloadSuccess) {
                     candidateErrors.add("$candidate: $messageOrPath")
@@ -346,18 +388,21 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 originalDataCache = File(messageOrPath)
                 val relativePath = originalDataCache.relativeTo(context.cacheDir)
 
-                updateJobStatus(hashedName, JobStatus.Installing("Repacking bundle..."))
+                updateJobStatus(hashedName, JobStatus.Installing("Waiting to repack..."))
                 val repackedFile = File(context.cacheDir, "repacked/${relativePath.path}")
                 if (repackedFile.exists()) repackedFile.delete()
                 repackedFile.parentFile?.mkdirs()
                 repackedFiles.add(repackedFile)
 
-                val (repackSuccess, repackMessage, unmatched) = ModdingService.repackBundle(
-                    originalDataCache.absolutePath,
-                    modAssetsDir.absolutePath,
-                    repackedFile.absolutePath,
-                    useAstc.value
-                ) { progress -> updateJobStatus(hashedName, JobStatus.Installing(progress)) }
+                val (repackSuccess, repackMessage, unmatched) = repackSemaphore.withPermit {
+                    updateJobStatus(hashedName, JobStatus.Installing("Repacking bundle..."))
+                    ModdingService.repackBundle(
+                        originalDataCache.absolutePath,
+                        modAssetsDir.absolutePath,
+                        repackedFile.absolutePath,
+                        useAstc.value
+                    ) { progress -> updateProgressThrottled({ JobStatus.Installing(it) }, progress) }
+                }
 
                 lastMessage = repackMessage
                 if (repackSuccess) {
@@ -449,14 +494,10 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         )
     }
 
-    @Synchronized
     private fun updateJobStatus(hashedName: String, newStatus: JobStatus) {
-        viewModelScope.launch(Dispatchers.Main) {
-            val currentJobs = _installJobs.value.toMutableList()
-            val jobIndex = currentJobs.indexOfFirst { it.job.hashedName == hashedName }
-            if (jobIndex != -1) {
-                currentJobs[jobIndex] = currentJobs[jobIndex].copy(status = newStatus)
-                _installJobs.value = currentJobs
+        _installJobs.update { jobs ->
+            jobs.map { job ->
+                if (job.job.hashedName == hashedName) job.copy(status = newStatus) else job
             }
         }
     }
@@ -607,9 +648,11 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                                 var entry = zis.nextEntry
                                 while (entry != null) {
                                     val fileName = entry.name.substringAfterLast('/')
-                                    if (!entry.isDirectory && !shouldIgnoreModEntry(fileName)) {
-                                        val newFile = File(tempDir, fileName)
-                                        newFile.outputStream().use { fos -> zis.copyTo(fos) }
+                                    if (!entry.isDirectory && !shouldIgnoreModEntry(entry.name)) {
+                                        val newFile = ModEntryUtils.resolveZipEntrySafely(tempDir, fileName)
+                                        if (newFile != null) {
+                                            newFile.outputStream().use { fos -> zis.copyTo(fos) }
+                                        }
                                     }
                                     entry = zis.nextEntry
                                 }
@@ -809,17 +852,53 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         return null
     }
 
-    private fun copyDirectoryToCache(context: Context, sourceDir: DocumentFile, destinationDir: File) {
+    private fun copyDirectoryToCache(
+        context: Context,
+        sourceDir: DocumentFile,
+        destinationDir: File,
+        depth: Int = 0
+    ) {
+        if (depth > 5) return
         if (!destinationDir.exists()) destinationDir.mkdirs()
         sourceDir.listFiles().forEach { file ->
             val fileName = file.name ?: return@forEach
-            if (file.isFile && !shouldIgnoreModEntry(fileName)) {
+            if (file.isDirectory) {
+                if (!shouldIgnoreModEntry("$fileName/placeholder")) {
+                    val subDest = File(destinationDir, fileName)
+                    copyDirectoryToCache(context, file, subDest, depth + 1)
+                }
+            } else if (file.isFile && !shouldIgnoreModEntry(fileName)) {
                 val destFile = File(destinationDir, fileName)
                 try {
-                    context.contentResolver.openInputStream(file.uri)?.use { input -> destFile.outputStream().use { output -> input.copyTo(output) } }
-                } catch (e: Exception) { e.printStackTrace() }
+                    context.contentResolver.openInputStream(file.uri)?.use { input ->
+                        destFile.outputStream().use { output -> input.copyTo(output) }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         }
+    }
+
+    private fun normalizePreviewAssetName(fileName: String): String {
+        val lower = fileName.lowercase()
+        return when {
+            lower.endsWith(".skel.bytes") -> fileName.dropLast(6)
+            lower.endsWith(".skel.txt") -> fileName.dropLast(4)
+            lower.endsWith(".atlas.txt") -> fileName.dropLast(4)
+            else -> fileName
+        }
+    }
+
+    private fun isPreviewAssetFile(fileName: String): Boolean {
+        val lower = fileName.lowercase()
+        return lower.endsWith(".skel") ||
+            lower.endsWith(".skel.bytes") ||
+            lower.endsWith(".skel.txt") ||
+            lower.endsWith(".json") ||
+            lower.endsWith(".atlas") ||
+            lower.endsWith(".atlas.txt") ||
+            lower.endsWith(".png")
     }
 
     fun prepareAndShowPreview(context: Context, modInfo: ModInfo) {
@@ -832,39 +911,50 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             var skelPath: String? = null
             var atlasPath: String? = null
 
-            try {
-                if (modInfo.isDirectory) {
-                    val sourceDir = DocumentFile.fromTreeUri(context, modInfo.uri)
-                    sourceDir?.listFiles()?.forEach { file ->
-                        val fileName = file.name ?: ""
-                        if (!shouldIgnoreModEntry(fileName) && (fileName.endsWith(".skel") || fileName.endsWith(".json") || fileName.endsWith(".atlas") || fileName.endsWith(".png"))) {
-                            val destFile = File(tempDir, fileName)
-                            context.contentResolver.openInputStream(file.uri)?.use { input ->
-                                destFile.outputStream().use { output ->
-                                    input.copyTo(output)
-                                }
-                            }
-                            if (fileName.endsWith(".skel") || fileName.endsWith(".json")) {
-                                skelPath = destFile.absolutePath
-                            } else if (fileName.endsWith(".atlas")) {
-                                atlasPath = destFile.absolutePath
-                            }
+            fun copyPreviewDocDir(dir: DocumentFile, depth: Int) {
+                if (depth > 5) return
+                dir.listFiles().forEach { file ->
+                    val rawName = file.name ?: return@forEach
+                    if (file.isDirectory) {
+                        if (!shouldIgnoreModEntry("$rawName/placeholder")) {
+                            copyPreviewDocDir(file, depth + 1)
+                        }
+                    } else if (!shouldIgnoreModEntry(rawName) && isPreviewAssetFile(rawName)) {
+                        val normalizedName = normalizePreviewAssetName(rawName)
+                        val destFile = ModEntryUtils.resolveZipEntrySafely(tempDir, normalizedName) ?: return@forEach
+                        context.contentResolver.openInputStream(file.uri)?.use { input ->
+                            destFile.outputStream().use { output -> input.copyTo(output) }
+                        }
+                        val lowerNorm = normalizedName.lowercase()
+                        if (lowerNorm.endsWith(".skel") || lowerNorm.endsWith(".json")) {
+                            skelPath = destFile.absolutePath
+                        } else if (lowerNorm.endsWith(".atlas")) {
+                            atlasPath = destFile.absolutePath
                         }
                     }
+                }
+            }
+
+            try {
+                if (modInfo.isDirectory) {
+                    DocumentFile.fromTreeUri(context, modInfo.uri)?.let { copyPreviewDocDir(it, 0) }
                 } else {
                     context.contentResolver.openInputStream(modInfo.uri)?.use { fis ->
                         ZipInputStream(fis).use { zis ->
                             var entry = zis.nextEntry
                             while (entry != null) {
                                 val fileName = entry.name.substringAfterLast('/')
-                                if (!entry.isDirectory && !shouldIgnoreModEntry(fileName) && (fileName.endsWith(".skel") || fileName.endsWith(".json") || fileName.endsWith(".atlas") || fileName.endsWith(".png"))) {
-                                    val destFile = File(tempDir, fileName)
-                                    destFile.outputStream().use { fos -> zis.copyTo(fos) }
-
-                                    if (fileName.endsWith(".skel") || fileName.endsWith(".json")) {
-                                        skelPath = destFile.absolutePath
-                                    } else if (fileName.endsWith(".atlas")) {
-                                        atlasPath = destFile.absolutePath
+                                if (!entry.isDirectory && !shouldIgnoreModEntry(entry.name) && isPreviewAssetFile(fileName)) {
+                                    val normalizedName = normalizePreviewAssetName(fileName)
+                                    val destFile = ModEntryUtils.resolveZipEntrySafely(tempDir, normalizedName)
+                                    if (destFile != null) {
+                                        destFile.outputStream().use { fos -> zis.copyTo(fos) }
+                                        val lowerNorm = normalizedName.lowercase()
+                                        if (lowerNorm.endsWith(".skel") || lowerNorm.endsWith(".json")) {
+                                            skelPath = destFile.absolutePath
+                                        } else if (lowerNorm.endsWith(".atlas")) {
+                                            atlasPath = destFile.absolutePath
+                                        }
                                     }
                                 }
                                 entry = zis.nextEntry
@@ -884,6 +974,10 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                         context.startActivity(intent)
                     }
                 } else {
+                    tempDir.deleteRecursively()
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "No valid Spine (.skel/.json + .atlas) files found for preview.", Toast.LENGTH_SHORT).show()
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

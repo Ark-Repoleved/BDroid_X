@@ -11,6 +11,7 @@ import com.example.bd2modmanager.data.model.ModInfo
 import com.example.bd2modmanager.data.model.ResolutionState
 import com.example.bd2modmanager.data.model.ResolvedTarget
 import com.example.bd2modmanager.service.ModdingService
+import com.example.bd2modmanager.utils.ModEntryUtils
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
@@ -31,8 +32,7 @@ class ModRepository(
     }
 
     private fun shouldIgnoreModEntry(entryName: String?): Boolean {
-        val name = entryName?.substringAfterLast('/')?.trim()?.lowercase() ?: return true
-        return name.isEmpty() || name == ".modfile" || name.endsWith(".modfile")
+        return ModEntryUtils.shouldIgnoreModEntry(entryName)
     }
 
     private val gson = Gson()
@@ -105,9 +105,9 @@ class ModRepository(
                             )
                         )
                     } else {
-                        val modName = displayName.removeSuffix(".zip")
+                        val modName = displayName.replace(Regex("\\.zip$", RegexOption.IGNORE_CASE), "")
                         val modDetails = if (isDirectory) {
-                            extractModDetailsFromDirectory(fileUri)
+                            extractModDetailsFromDirectory(dirUri, fileUri)
                         } else {
                             extractModDetailsFromUri(fileUri)
                         }
@@ -303,33 +303,49 @@ class ModRepository(
         return ModDetails(fileId, fileNames)
     }
 
-    private fun extractModDetailsFromDirectory(dirUri: Uri): ModDetails {
+    private fun extractModDetailsFromDirectory(treeUri: Uri, dirUri: Uri): ModDetails {
         val fileNames = mutableListOf<String>()
         var fileId: String? = null
-        try {
-            val docId = DocumentsContract.getDocumentId(dirUri)
-            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(dirUri, docId)
-            val projection = arrayOf(
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                DocumentsContract.Document.COLUMN_MIME_TYPE
-            )
-            context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
-                val nameCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                val mimeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
-                while (cursor.moveToNext()) {
-                    val entryName = cursor.getString(nameCol) ?: continue
-                    val mimeType = cursor.getString(mimeCol) ?: ""
-                    if (shouldIgnoreModEntry(entryName)) continue
-                    fileNames.add(entryName)
-                    val isFile = mimeType != DocumentsContract.Document.MIME_TYPE_DIR
-                    if (isFile && fileId == null) {
-                        fileId = characterRepository.extractFileId(entryName)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE
+        )
+
+        fun collectRecursive(currentDirUri: Uri, relativePrefix: String, depth: Int) {
+            if (depth > 5) return
+            try {
+                val docId = DocumentsContract.getDocumentId(currentDirUri)
+                val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
+                context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                    val idCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                    val nameCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                    val mimeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                    while (cursor.moveToNext()) {
+                        val childDocId = cursor.getString(idCol) ?: continue
+                        val entryName = cursor.getString(nameCol) ?: continue
+                        val mimeType = cursor.getString(mimeCol) ?: ""
+                        val relativePath = if (relativePrefix.isEmpty()) entryName else "$relativePrefix/$entryName"
+                        val isDir = mimeType == DocumentsContract.Document.MIME_TYPE_DIR
+                        if (isDir) {
+                            if (shouldIgnoreModEntry("$relativePath/placeholder")) continue
+                            val childDirUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
+                            collectRecursive(childDirUri, relativePath, depth + 1)
+                        } else {
+                            if (shouldIgnoreModEntry(relativePath)) continue
+                            fileNames.add(relativePath)
+                            if (fileId == null) {
+                                fileId = characterRepository.extractFileId(entryName)
+                            }
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
+
+        collectRecursive(dirUri, "", 0)
         return ModDetails(fileId, fileNames)
     }
 

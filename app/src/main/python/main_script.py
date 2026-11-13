@@ -7,6 +7,7 @@ catalog (see catalog_index.py).  There is no local bundle scanning any more.
 import json
 import os
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
@@ -27,6 +28,28 @@ _index_state = {
     'version': None,
 }
 _index_lock = threading.Lock()
+
+
+def _ensure_temp_dir(base_dir=None):
+    """Guarantee tempfile has a writable existing directory on Android."""
+    current = tempfile.tempdir
+    if current and os.path.isdir(current) and os.access(current, os.W_OK):
+        return current
+    candidates = [os.environ.get('TMPDIR')]
+    if base_dir:
+        candidates.append(os.path.join(str(base_dir), '.tmp'))
+    for cand in candidates:
+        if not cand:
+            continue
+        try:
+            os.makedirs(cand, exist_ok=True)
+            if os.path.isdir(cand) and os.access(cand, os.W_OK):
+                tempfile.tempdir = cand
+                os.environ['TMPDIR'] = cand
+                return cand
+        except OSError:
+            continue
+    return None
 
 
 def _report(progress_callback, message):
@@ -50,6 +73,7 @@ def _normalize_quality(quality):
 
 def ensure_catalog_index(output_dir, quality='HD', progress_callback=None, force=False):
     """Load or (re)build the catalog index. Returns (index, error)."""
+    _ensure_temp_dir(output_dir)
     with _index_lock:
         return _ensure_catalog_index(output_dir, quality, progress_callback, force)
 
@@ -197,6 +221,7 @@ def download_bundle(hashed_name, quality, output_dir, cache_key=None, progress_c
     ``output_dir`` is the scratch directory the bundle bytes are written to.
     """
     try:
+        _ensure_temp_dir(output_dir or index_dir)
         quality = _normalize_quality(quality)
         index, error = ensure_catalog_index(index_dir or output_dir, quality, progress_callback)
         if error:
@@ -218,6 +243,7 @@ def download_bundle(hashed_name, quality, output_dir, cache_key=None, progress_c
 def unpack_bundle(bundle_path, output_dir, progress_callback=None):
     """Unpack a game bundle. Returns (success, message)."""
     try:
+        _ensure_temp_dir(output_dir)
         success, message = unpacker_main(
             bundle_path=bundle_path,
             output_dir=output_dir,
@@ -240,6 +266,7 @@ def main(original_bundle_path, modded_assets_folder, output_path, use_astc, prog
     caller retry with an alternative bundle if one is available.
     """
     try:
+        _ensure_temp_dir(os.path.dirname(output_path) if output_path else modded_assets_folder)
         success, message, unmatched = repack_bundle(
             original_bundle_path=original_bundle_path,
             modded_assets_folder=modded_assets_folder,

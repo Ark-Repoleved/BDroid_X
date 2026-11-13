@@ -23,6 +23,35 @@ STRATEGY_EXACT = 'EXACT'
 STRATEGY_FAMILY = 'NORMALIZED'
 STRATEGY_HINT = 'FALLBACK'
 
+_IGNORED_NAMES = {
+    '.ds_store', 'thumbs.db', 'desktop.ini', '.modfile',
+    'mod.json', 'info.json', 'manifest.json', 'metadata.json', 'config.json',
+    'readme.txt', 'readme.md', 'changelog.txt', 'changelog.md',
+    'license.txt', 'license.md', 'credits.txt',
+    'preview.png', 'cover.png', 'thumb.png', 'thumbnail.png',
+}
+_IGNORED_DIRS = {'__macosx', '.git', '.old'}
+_IGNORED_EXTS = ('.modfile', '.md', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.url', '.lnk')
+
+
+def _is_ignored(file_name):
+    norm = (file_name or '').strip().replace('\\', '/')
+    if not norm:
+        return True
+    parts = [p for p in norm.split('/') if p]
+    if not parts:
+        return True
+    if any(p.lower() in _IGNORED_DIRS for p in parts[:-1]):
+        return True
+    base = parts[-1].lower()
+    if base in _IGNORED_NAMES or base in _IGNORED_DIRS or base.startswith('._'):
+        return True
+    if any(base.endswith(ext) for ext in _IGNORED_EXTS):
+        return True
+    if base.startswith('readme') and base.endswith(('.txt', '.md')):
+        return True
+    return False
+
 
 def _basename(file_name):
     return (file_name or '').strip().replace('\\', '/').rsplit('/', 1)[-1].lower()
@@ -90,6 +119,8 @@ def resolve_mod_folder(mod_file_names, index, hints=None):
     matches = []
     unresolved = []
     for file_name in (mod_file_names or []):
+        if _is_ignored(file_name):
+            continue
         stems = lookup_stems(file_name)
         if not stems:
             continue
