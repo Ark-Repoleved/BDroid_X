@@ -8,6 +8,28 @@ enum class ResolutionState {
     INVALID
 }
 
+enum class ModCategory(val label: String) {
+    CUTSCENE("Cutscene"),
+    ILLUST("Idle / Illust"),
+    DATING("Dating Sim"),
+    OTHER("Other")
+}
+
+fun categoryOf(type: String?, costume: String?): ModCategory {
+    if (costume?.contains("DATING SIM", ignoreCase = true) == true) return ModCategory.DATING
+    val t = type?.trim().orEmpty()
+    return when {
+        t.equals("cutscene", true) -> ModCategory.CUTSCENE
+        t.equals("idle", true) -> ModCategory.ILLUST
+        else -> ModCategory.OTHER
+    }
+}
+
+fun isUnknownCharacter(character: String?): Boolean {
+    val c = character?.trim().orEmpty()
+    return c.isEmpty() || c.equals("Unknown", true) || c.equals("Unknown Character", true)
+}
+
 data class ModInfo(
     val name: String,
     val character: String,

@@ -19,6 +19,7 @@ import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,13 +34,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.bd2modmanager.data.model.ModInfo
 import com.example.bd2modmanager.data.model.ResolutionState
+import com.example.bd2modmanager.data.repository.AvatarRepository
+import com.example.bd2modmanager.ui.components.RecoveryBanner
 import com.example.bd2modmanager.ui.viewmodel.MainViewModel
+import com.example.bd2modmanager.update.UpdateViewModel
 import com.valentinilk.shimmer.shimmer
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ModScreen(
     viewModel: MainViewModel,
+    updateViewModel: UpdateViewModel,
     onSelectModSource: () -> Unit,
     onUninstallRequest: (String) -> Unit,
     onUnpackRequest: () -> Unit,
@@ -61,6 +66,16 @@ fun ModScreen(
     val context = LocalContext.current
     val isSearchActive by viewModel.isSearchActive.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
+    val characterEntries by viewModel.characterEntries.collectAsState()
+    val avatarSyncState by viewModel.avatarSyncState.collectAsState()
+    val recoveryNotices by viewModel.recoveryNotices.collectAsState()
+    val isInstallRunning by viewModel.isInstallServiceRunning.collectAsState()
+    val betaChannel by updateViewModel.betaChannel.collectAsState()
+    val updateChecking by updateViewModel.updateChecking.collectAsState()
+
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    var characterFilter by remember { mutableStateOf(CharacterFilter.ALL) }
+    var pickedCharacter by remember { mutableStateOf<String?>(null) }
 
 
     val pullToRefreshState = rememberPullToRefreshState()
@@ -81,8 +96,21 @@ fun ModScreen(
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val selectedQuality by viewModel.selectedQuality.collectAsState()
                 var qualityExpanded by remember { mutableStateOf(false) }
-                
-                AnimatedVisibility(visible = selectedMods.isNotEmpty()) {
+
+                AnimatedVisibility(visible = isInstallRunning) {
+                    ExtendedFloatingActionButton(
+                        onClick = { viewModel.reopenInstallDialog() },
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                        icon = { Icon(Icons.Default.Sync, contentDescription = "Install Running") },
+                        text = { Text("Task Running") }
+                    )
+                }
+
+                AnimatedVisibility(
+                    visible = modSourceDirectoryUri != null &&
+                        (selectedTab == 0 || selectedMods.isNotEmpty())
+                ) {
                     Box {
                         ExtendedFloatingActionButton(
                             onClick = { qualityExpanded = true },
@@ -107,9 +135,11 @@ fun ModScreen(
                         }
                     }
                 }
-                
-                val canMergeSelected = remember(selectedMods, allModsList) {
-                    selectedMods.size == 1 && allModsList.find { it.uri == selectedMods.first() }?.isDirectory == true
+
+                val canMergeSelected = remember(selectedMods, allModsList, selectedTab) {
+                    selectedTab == 1 &&
+                        selectedMods.size == 1 &&
+                        allModsList.find { it.uri == selectedMods.first() }?.isDirectory == true
                 }
                 AnimatedVisibility(visible = canMergeSelected) {
                     ExtendedFloatingActionButton(
@@ -118,14 +148,17 @@ fun ModScreen(
                         text = { Text("Merge Spine") }
                     )
                 }
-                AnimatedVisibility(visible = modSourceDirectoryUri != null && selectedMods.isEmpty()) {
+                AnimatedVisibility(
+                    visible = modSourceDirectoryUri != null &&
+                        (selectedTab == 0 || selectedMods.isEmpty())
+                ) {
                     FloatingActionButton(
                         onClick = onUnpackRequest,
                     ) {
                         Icon(Icons.Default.Unarchive, contentDescription = "Unpack Bundle")
                     }
                 }
-                AnimatedVisibility(visible = selectedMods.isNotEmpty()) {
+                AnimatedVisibility(visible = selectedTab == 1 && selectedMods.isNotEmpty()) {
                     ExtendedFloatingActionButton(
                         onClick = { viewModel.initiateBatchRepack(context) },
                         icon = { Icon(Icons.Default.Done, contentDescription = "Repack") },
@@ -152,31 +185,33 @@ fun ModScreen(
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Card(
-                                shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background)
-                            ) {
-                                Box(
-                                    modifier = Modifier.size(width = 48.dp, height = 40.dp),
-                                    contentAlignment = Alignment.Center
+                            if (selectedTab == 1) {
+                                Card(
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background)
                                 ) {
-                                    val allModsCount = allModsList.count {
-                                        it.resolutionState == ResolutionState.KNOWN
+                                    Box(
+                                        modifier = Modifier.size(width = 48.dp, height = 40.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        val allModsCount = allModsList.count {
+                                            it.resolutionState == ResolutionState.KNOWN
+                                        }
+                                        val selectedModsCount = selectedMods.size
+                                        val checkboxState = when {
+                                            selectedModsCount == 0 -> ToggleableState.Off
+                                            selectedModsCount == allModsCount && allModsCount > 0 -> ToggleableState.On
+                                            selectedModsCount > 0 -> ToggleableState.Indeterminate
+                                            else -> ToggleableState.Off
+                                        }
+                                        TriStateCheckbox(
+                                            state = checkboxState,
+                                            onClick = { viewModel.toggleSelectAll() }
+                                        )
                                     }
-                                    val selectedModsCount = selectedMods.size
-                                    val checkboxState = when {
-                                        selectedModsCount == 0 -> ToggleableState.Off
-                                        selectedModsCount == allModsCount && allModsCount > 0 -> ToggleableState.On
-                                        selectedModsCount > 0 -> ToggleableState.Indeterminate
-                                        else -> ToggleableState.Off
-                                    }
-                                    TriStateCheckbox(
-                                        state = checkboxState,
-                                        onClick = { viewModel.toggleSelectAll() }
-                                    )
                                 }
+                                Spacer(modifier = Modifier.width(8.dp))
                             }
-                            Spacer(modifier = Modifier.width(8.dp))
 
                             BoxWithConstraints(
                                 modifier = Modifier
@@ -313,6 +348,28 @@ fun ModScreen(
                                     onDismissRequest = { menuExpanded = false }
                                 ) {
                                     DropdownMenuItem(
+                                        text = { Text(if (updateChecking) "Checking Updates..." else "Check for Updates") },
+                                        leadingIcon = { Icon(Icons.Default.SystemUpdate, contentDescription = null) },
+                                        enabled = !updateChecking,
+                                        onClick = {
+                                            menuExpanded = false
+                                            updateViewModel.checkForUpdates(auto = false)
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Beta Update Channel") },
+                                        leadingIcon = {
+                                            Icon(
+                                                if (betaChannel) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                                                contentDescription = null
+                                            )
+                                        },
+                                        onClick = {
+                                            updateViewModel.setBetaChannel(!betaChannel)
+                                        }
+                                    )
+                                    HorizontalDivider()
+                                    DropdownMenuItem(
                                         text = { Text("Export Diagnostic Logs") },
                                         leadingIcon = { Icon(Icons.Default.BugReport, contentDescription = null) },
                                         onClick = {
@@ -332,8 +389,37 @@ fun ModScreen(
                             }
                         }
 
+                        RecoveryBanner(
+                            notices = recoveryNotices,
+                            onRetryMove = { viewModel.retryRecoveryMove(context) },
+                            onDismiss = { viewModel.dismissRecoveryNotices(context) }
+                        )
+
+                        TabRow(selectedTabIndex = selectedTab) {
+                            Tab(
+                                selected = selectedTab == 0,
+                                onClick = { selectedTab = 0 },
+                                text = { Text("Characters") }
+                            )
+                            Tab(
+                                selected = selectedTab == 1,
+                                onClick = { selectedTab = 1 },
+                                text = { Text("All Mods (${allModsList.size})") }
+                            )
+                        }
+
                         if (showShimmer) {
                             ShimmerLoadingScreen()
+                        } else if (selectedTab == 0) {
+                            CharacterScreen(
+                                entries = characterEntries,
+                                filter = characterFilter,
+                                searchQuery = searchQuery,
+                                onSelectFilter = { characterFilter = it },
+                                onPickCharacter = { pickedCharacter = it },
+                                avatarSyncFailed = avatarSyncState == AvatarRepository.SyncState.FAILED,
+                                onRetryAvatarSync = { viewModel.retryAvatarSync(context) }
+                            )
                         } else if (modsList.isEmpty()) {
                             if (searchQuery.isNotEmpty()) {
                                 NoSearchResultsScreen(searchQuery)
@@ -445,6 +531,18 @@ fun ModScreen(
                     PullToRefreshContainer(
                         modifier = Modifier.align(Alignment.TopCenter),
                         state = pullToRefreshState,
+                    )
+                }
+
+                pickedCharacter?.let { charName ->
+                    CharacterSheet(
+                        characterName = charName,
+                        mods = allModsList,
+                        onPreview = { mod -> viewModel.prepareAndShowPreview(context, mod) },
+                        onRepackSingle = { mod -> viewModel.initiateBatchRepackMods(context, listOf(mod)) },
+                        onRepackBatch = { mods -> viewModel.initiateBatchRepackMods(context, mods) },
+                        onUninstallBundle = onUninstallRequest,
+                        onDismiss = { pickedCharacter = null }
                     )
                 }
             }

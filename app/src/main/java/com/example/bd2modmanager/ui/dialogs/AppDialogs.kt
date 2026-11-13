@@ -129,7 +129,7 @@ fun ParallelInstallDialog(
     val context = LocalContext.current
 
     AlertDialog(
-        onDismissRequest = { if (finalResult != null) onDismiss() },
+        onDismissRequest = { onDismiss() },
         modifier = Modifier
             .fillMaxHeight(0.8f)
             .fillMaxWidth(0.95f),
@@ -277,14 +277,16 @@ fun ParallelInstallDialog(
                     }
                 }
 
-                if (finalResult != null) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 16.dp),
-                        horizontalArrangement = Arrangement.End
-                    ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    if (finalResult != null) {
                         Button(onClick = onDismiss) { Text("OK") }
+                    } else {
+                        TextButton(onClick = onDismiss) { Text("Run in Background") }
                     }
                 }
             }

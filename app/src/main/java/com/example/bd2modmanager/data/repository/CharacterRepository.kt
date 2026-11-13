@@ -145,4 +145,26 @@ class CharacterRepository(private val context: Context) {
     fun extractFileId(entryName: String): String? {
         return "(char\\d{6}|illust_dating\\d+|illust_special\\d+|illust_talk\\d+|npc\\d+|specialillust\\w+|storypack\\w+|\\bRhythmHitAnim\\b)".toRegex(RegexOption.IGNORE_CASE).find(entryName)?.value?.lowercase()
     }
+
+    fun getAllCharacterNames(): Pair<List<String>, List<String>> {
+        val playable = LinkedHashSet<String>()
+        val npc = LinkedHashSet<String>()
+        for ((fileId, entries) in characterLut) {
+            val isNpcId = fileId.startsWith("npc", ignoreCase = true) ||
+                fileId.startsWith("illust_npc", ignoreCase = true)
+            for (info in entries) {
+                val name = info.character.trim()
+                if (name.isEmpty() || name.equals("Unknown", true) || name.equals("Unknown Character", true)) {
+                    continue
+                }
+                if (isNpcId || name.equals("Other", true)) {
+                    npc.add(name)
+                } else {
+                    playable.add(name)
+                }
+            }
+        }
+        npc.removeAll(playable)
+        return playable.sortedBy { it.lowercase() } to npc.sortedBy { it.lowercase() }
+    }
 }

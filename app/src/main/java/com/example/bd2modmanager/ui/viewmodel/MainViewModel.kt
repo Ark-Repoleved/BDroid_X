@@ -16,10 +16,17 @@ import androidx.lifecycle.viewModelScope
 import com.chaquo.python.Python
 import com.example.bd2modmanager.SpinePreviewActivity
 import com.example.bd2modmanager.data.model.*
+import com.example.bd2modmanager.data.repository.AvatarRepository
+import com.example.bd2modmanager.data.repository.CharacterMetaRepository
 import com.example.bd2modmanager.data.repository.CharacterRepository
 import com.example.bd2modmanager.data.repository.ModRepository
+import com.example.bd2modmanager.service.InstallService
 import com.example.bd2modmanager.service.ModdingService
+import com.example.bd2modmanager.service.OperationJournalStore
+import com.example.bd2modmanager.service.RecoveryNotice
 import com.example.bd2modmanager.service.ShizukuManager
+import com.example.bd2modmanager.ui.screens.CharacterEntry
+import com.example.bd2modmanager.ui.screens.buildCharacterEntries
 import com.example.bd2modmanager.utils.LogExporter
 import com.example.bd2modmanager.utils.ModEntryUtils
 import com.example.bd2modmanager.utils.SafMediaExclusion
@@ -30,21 +37,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.zip.ZipInputStream
 
 class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel() {
-
-    companion object {
-        // Upper bound for install-time bundle fallback attempts.
-        private const val MAX_BUNDLE_CANDIDATES = 3
-    }
 
     private fun shouldIgnoreModEntry(entryName: String?): Boolean {
         return ModEntryUtils.shouldIgnoreModEntry(entryName)
@@ -52,6 +51,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     private lateinit var characterRepository: CharacterRepository
     private lateinit var modRepository: ModRepository
+    private var avatarRepository: AvatarRepository? = null
+    private var characterMetaRepository: CharacterMetaRepository? = null
 
     val modSourceDirectoryUri: StateFlow<Uri?> = savedStateHandle.getStateFlow("mod_source_dir_uri", null)
 
@@ -101,17 +102,14 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             }
         }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), emptyList())
 
-    private val _installJobs = MutableStateFlow<List<InstallJob>>(emptyList())
-    val installJobs: StateFlow<List<InstallJob>> = _installJobs.asStateFlow()
+    val installJobs: StateFlow<List<InstallJob>> = InstallService.installJobs
 
     private val _showInstallDialog = MutableStateFlow(false)
     val showInstallDialog: StateFlow<Boolean> = _showInstallDialog.asStateFlow()
 
-    private val _finalInstallResult = MutableStateFlow<FinalInstallResult?>(null)
-    val finalInstallResult: StateFlow<FinalInstallResult?> = _finalInstallResult.asStateFlow()
-    
-    // 批次處理開始時間（用於計算總耗時）
-    private var batchStartTimeMs: Long = 0L
+    val finalInstallResult: StateFlow<FinalInstallResult?> = InstallService.finalResult
+
+    val isInstallServiceRunning: StateFlow<Boolean> = InstallService.isRunning
 
     private val _uninstallState = MutableStateFlow<UninstallState>(UninstallState.Idle)
     val uninstallState: StateFlow<UninstallState> = _uninstallState.asStateFlow()
@@ -128,8 +126,20 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private val _showMergeDialog = MutableStateFlow(false)
     val showMergeDialog: StateFlow<Boolean> = _showMergeDialog.asStateFlow()
 
-    private val _moveState = MutableStateFlow<MoveState>(MoveState.Idle)
-    val moveState: StateFlow<MoveState> = _moveState.asStateFlow()
+    val moveState: StateFlow<MoveState> = InstallService.moveState
+
+    private val _characterEntries = MutableStateFlow<List<CharacterEntry>>(emptyList())
+    val characterEntries: StateFlow<List<CharacterEntry>> = _characterEntries.asStateFlow()
+
+    private val _avatarSyncState = MutableStateFlow(AvatarRepository.SyncState.IDLE)
+    val avatarSyncState: StateFlow<AvatarRepository.SyncState> = _avatarSyncState.asStateFlow()
+
+    private val _recoveryNotices = MutableStateFlow<List<RecoveryNotice>>(emptyList())
+    val recoveryNotices: StateFlow<List<RecoveryNotice>> = _recoveryNotices.asStateFlow()
+
+    private val _staticPreviewImages = MutableStateFlow<List<String>>(emptyList())
+    val staticPreviewImages: StateFlow<List<String>> = _staticPreviewImages.asStateFlow()
+    private var staticPreviewTempDir: String? = null
 
     private var appContext: Context? = null
 
@@ -149,6 +159,20 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
         characterRepository = CharacterRepository(context)
         modRepository = ModRepository(context, characterRepository)
+        characterMetaRepository = CharacterMetaRepository.getInstance(context)
+        avatarRepository = AvatarRepository.getInstance(context).also { repo ->
+            viewModelScope.launch {
+                repo.syncState.collect { state -> _avatarSyncState.value = state }
+            }
+            viewModelScope.launch(Dispatchers.IO) {
+                repo.syncAll()
+            }
+        }
+
+        if (InstallService.isRunning.value || InstallService.finalResult.value != null) {
+            _showInstallDialog.value = true
+        }
+        checkRecoveryJournal(context)
 
         viewModelScope.launch {
             val hasLocalData = characterRepository.hasLocalCharactersJson() &&
@@ -156,9 +180,11 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
             if (hasLocalData) {
                 characterRepository.loadLocalCharacterData()
+                refreshCharacterEntries()
                 modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
                 try {
                     val status = characterRepository.updateCharacterData(_selectedQuality.value)
+                    refreshCharacterEntries()
                     if (status == "SUCCESS") {
                         modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
                     }
@@ -166,10 +192,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     Log.e("MainViewModel", "Background character/catalog update failed", e)
                 }
             } else {
+                refreshCharacterEntries()
                 try {
                     _isUpdatingCharacters.value = true
-                    // Refreshes characters.json and the catalog index (the single source
-                    // of truth for mod resolution) for the current game version.
                     characterRepository.updateCharacterData(_selectedQuality.value)
                 } catch (e: Exception) {
                     Log.e("MainViewModel", "Error during initialization", e)
@@ -177,13 +202,62 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 finishInitialization()
             }
         }
+    }
 
+    fun retryAvatarSync(context: Context) {
+        val repo = avatarRepository ?: AvatarRepository.getInstance(context).also { avatarRepository = it }
+        viewModelScope.launch(Dispatchers.IO) {
+            repo.syncAll()
+        }
+    }
+
+    private fun refreshCharacterEntries() {
+        val (repoPlayable, npc) = if (::characterRepository.isInitialized) {
+            characterRepository.getAllCharacterNames()
+        } else {
+            emptyList<String>() to emptyList()
+        }
+        val metaPlayable = characterMetaRepository?.allCharacterNames().orEmpty()
+        val allPlayable = (repoPlayable + metaPlayable).distinct()
+        _characterEntries.value = buildCharacterEntries(allPlayable, npc, _modsList.value)
+    }
+
+    private fun checkRecoveryJournal(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val sharedDir = File("/storage/emulated/0/Download/Shared")
+            val hasStaged = sharedDir.isDirectory && (sharedDir.listFiles()?.isNotEmpty() == true)
+            val journal = OperationJournalStore(
+                File(context.filesDir, OperationJournalStore.JOURNAL_FILENAME)
+            )
+            val notices = if (InstallService.isRunning.value) emptyList() else journal.classify(hasStaged)
+            _recoveryNotices.value = notices
+        }
+    }
+
+    fun retryRecoveryMove(context: Context) {
+        val started = InstallService.startMove(context.applicationContext)
+        if (!started) {
+            Toast.makeText(context, "Unable to start foreground install service.", Toast.LENGTH_LONG).show()
+            return
+        }
         viewModelScope.launch {
-            installJobs.collect { jobs ->
-                if (jobs.isNotEmpty() && jobs.all { it.status is JobStatus.Finished || it.status is JobStatus.Failed }) {
-                    summarizeResults()
-                }
+            InstallService.isRunning.first { !it }
+            checkRecoveryJournal(context)
+            when (val ms = InstallService.moveState.value) {
+                is MoveState.Success -> Toast.makeText(context, ms.message, Toast.LENGTH_SHORT).show()
+                is MoveState.Failed -> Toast.makeText(context, ms.error, Toast.LENGTH_LONG).show()
+                else -> Unit
             }
+        }
+    }
+
+    fun dismissRecoveryNotices(context: Context) {
+        val appCtx = context.applicationContext
+        viewModelScope.launch(Dispatchers.IO) {
+            OperationJournalStore(
+                File(appCtx.filesDir, OperationJournalStore.JOURNAL_FILENAME)
+            ).clear()
+            _recoveryNotices.value = emptyList()
         }
     }
 
@@ -275,6 +349,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     private fun finishInitialization() {
         _isUpdatingCharacters.value = false
+        refreshCharacterEntries()
         modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
     }
 
@@ -329,260 +404,67 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
     fun initiateBatchRepack(context: Context) {
         val allMods = _modsList.value
-        val jobs = _selectedMods.value
-            .mapNotNull { uri -> allMods.find { it.uri == uri } }
+        val selectedList = _selectedMods.value.mapNotNull { uri -> allMods.find { it.uri == uri } }
+        initiateBatchRepackMods(context, selectedList)
+    }
+
+    fun initiateBatchRepackMods(context: Context, mods: List<ModInfo>) {
+        if (InstallService.isRunning.value) {
+            _showInstallDialog.value = true
+            Toast.makeText(context, "A repack or install task is already running.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val jobs = mods
             .filter {
                 !it.targetHash.isNullOrBlank() &&
                     it.resolutionState == ResolutionState.KNOWN
             }
             .groupBy { it.targetHash!! }
-            .map { (hash, mods) -> RepackJob(hash, mods) }
+            .map { (hash, groupMods) -> RepackJob(hash, groupMods) }
 
         if (jobs.isNotEmpty()) {
-            _moveState.value = MoveState.Idle
-            batchStartTimeMs = System.currentTimeMillis()  // 記錄開始時間
-            _installJobs.value = jobs.map { InstallJob(it) }
-            _finalInstallResult.value = null
-            _showInstallDialog.value = true
-            processInstallJobs(context)
-        }
-    }
-
-    private val repackSemaphore = Semaphore(1)
-
-    private fun processInstallJobs(context: Context) {
-        viewModelScope.launch {
-            if (!Python.isStarted()) {
-                withContext(Dispatchers.IO) {
-                    Python.start(com.chaquo.python.android.AndroidPlatform(context))
-                }
-            }
-
-            val downloadSemaphore = Semaphore(4)
-
-            _installJobs.value.forEach { installJob ->
-                launch(Dispatchers.IO) {
-                    downloadSemaphore.withPermit {
-                        processSingleJob(context, installJob)
-                    }
-                }
-            }
-        }
-    }
-
-    private suspend fun processSingleJob(context: Context, installJob: InstallJob) {
-        val job = installJob.job
-        val hashedName = job.hashedName
-        val repackedFiles = mutableListOf<File>()
-        val modAssetsDir = File(context.cacheDir, "temp_mod_assets_${hashedName}")
-        var lastProgressUpdateMs = 0L
-
-        fun updateProgressThrottled(statusFactory: (String) -> JobStatus, message: String, force: Boolean = false) {
-            val now = System.currentTimeMillis()
-            if (force || now - lastProgressUpdateMs >= 150L) {
-                lastProgressUpdateMs = now
-                updateJobStatus(hashedName, statusFactory(message))
-            }
-        }
-
-        try {
-            updateJobStatus(hashedName, JobStatus.Installing("Extracting mod files..."))
-
-            if (modAssetsDir.exists()) modAssetsDir.deleteRecursively()
-            modAssetsDir.mkdirs()
-
-            job.modsToInstall.forEach { modInfo ->
-                if (modInfo.isDirectory) {
-                    DocumentFile.fromTreeUri(context, modInfo.uri)?.let { copyDirectoryToCache(context, it, modAssetsDir) }
-                } else {
-                    context.contentResolver.openInputStream(modInfo.uri)?.use { fis ->
-                        ZipInputStream(fis).use { zis ->
-                            var entry = zis.nextEntry
-                            while (entry != null) {
-                                if (!entry.isDirectory && !shouldIgnoreModEntry(entry.name)) {
-                                    val newFile = ModEntryUtils.resolveZipEntrySafely(modAssetsDir, entry.name)
-                                    if (newFile != null) {
-                                        newFile.parentFile?.mkdirs()
-                                        newFile.outputStream().use { fos -> zis.copyTo(fos) }
-                                    } else {
-                                        Log.w("MainViewModel", "Skipped unsafe zip entry: ${entry.name}")
-                                    }
-                                }
-                                entry = zis.nextEntry
-                            }
-                        }
-                    }
-                }
-            }
-
-            // The catalog is authoritative, but a family can be bundled in several
-            // places. Try the best candidate first and fall back to alternatives when
-            // some mod files do not exist in the downloaded bundle.
-            val candidates = (listOf(hashedName) + job.modsToInstall.flatMap { it.alternativeHashes })
-                .distinct()
-                .take(MAX_BUNDLE_CANDIDATES)
-
-            var chosenRepoPath: String? = null
-            var chosenRepackedFile: File? = null
-            var bestUnmatchedCount = Int.MAX_VALUE
-            var lastMessage: String? = null
-            val candidateErrors = mutableListOf<String>()
-
-            val bundleCacheDir = File(context.cacheDir, "bundle_cache").apply { mkdirs() }
-
-            for ((index, candidate) in candidates.withIndex()) {
-                updateJobStatus(hashedName, JobStatus.Downloading(
-                    if (index == 0) "Downloading bundle..."
-                    else "Trying alternative bundle (${index + 1}/${candidates.size})..."
-                ))
-                val (downloadSuccess, messageOrPath) = ModdingService.downloadBundle(
-                    candidate, selectedQuality.value, bundleCacheDir.absolutePath,
-                    context.filesDir.absolutePath
-                ) { progress -> updateProgressThrottled({ JobStatus.Downloading(it) }, progress) }
-
-                if (!downloadSuccess) {
-                    candidateErrors.add("$candidate: $messageOrPath")
-                    continue
-                }
-                val originalDataCache = File(messageOrPath)
-                val relativePath = originalDataCache.relativeTo(bundleCacheDir)
-
-                updateJobStatus(hashedName, JobStatus.Installing("Waiting to repack..."))
-                val repackedFile = File(context.cacheDir, "repacked/${relativePath.path}")
-                if (repackedFile.exists()) repackedFile.delete()
-                repackedFile.parentFile?.mkdirs()
-                repackedFiles.add(repackedFile)
-
-                val (repackSuccess, repackMessage, unmatched) = repackSemaphore.withPermit {
-                    updateJobStatus(hashedName, JobStatus.Installing("Repacking bundle..."))
-                    ModdingService.repackBundle(
-                        originalDataCache.absolutePath,
-                        modAssetsDir.absolutePath,
-                        repackedFile.absolutePath,
-                        useAstc.value
-                    ) { progress -> updateProgressThrottled({ JobStatus.Installing(it) }, progress) }
-                }
-
-                lastMessage = repackMessage
-                if (repackSuccess) {
-                    if (unmatched.isEmpty()) {
-                        chosenRepoPath = relativePath.path
-                        chosenRepackedFile = repackedFile
-                        break
-                    }
-                    if (unmatched.size < bestUnmatchedCount) {
-                        bestUnmatchedCount = unmatched.size
-                        chosenRepoPath = relativePath.path
-                        chosenRepackedFile = repackedFile
-                    }
-                } else {
-                    candidateErrors.add("$candidate: $repackMessage")
-                    // Evict possibly corrupt cached original bundle so retry fetches fresh
-                    try {
-                        originalDataCache.takeIf { it.exists() }?.delete()
-                    } catch (_: Exception) {}
-                }
-            }
-
-            val repoPath = chosenRepoPath
-            val repackedOutput = chosenRepackedFile
-            if (repoPath == null || repackedOutput == null || !repackedOutput.exists()) {
-                val detail = candidateErrors.ifEmpty { listOfNotNull(lastMessage) }.joinToString("\n")
-                throw Exception("Repack failed: $detail")
-            }
-
-            val warningMessage = if (bestUnmatchedCount != Int.MAX_VALUE && bestUnmatchedCount > 0) {
-                "Finished with warning: $bestUnmatchedCount file(s) did not match this bundle."
-            } else null
-
-            val publicUri = saveFileToDownloads(context, repackedOutput, repoPath, "Shared")
-
-            if (publicUri != null) {
-                updateJobStatus(hashedName, JobStatus.Finished(repoPath, warning = warningMessage))
+            val started = InstallService.startRepack(
+                context = context.applicationContext,
+                jobs = jobs,
+                quality = _selectedQuality.value,
+                useAstc = _useAstc.value
+            )
+            if (started) {
+                _showInstallDialog.value = true
             } else {
-                throw Exception("Failed to save file to Downloads folder.")
+                Toast.makeText(context, "Could not start background install service.", Toast.LENGTH_LONG).show()
             }
-
-        } catch (e: Exception) {
-            e.printStackTrace()
-            val fullError = e.message ?: "An unknown error occurred."
-            updateJobStatus(hashedName, JobStatus.Failed(displayMessage = fullError, detailedLog = fullError))
-        } finally {
-            repackedFiles.forEach { file ->
-                try {
-                    if (file.exists()) file.delete()
-                } catch (_: Exception) {}
-            }
-            try {
-                if (modAssetsDir.exists()) modAssetsDir.deleteRecursively()
-            } catch (_: Exception) {}
         }
     }
 
-    private fun summarizeResults() {
-        val finishedJobs = _installJobs.value
-        val successfulJobs = finishedJobs.filter { it.status is JobStatus.Finished }
-        val failedJobs = finishedJobs.filter { it.status is JobStatus.Failed }
-        
-        // 計算總耗時
-        val elapsedTimeMs = System.currentTimeMillis() - batchStartTimeMs
-        
-        // 收集失敗任務的詳細資訊
-        val failedJobDetails = failedJobs.map { job ->
-            val failedStatus = job.status as JobStatus.Failed
-            FailedJobInfo(hashedName = job.job.hashedName, error = failedStatus.detailedLog)
-        }
-
-        val shizukuAvailable = ShizukuManager.isRunning()
-
-        val command = if (successfulJobs.isNotEmpty()) {
-            "mv -f /storage/emulated/0/Download/Shared /storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/"
-        } else null
-
-        _finalInstallResult.value = FinalInstallResult(
-            successfulJobs = successfulJobs.size,
-            failedJobs = failedJobs.size,
-            command = command,
-            elapsedTimeMs = elapsedTimeMs,
-            failedJobDetails = failedJobDetails,
-            shizukuAvailable = shizukuAvailable
-        )
-    }
-
-    private fun updateJobStatus(hashedName: String, newStatus: JobStatus) {
-        _installJobs.update { jobs ->
-            jobs.map { job ->
-                if (job.job.hashedName == hashedName) job.copy(status = newStatus) else job
-            }
+    fun reopenInstallDialog() {
+        if (InstallService.isRunning.value || InstallService.finalResult.value != null) {
+            _showInstallDialog.value = true
         }
     }
 
     fun closeInstallDialog() {
+        if (InstallService.isRunning.value) {
+            _showInstallDialog.value = false
+            return
+        }
         _showInstallDialog.value = false
-        _installJobs.value = emptyList()
-        _finalInstallResult.value = null
+        InstallService.resetSessionState()
         _selectedMods.value = emptySet()
-        _moveState.value = MoveState.Idle
+        appContext?.let { checkRecoveryJournal(it) }
     }
 
     fun moveFilesToGame() {
-        viewModelScope.launch {
-            _moveState.value = MoveState.Moving
-            val (success, message) = ShizukuManager.moveDownloadToGame()
-            _moveState.value = if (success) {
-                MoveState.Success(message)
-            } else {
-                MoveState.Failed(message)
-            }
-        }
+        val ctx = appContext ?: return
+        InstallService.startMove(ctx)
     }
 
     fun resetMoveState() {
-        _moveState.value = MoveState.Idle
+        InstallService.resetMoveState()
     }
 
     fun initiateUninstall(context: Context, hashedName: String) {
-        _moveState.value = MoveState.Idle
+        InstallService.resetMoveState()
         if (_uninstallState.value !is UninstallState.Idle) return
 
         viewModelScope.launch {
@@ -839,6 +721,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     withContext(Dispatchers.Main) {
                         _modsList.value = mods
                         _selectedMods.value = emptySet()
+                        refreshCharacterEntries()
                     }
                 } finally {
                     withContext(Dispatchers.Main) {
@@ -970,6 +853,17 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             lower.endsWith(".png")
     }
 
+    fun dismissStaticPreview() {
+        _staticPreviewImages.value = emptyList()
+        val dir = staticPreviewTempDir
+        staticPreviewTempDir = null
+        if (!dir.isNullOrBlank()) {
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching { File(dir).deleteRecursively() }
+            }
+        }
+    }
+
     fun prepareAndShowPreview(context: Context, modInfo: ModInfo) {
         viewModelScope.launch(Dispatchers.IO) {
             val tempDir = File(context.cacheDir, "spine_preview_${System.currentTimeMillis()}")
@@ -979,6 +873,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
             var skelPath: String? = null
             var atlasPath: String? = null
+            val pngPaths = mutableListOf<String>()
 
             fun copyPreviewDocDir(dir: DocumentFile, depth: Int) {
                 if (depth > 5) return
@@ -996,9 +891,13 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                         }
                         val lowerNorm = normalizedName.lowercase()
                         if (lowerNorm.endsWith(".skel") || lowerNorm.endsWith(".json")) {
-                            skelPath = destFile.absolutePath
+                            if (skelPath == null || !skelPath!!.endsWith(".skel", ignoreCase = true)) {
+                                skelPath = destFile.absolutePath
+                            }
                         } else if (lowerNorm.endsWith(".atlas")) {
                             atlasPath = destFile.absolutePath
+                        } else if (lowerNorm.endsWith(".png")) {
+                            pngPaths.add(destFile.absolutePath)
                         }
                     }
                 }
@@ -1020,9 +919,13 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                                         destFile.outputStream().use { fos -> zis.copyTo(fos) }
                                         val lowerNorm = normalizedName.lowercase()
                                         if (lowerNorm.endsWith(".skel") || lowerNorm.endsWith(".json")) {
-                                            skelPath = destFile.absolutePath
+                                            if (skelPath == null || !skelPath!!.endsWith(".skel", ignoreCase = true)) {
+                                                skelPath = destFile.absolutePath
+                                            }
                                         } else if (lowerNorm.endsWith(".atlas")) {
                                             atlasPath = destFile.absolutePath
+                                        } else if (lowerNorm.endsWith(".png")) {
+                                            pngPaths.add(destFile.absolutePath)
                                         }
                                     }
                                 }
@@ -1042,10 +945,19 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                         }
                         context.startActivity(intent)
                     }
+                } else if (pngPaths.isNotEmpty()) {
+                    val sortedPngs = pngPaths.sortedBy { File(it).name.lowercase() }
+                    withContext(Dispatchers.Main) {
+                        staticPreviewTempDir?.let { oldDir ->
+                            viewModelScope.launch(Dispatchers.IO) { runCatching { File(oldDir).deleteRecursively() } }
+                        }
+                        staticPreviewTempDir = tempDir.absolutePath
+                        _staticPreviewImages.value = sortedPngs
+                    }
                 } else {
                     tempDir.deleteRecursively()
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "No valid Spine (.skel/.json + .atlas) files found for preview.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "No valid Spine (.skel/.json + .atlas) or .png files found for preview.", Toast.LENGTH_SHORT).show()
                     }
                 }
             } catch (e: Exception) {

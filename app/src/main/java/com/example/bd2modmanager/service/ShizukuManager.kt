@@ -24,6 +24,11 @@ object ShizukuManager {
 
     private var fileService: IFileService? = null
     private val bindMutex = Mutex()
+    private val occupancy = ConnectionOccupancy(onAllReleased = ::performUnbind)
+
+    fun acquireConnection(): Any = occupancy.acquire()
+
+    fun releaseConnection(token: Any) = occupancy.release(token)
 
     private val userServiceArgs = Shizuku.UserServiceArgs(
         ComponentName(
@@ -132,6 +137,7 @@ object ShizukuManager {
      * @return Pair<成功, 錯誤訊息>
      */
     suspend fun moveDownloadToGame(): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        val token = acquireConnection()
         try {
             if (!isRunning()) {
                 return@withContext Pair(false, "Shizuku is not running. Please start Shizuku first.")
@@ -166,13 +172,19 @@ object ShizukuManager {
         } catch (e: Exception) {
             Log.e("ShizukuManager", "Error during Shizuku file operation", e)
             Pair(false, "Error: ${e.message}")
+        } finally {
+            releaseConnection(token)
         }
     }
 
     /**
-     * 解綁 UserService
+     * 解綁 UserService（保留給顯式強制解綁；平常由 ConnectionOccupancy 在所有佔用釋放後觸發）
      */
     fun unbindService() {
+        performUnbind()
+    }
+
+    private fun performUnbind() {
         try {
             Shizuku.unbindUserService(userServiceArgs, serviceConnection, true)
         } catch (e: Exception) {
