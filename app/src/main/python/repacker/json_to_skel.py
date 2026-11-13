@@ -1,5 +1,8 @@
+from contextlib import nullcontext
 import hashlib
+import io
 import json
+import os
 import struct
 import threading
 
@@ -30,31 +33,58 @@ _conversion_lock = threading.Lock()
 
 
 
+def _load_and_validate_spine_json(json_file):
+    try:
+        with open(json_file, "r", encoding="utf-8") as f:
+            skeleton_data = json.load(f)
+    except UnicodeDecodeError:
+        with open(json_file, "r", encoding="utf-8-sig") as f:
+            skeleton_data = json.load(f)
+
+    if not isinstance(skeleton_data, dict):
+        raise ValueError(f"'{json_file}' is not a valid Spine skeleton JSON object.")
+
+    skeleton_meta = skeleton_data.get('skeleton')
+    if not isinstance(skeleton_meta, dict):
+        raise ValueError(f"'{json_file}' is missing the 'skeleton' header (not a Spine JSON).")
+
+    spine_ver = str(skeleton_meta.get('spine') or '')
+    if not spine_ver.startswith("4.1"):
+        raise ValueError(
+            f"Unsupported Spine JSON version '{spine_ver or 'unknown'}' in '{json_file}' (only Spine 4.1.x is supported)."
+        )
+    return skeleton_data
+
+
+def json_to_skel_bytes(json_file):
+    """
+    Convert a JSON Spine file to binary .skel bytes in memory.
+
+    IMPORTANT: Uses module-level index mappings protected by _conversion_lock.
+    """
+    with _conversion_lock:
+        skeleton_data = _load_and_validate_spine_json(json_file)
+        buf = io.BytesIO()
+        write_skeleton_data_to_binary(skeleton_data, buf)
+        return buf.getvalue()
+
+
 # Main function to convert JSON file to binary
 def json_to_skel(json_file, output_file):
     """
     Convert a JSON Spine file to binary .skel format.
-    
+
     IMPORTANT: This function uses global variables and is NOT thread-safe.
     A lock is used to ensure only one conversion runs at a time.
     """
-    with _conversion_lock:
-        try:
-            with open(json_file, "r", encoding="utf-8") as f:
-                skeleton_data = json.load(f)
-        except UnicodeDecodeError:
-            with open(json_file, "r", encoding="utf-8-sig") as f:
-                skeleton_data = json.load(f)
-        
-        if not skeleton_data.get('skeleton').get('spine').startswith("4.1"):
-            raise Exception("Cannot convert this file, unsupported Spine version.")
-        
-        write_skeleton_data_to_binary(skeleton_data, output_file)
+    data = json_to_skel_bytes(json_file)
+    with open(output_file, 'wb') as out_f:
+        out_f.write(data)
 
 
 
 # Function to write skeleton data into binary
-def write_skeleton_data_to_binary(skeleton_data, output_file):
+def write_skeleton_data_to_binary(skeleton_data, binary_file):
     global strings_name_to_index
     global bones_name_to_index
     global slots_name_to_index
@@ -62,31 +92,32 @@ def write_skeleton_data_to_binary(skeleton_data, output_file):
     global transforms_name_to_index
     global paths_name_to_index
     global skins_name_to_index
-    
+
     bones = skeleton_data.get('bones', [])
     bones_name_to_index = {bone['name']: index for index, bone in enumerate(bones)}
-    
+
     slots = skeleton_data.get('slots', [])
     slots_name_to_index = {slot['name']: index for index, slot in enumerate(slots)}
-    
+
     iks = skeleton_data.get('ik', [])
     iks_name_to_index = {ik['name']: index for index, ik in enumerate(iks)}
-    
+
     transforms = skeleton_data.get('transform', [])
     transforms_name_to_index = {transform['name']: index for index, transform in enumerate(transforms)}
-    
+
     paths = skeleton_data.get('path', [])
     paths_name_to_index = {path['name']: index for index, path in enumerate(paths)}
-    
+
     skins = skeleton_data.get('skins', [])
     default_skin = next((s for s in skins if s.get('name') == 'default'), None)
     other_skins = [s for s in skins if s.get('name') != 'default']
     skins_in_order = ([default_skin] if default_skin else []) + other_skins
     skins_name_to_index = {skin.get('name'): index for index, skin in enumerate(skins_in_order) if skin.get('name') is not None}
-    
+
     animations = skeleton_data.get('animations', {})
 
-    with open(output_file, 'wb') as binary_file:
+    stream_ctx = open(binary_file, 'wb') if isinstance(binary_file, (str, os.PathLike)) else nullcontext(binary_file)
+    with stream_ctx as binary_file:
         
         # Write the hash
         # I don't know how it's actually generated so I just rehash the
@@ -959,6 +990,8 @@ def write_int(binary_file, value):
     binary_file.write(struct.pack('>i', value))
         
 def write_varint(binary_file, value, optimize_positive=True):
+    if value is None:
+        raise ValueError("Cannot write varint for None (missing bone/slot/constraint index in Spine JSON).")
     if not optimize_positive:
         value = (value << 1) ^ (value >> 31)
     value &= 0xFFFFFFFF

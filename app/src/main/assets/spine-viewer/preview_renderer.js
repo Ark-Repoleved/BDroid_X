@@ -136,7 +136,7 @@ function onLoaded(loader, res) {
         input.addEventListener('change', (e) => setSkin(e.target.value));
         input.classList.add('list-option');
         if (index === 0) input.checked = true;
-        label.innerHTML += s.name;
+        label.append(document.createTextNode(s.name));
         li.append(input, label);
         skinList.append(li);
     });
@@ -160,8 +160,7 @@ function onLoaded(loader, res) {
             playAnimation(a.name, true);
         }
         span.innerText = a.duration + 's';
-        label.innerHTML += a.name;
-        label.append(span);
+        label.append(document.createTextNode(a.name), span);
         li.append(input, label);
         animationList.append(li);
     });
@@ -290,9 +289,8 @@ function setupEventListeners() {
 // --- Main Loading Logic ---
 document.addEventListener('DOMContentLoaded', () => {
     const params = new URLSearchParams(window.location.search);
-    // Use decodeURIComponent to handle encoded file paths
-    const skelPath = decodeURIComponent(params.get('skel') || '');
-    const atlasPath = decodeURIComponent(params.get('atlas') || '');
+    const skelPath = params.get('skel') || '';
+    const atlasPath = params.get('atlas') || '';
 
     if (!skelPath || !atlasPath) {
         console.error('Missing skel or atlas path in URL parameters.');

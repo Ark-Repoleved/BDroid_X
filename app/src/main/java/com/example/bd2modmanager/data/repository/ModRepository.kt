@@ -4,13 +4,13 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import com.chaquo.python.Python
-import com.example.bd2modmanager.data.model.MatchStrategy
 import com.example.bd2modmanager.data.model.ModCacheInfo
 import com.example.bd2modmanager.data.model.ModDetails
+import com.example.bd2modmanager.data.model.ModFileListCacheEntry
 import com.example.bd2modmanager.data.model.ModInfo
 import com.example.bd2modmanager.data.model.ResolutionState
-import com.example.bd2modmanager.data.model.ResolvedTarget
 import com.example.bd2modmanager.service.ModdingService
+import com.example.bd2modmanager.utils.ModEntryUtils
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
@@ -28,11 +28,11 @@ class ModRepository(
     companion object {
         // Bumped when the cached ModCacheInfo schema changes.
         private const val MOD_CACHE_FILENAME = "mod_cache_v2.json"
+        private const val MOD_FILELIST_CACHE_FILENAME = "mod_filelist_cache_v1.json"
     }
 
     private fun shouldIgnoreModEntry(entryName: String?): Boolean {
-        val name = entryName?.substringAfterLast('/')?.trim()?.lowercase() ?: return true
-        return name.isEmpty() || name == ".modfile" || name.endsWith(".modfile")
+        return ModEntryUtils.shouldIgnoreModEntry(entryName)
     }
 
     private val gson = Gson()
@@ -49,7 +49,9 @@ class ModRepository(
     suspend fun scanMods(dirUri: Uri): List<ModInfo> {
         return withContext(Dispatchers.IO) {
             val existingCache = loadModCache()
+            val existingFileListCache = loadFileListCache()
             val newCache = mutableMapOf<String, ModCacheInfo>()
+            val newFileListCache = mutableMapOf<String, ModFileListCacheEntry>()
             val tempModsList = mutableListOf<ModInfo>()
             val candidates = mutableListOf<ScannedModCandidate>()
 
@@ -82,6 +84,11 @@ class ModRepository(
 
                     val fileUri = DocumentsContract.buildDocumentUriUsingTree(dirUri, documentId)
                     val uriString = fileUri.toString()
+                    val cachedFileList = existingFileListCache[uriString]
+                    if (cachedFileList != null && cachedFileList.lastModified == lastModified) {
+                        newFileListCache[uriString] = cachedFileList
+                    }
+
                     val cachedInfo = existingCache[uriString]
 
                     if (cachedInfo != null && cachedInfo.lastModified == lastModified) {
@@ -105,11 +112,23 @@ class ModRepository(
                             )
                         )
                     } else {
-                        val modName = displayName.removeSuffix(".zip")
-                        val modDetails = if (isDirectory) {
-                            extractModDetailsFromDirectory(fileUri)
+                        val modName = displayName.replace(Regex("\\.zip$", RegexOption.IGNORE_CASE), "")
+                        val modDetails = if (cachedFileList != null && cachedFileList.lastModified == lastModified) {
+                            ModDetails(cachedFileList.fileId, cachedFileList.fileNames)
                         } else {
-                            extractModDetailsFromUri(fileUri)
+                            val extracted = if (isDirectory) {
+                                extractModDetailsFromDirectory(dirUri, fileUri)
+                            } else {
+                                extractModDetailsFromUri(fileUri)
+                            }
+                            newFileListCache[uriString] = ModFileListCacheEntry(
+                                lastModified = lastModified,
+                                name = modName,
+                                isDirectory = isDirectory,
+                                fileId = extracted.fileId,
+                                fileNames = extracted.fileNames
+                            )
+                            extracted
                         }
                         candidates.add(
                             ScannedModCandidate(
@@ -161,13 +180,12 @@ class ModRepository(
                 candidates.forEachIndexed { index, candidate ->
                     val resolvePayload = resultsById[index] ?: buildResolverFallback(candidate.modDetails.fileNames)
                     val resolutionState = parseResolutionState(resolvePayload)
-                    val targetHash = resolvePayload.optString("targetHash").ifBlank { null }
-                    val resolvedFamilyKey = resolvePayload.optString("resolvedFamilyKey").ifBlank { null }
+                    val targetHash = resolvePayload.optNullableString("targetHash")
+                    val resolvedFamilyKey = resolvePayload.optNullableString("resolvedFamilyKey")
                     val unresolvedFiles = jsonArrayToStringList(resolvePayload.optJSONArray("unresolvedFiles"))
-                    val errorReason = resolvePayload.optString("errorReason").ifBlank { null }
-                    val resolvedTargets = parseResolvedTargets(resolvePayload.optJSONArray("resolvedTargets"))
+                    val errorReason = resolvePayload.optNullableString("errorReason")
                     val alternativeHashes = jsonArrayToStringList(resolvePayload.optJSONArray("candidateHashes"))
-                        .filter { it != resolvedHashSafe(resolvePayload) }
+                        .filter { it != targetHash }
                     val bestMatch = characterRepository.findBestMatch(candidate.modDetails.fileId, candidate.modDetails.fileNames)
 
                     val displayCharacter: String
@@ -228,7 +246,6 @@ class ModRepository(
                             resolutionState = resolutionState,
                             targetHash = resolvedHash,
                             resolvedFamilyKey = resolvedFamilyKey,
-                            resolvedTargets = resolvedTargets,
                             unresolvedFiles = unresolvedFiles,
                             errorReason = errorReason,
                             alternativeHashes = alternativeHashes
@@ -238,6 +255,7 @@ class ModRepository(
             }
 
             saveModCache(newCache)
+            saveFileListCache(newFileListCache)
             tempModsList.sortedBy { it.name }
         }
     }
@@ -246,8 +264,36 @@ class ModRepository(
         return File(context.filesDir, MOD_CACHE_FILENAME)
     }
 
-    private fun resolvedHashSafe(payload: JSONObject): String? =
-        payload.optString("targetHash").ifBlank { null }
+    private fun getFileListCacheFile(): File {
+        return File(context.filesDir, MOD_FILELIST_CACHE_FILENAME)
+    }
+
+    private fun loadFileListCache(): Map<String, ModFileListCacheEntry> {
+        val cacheFile = getFileListCacheFile()
+        if (!cacheFile.exists()) return emptyMap()
+        return try {
+            val json = cacheFile.readText()
+            val type = object : TypeToken<Map<String, ModFileListCacheEntry>>() {}.type
+            gson.fromJson(json, type) ?: emptyMap()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyMap()
+        }
+    }
+
+    private fun saveFileListCache(cache: Map<String, ModFileListCacheEntry>) {
+        try {
+            val cacheFile = getFileListCacheFile()
+            cacheFile.writeText(gson.toJson(cache))
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun JSONObject.optNullableString(key: String): String? {
+        if (isNull(key)) return null
+        return optString(key).ifBlank { null }
+    }
 
     private fun loadModCache(): Map<String, ModCacheInfo> {
         val cacheFile = getModCacheFile()
@@ -303,33 +349,49 @@ class ModRepository(
         return ModDetails(fileId, fileNames)
     }
 
-    private fun extractModDetailsFromDirectory(dirUri: Uri): ModDetails {
+    private fun extractModDetailsFromDirectory(treeUri: Uri, dirUri: Uri): ModDetails {
         val fileNames = mutableListOf<String>()
         var fileId: String? = null
-        try {
-            val docId = DocumentsContract.getDocumentId(dirUri)
-            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(dirUri, docId)
-            val projection = arrayOf(
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                DocumentsContract.Document.COLUMN_MIME_TYPE
-            )
-            context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
-                val nameCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                val mimeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
-                while (cursor.moveToNext()) {
-                    val entryName = cursor.getString(nameCol) ?: continue
-                    val mimeType = cursor.getString(mimeCol) ?: ""
-                    if (shouldIgnoreModEntry(entryName)) continue
-                    fileNames.add(entryName)
-                    val isFile = mimeType != DocumentsContract.Document.MIME_TYPE_DIR
-                    if (isFile && fileId == null) {
-                        fileId = characterRepository.extractFileId(entryName)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE
+        )
+
+        fun collectRecursive(currentDirUri: Uri, relativePrefix: String, depth: Int) {
+            if (depth > 5) return
+            try {
+                val docId = DocumentsContract.getDocumentId(currentDirUri)
+                val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
+                context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                    val idCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                    val nameCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                    val mimeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                    while (cursor.moveToNext()) {
+                        val childDocId = cursor.getString(idCol) ?: continue
+                        val entryName = cursor.getString(nameCol) ?: continue
+                        val mimeType = cursor.getString(mimeCol) ?: ""
+                        val relativePath = if (relativePrefix.isEmpty()) entryName else "$relativePrefix/$entryName"
+                        val isDir = mimeType == DocumentsContract.Document.MIME_TYPE_DIR
+                        if (isDir) {
+                            if (shouldIgnoreModEntry("$relativePath/placeholder")) continue
+                            val childDirUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
+                            collectRecursive(childDirUri, relativePath, depth + 1)
+                        } else {
+                            if (shouldIgnoreModEntry(relativePath)) continue
+                            fileNames.add(relativePath)
+                            if (fileId == null) {
+                                fileId = characterRepository.extractFileId(entryName)
+                            }
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
+
+        collectRecursive(dirUri, "", 0)
         return ModDetails(fileId, fileNames)
     }
 
@@ -338,7 +400,6 @@ class ModRepository(
             put("resolutionState", ResolutionState.UNKNOWN.name)
             put("errorReason", "Resolver failed")
             put("unresolvedFiles", JSONArray(fileNames))
-            put("resolvedTargets", JSONArray())
         }
     }
 
@@ -354,36 +415,8 @@ class ModRepository(
         if (array == null) return emptyList()
         return buildList {
             for (i in 0 until array.length()) {
-                add(array.optString(i))
-            }
-        }
-    }
-
-    private fun parseResolvedTargets(array: JSONArray?): List<ResolvedTarget> {
-        if (array == null) return emptyList()
-        return buildList {
-            for (i in 0 until array.length()) {
-                val obj = array.optJSONObject(i) ?: continue
-                val candidates = jsonArrayToStringList(obj.optJSONArray("normalizedCandidates"))
-                val strategy = try {
-                    MatchStrategy.valueOf(obj.optString("matchStrategy", MatchStrategy.NONE.name))
-                } catch (_: Exception) {
-                    MatchStrategy.NONE
-                }
-                add(
-                    ResolvedTarget(
-                        originalFileName = obj.optString("originalFileName"),
-                        normalizedCandidates = candidates,
-                        resolvedAssetKey = obj.optString("resolvedAssetKey").ifBlank { null },
-                        resolvedBundleName = obj.optString("resolvedBundleName").ifBlank { null },
-                        resolvedBundlePath = obj.optString("resolvedBundlePath").ifBlank { null },
-                        assetType = obj.optString("assetType").ifBlank { null },
-                        targetHash = obj.optString("targetHash").ifBlank { null },
-                        familyKey = obj.optString("familyKey").ifBlank { null },
-                        matchStrategy = strategy,
-                        confidence = obj.optDouble("confidence", 0.0).toFloat()
-                    )
-                )
+                val item = if (array.isNull(i)) "" else array.optString(i)
+                if (item.isNotBlank()) add(item)
             }
         }
     }

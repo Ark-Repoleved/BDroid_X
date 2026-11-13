@@ -26,11 +26,9 @@ class MainActivity : ComponentActivity() {
     private val SHIZUKU_PERMISSION_REQUEST_CODE = 1001
 
     private val shizukuPermissionListener =
-        Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+        Shizuku.OnRequestPermissionResultListener { requestCode, _ ->
             if (requestCode == SHIZUKU_PERMISSION_REQUEST_CODE) {
-                if (grantResult == PackageManager.PERMISSION_GRANTED) {
-                    // Permission granted, UI will update automatically via state
-                }
+                // Handled when user triggers move action
             }
         }
 

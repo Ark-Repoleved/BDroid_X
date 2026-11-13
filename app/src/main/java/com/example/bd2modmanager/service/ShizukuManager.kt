@@ -21,8 +21,6 @@ object ShizukuManager {
         "/storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/"
     private const val DOWNLOAD_SHARED_PATH =
         "/storage/emulated/0/Download/Shared"
-    private const val GAME_SHARED_PATH =
-        "/storage/emulated/0/Android/data/com.neowizgames.game.browndust2/files/UnityCache/Shared"
 
     private var fileService: IFileService? = null
     private val bindMutex = Mutex()

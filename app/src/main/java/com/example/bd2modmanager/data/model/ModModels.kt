@@ -4,32 +4,9 @@ import android.net.Uri
 
 enum class ResolutionState {
     KNOWN,
-    MISC,
     UNKNOWN,
     INVALID
 }
-
-enum class MatchStrategy {
-    EXACT,
-    NORMALIZED,
-    EXTENSION_MAPPING,
-    LOCAL_SCAN,
-    FALLBACK,
-    NONE
-}
-
-data class ResolvedTarget(
-    val originalFileName: String,
-    val normalizedCandidates: List<String> = emptyList(),
-    val resolvedAssetKey: String? = null,
-    val resolvedBundleName: String? = null,
-    val resolvedBundlePath: String? = null,
-    val assetType: String? = null,
-    val targetHash: String? = null,
-    val familyKey: String? = null,
-    val matchStrategy: MatchStrategy = MatchStrategy.NONE,
-    val confidence: Float = 0f
-)
 
 data class ModInfo(
     val name: String,
@@ -43,7 +20,6 @@ data class ModInfo(
     val resolutionState: ResolutionState = ResolutionState.UNKNOWN,
     val targetHash: String? = targetHashedName,
     val resolvedFamilyKey: String? = null,
-    val resolvedTargets: List<ResolvedTarget> = emptyList(),
     val unresolvedFiles: List<String> = emptyList(),
     val errorReason: String? = null,
     val alternativeHashes: List<String> = emptyList()
@@ -70,12 +46,20 @@ data class CharacterInfo(val character: String, val costume: String, val type: S
 
 data class ModDetails(val fileId: String?, val fileNames: List<String>)
 
+data class ModFileListCacheEntry(
+    val lastModified: Long,
+    val name: String,
+    val isDirectory: Boolean,
+    val fileId: String?,
+    val fileNames: List<String>
+)
+
 data class RepackJob(val hashedName: String, val modsToInstall: List<ModInfo>)
 sealed class JobStatus {
     object Pending : JobStatus()
     data class Downloading(val progressMessage: String = "Waiting...") : JobStatus()
     data class Installing(val progressMessage: String = "Initializing...") : JobStatus()
-    data class Finished(val relativePath: String) : JobStatus()
+    data class Finished(val relativePath: String, val warning: String? = null) : JobStatus()
     data class Failed(val displayMessage: String, val detailedLog: String) : JobStatus()
 }
 

@@ -30,9 +30,7 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.bd2modmanager.data.model.ModInfo
 import com.example.bd2modmanager.data.model.ResolutionState
 import com.example.bd2modmanager.ui.viewmodel.MainViewModel
@@ -53,7 +51,6 @@ fun ModScreen(
     val groupedMods = modsList.groupBy {
         when (it.resolutionState) {
             ResolutionState.KNOWN -> it.targetHash ?: "Unknown"
-            ResolutionState.MISC -> it.targetHash ?: "Unknown"
             ResolutionState.UNKNOWN -> "Unknown"
             ResolutionState.INVALID -> "Invalid"
         }
@@ -111,7 +108,10 @@ fun ModScreen(
                     }
                 }
                 
-                AnimatedVisibility(visible = selectedMods.size == 1) {
+                val canMergeSelected = remember(selectedMods, allModsList) {
+                    selectedMods.size == 1 && allModsList.find { it.uri == selectedMods.first() }?.isDirectory == true
+                }
+                AnimatedVisibility(visible = canMergeSelected) {
                     ExtendedFloatingActionButton(
                         onClick = onMergeRequest,
                         icon = { Icon(Icons.Default.Merge, contentDescription = "Merge") },
@@ -344,10 +344,11 @@ fun ModScreen(
                                                                 fontWeight = FontWeight.Bold,
                                                                 color = MaterialTheme.colorScheme.primary
                                                             )
-                                                            AutoShrinkText(
+                                                            Text(
                                                                 text = hash,
-                                                                maxFontSize = MaterialTheme.typography.titleMedium.fontSize,
-                                                                minFontSize = 12.sp,
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis,
+                                                                style = MaterialTheme.typography.titleSmall,
                                                                 fontWeight = FontWeight.Bold,
                                                                 color = MaterialTheme.colorScheme.primary,
                                                                 modifier = Modifier.weight(1f)
@@ -406,35 +407,6 @@ fun ModScreen(
             }
         }
     }
-}
-
-@Composable
-private fun AutoShrinkText(
-    text: String,
-    modifier: Modifier = Modifier,
-    maxFontSize: TextUnit = 20.sp,
-    minFontSize: TextUnit = 12.sp,
-    fontWeight: FontWeight? = null,
-    color: androidx.compose.ui.graphics.Color = LocalContentColor.current
-) {
-    var currentFontSize by remember(text) { mutableStateOf(maxFontSize) }
-
-    Text(
-        text = text,
-        modifier = modifier,
-        maxLines = 1,
-        softWrap = false,
-        overflow = TextOverflow.Clip,
-        fontSize = currentFontSize,
-        fontWeight = fontWeight,
-        color = color,
-        style = LocalTextStyle.current.copy(color = color),
-        onTextLayout = { result ->
-            if (result.hasVisualOverflow && currentFontSize > minFontSize) {
-                currentFontSize = (currentFontSize.value - 1f).coerceAtLeast(minFontSize.value).sp
-            }
-        }
-    )
 }
 
 @Composable
@@ -520,7 +492,7 @@ fun ModCard(modInfo: ModInfo, isSelected: Boolean, onToggleSelection: () -> Unit
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 2.dp)
             .clip(CardDefaults.shape)
-            .pointerInput(Unit) {
+            .pointerInput(modInfo.uri, isSelectable) {
                 detectTapGestures(
                     onTap = { if (isSelectable) onToggleSelection() },
                     onLongPress = { onLongPress() }

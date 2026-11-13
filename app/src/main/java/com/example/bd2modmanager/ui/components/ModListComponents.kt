@@ -59,7 +59,7 @@ fun InstallJobRow(installJob: InstallJob) {
                     is JobStatus.Downloading -> status.progressMessage
                     is JobStatus.Installing -> status.progressMessage
                     is JobStatus.Failed -> status.displayMessage
-                    is JobStatus.Finished -> "Finished successfully!"
+                    is JobStatus.Finished -> status.warning ?: "Finished successfully!"
                     is JobStatus.Pending -> "Waiting in queue..."
                 }
                 Text(progressMessage, style = MaterialTheme.typography.bodySmall)

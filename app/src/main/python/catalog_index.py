@@ -26,7 +26,7 @@ import re
 import struct
 from pathlib import Path
 
-INDEX_SCHEMA_VERSION = 1
+INDEX_SCHEMA_VERSION = 2
 BUNDLE_PROVIDER = "UnityEngine.ResourceManagement.ResourceProviders.AssetBundleProvider"
 
 _COMPOUND_EXTS = ('.skel.bytes', '.atlas.txt', '.skel.txt')
@@ -106,42 +106,56 @@ def family_aliases(stem):
     for candidate in (stem, variant_stem(stem)):
         if not candidate:
             continue
-        m = re.fullmatch(r'illust_char(\d{6})', candidate)
+        m = re.fullmatch(r'illust_char_?(\d{6})', candidate)
         if m:
             out.append('char' + m.group(1))
-        m = re.fullmatch(r'illust_npc(\w+)', candidate)
+        m = re.fullmatch(r'illust_npc_?(\w+)', candidate)
         if m:
             out.append('npc' + m.group(1))
-        m = re.fullmatch(r'illust_dating(\w+)', candidate)
+        m = re.fullmatch(r'illust_dating_?(\w+)', candidate)
         if m:
             out.append('illust_dating' + m.group(1))
-        m = re.fullmatch(r'illust_talk(\w+)', candidate)
+        m = re.fullmatch(r'illust_talk_?(\w+)', candidate)
         if m:
             out.append('illust_talk' + m.group(1))
-        m = re.fullmatch(r'(?:specialillust|sepcialillust|illustspecial)(\w+)', candidate)
+        m = re.fullmatch(r'(?:specialillust|sepcialillust|illust_?special)_?(\w+)', candidate)
         if m:
             out.append('specialillust' + m.group(1))
-        m = re.fullmatch(r'cutscene(\d\w*?)(?:_loop(?:_\d+)?)?', candidate)
+            out.append('illust_special' + m.group(1))
+        m = re.fullmatch(r'cutscene_?(\d\w*?)(?:_loop(?:_\d+)?)?', candidate)
         if m:
             out.append('cutscene_char' + m.group(1))
             out.append('cutscene' + m.group(1))
-        m = re.fullmatch(r'cutscene_char([0-9a-z]+)', candidate)
+        m = re.fullmatch(r'cutscene_char_?([0-9a-z]+)', candidate)
         if m:
             out.append('cutscene_char' + m.group(1))
     return list(dict.fromkeys(x for x in out if x))
 
 
+_SECONDARY_PATH_HINTS = ('/lastnight/', '/story/', '/event/', '/minigame/', '/tutorial/')
+_PRIMARY_PATH_HINTS = ('/illust_char/', '/illust_dating/', '/spine/', '/cutscene/')
+
+
 def _source_score(key, basename):
     lowered = key.lower()
     if basename.endswith('.playable'):
-        return SCORE_PLAYABLE
-    if basename.endswith('.prefab'):
-        return SCORE_PREFAB
-    if any(lowered.startswith(d) for d in _FLAT_IMAGE_DIRS):
+        base = SCORE_PLAYABLE
+    elif basename.endswith('.prefab'):
+        base = SCORE_PREFAB
+    elif any(lowered.startswith(d) for d in _FLAT_IMAGE_DIRS):
         return SCORE_FLAT_IMAGE
-    if basename.endswith(('.skel.bytes', '.atlas.txt')):
+    elif basename.endswith(('.skel.bytes', '.atlas.txt')):
         return SCORE_SKELETON
-    return SCORE_ASSET
+    else:
+        return SCORE_ASSET
+
+    if any(hint in lowered for hint in _SECONDARY_PATH_HINTS):
+        base = max(1, base - 2)
+    elif '/npc/' in lowered and 'illust_char' in basename:
+        base = max(1, base - 2)
+    elif any(hint in lowered for hint in _PRIMARY_PATH_HINTS):
+        base += 1
+    return base
 
 
 def _is_exact_candidate(basename):
@@ -335,9 +349,4 @@ def save_catalog_index(output_dir, quality, index):
         json.dump(index, f, ensure_ascii=False, separators=(',', ':'))
     tmp_path.replace(path)
     return str(path)
-
-
-def get_bundle(index, bundle_name):
-    """Look up the CDN record for a bundle name."""
-    return ((index or {}).get('bundles') or {}).get(bundle_name)
 
