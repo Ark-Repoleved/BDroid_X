@@ -390,8 +390,6 @@ def _merge_spine_assets(mod_dir_path, base_name, target_count, report_progress, 
 
     return None
 
-from utils.file_operations import find_file_case_insensitive
-
 
 def compress_image_astc(image_bytes, width, height, block_x, block_y):
     astcenc = _load_astcenc_library()
@@ -674,6 +672,7 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
 
         # ========== 階段二：處理 JSON 和 TextAsset (序列) ==========
         report_progress("Phase 2: Processing JSON and TextAsset files...")
+        processing_errors = []
 
         # 處理 JSON -> SKEL
         for i, (mod_filepath, target_asset_name) in enumerate(json_files):
@@ -692,15 +691,16 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                     edited = True
                 report_progress(f"{current_progress}Successfully replaced: {mod_filename} -> {len(target_objects)} object(s)")
 
-            except Exception:
+            except Exception as e:
                 import traceback
+                processing_errors.append(f"{mod_filename}: {e}")
                 report_progress(f"Error processing {mod_filename}: {traceback.format_exc()}")
-        
+
         # 處理 TextAsset
         for i, (mod_filepath, target_asset_name) in enumerate(text_files):
             mod_filename = os.path.basename(mod_filepath)
             current_progress = f"(Text {i+1}/{len(text_files)}) "
-            
+
             try:
                 report_progress(f"{current_progress}Replacing asset: {mod_filename}")
                 target_objects = _asset_objects(asset_map, target_asset_name, "TextAsset")
@@ -712,50 +712,53 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                     data.m_Script = new_script
                     data.save()
                     edited = True
-                
+
             except Exception as e:
                 import traceback
+                processing_errors.append(f"{mod_filename}: {e}")
                 report_progress(f"Error processing {mod_filename}: {traceback.format_exc()}")
-        
+
         # ========== 階段三：平行處理 ASTC 紋理壓縮 ==========
         # 優化策略：單一 Executor + 完成一個就立即寫入，控制記憶體峰值
         if png_astc_files:
             executor_type = "Thread" if IS_ANDROID else "Process"
             total_textures = len(png_astc_files)
-            
+
             report_progress(f"Phase 3: Parallel ASTC compression ({total_textures} textures, {MAX_PARALLEL_TEXTURES} {executor_type} workers)...")
-            
+
             block_x, block_y = 4, 4
             total_success = 0
             total_failed = 0
             completed_count = 0
-            
+            processed_sources = set()
+
             # 準備所有 worker 參數
             worker_args = [
                 (mod_filepath, target_asset_name, block_x, block_y)
                 for mod_filepath, target_asset_name in png_astc_files
             ]
-            
+
             # 根據環境選擇 Executor
             ExecutorClass = ThreadPoolExecutor if IS_ANDROID else ProcessPoolExecutor
-            
+
             try:
                 with ExecutorClass(max_workers=MAX_PARALLEL_TEXTURES) as executor:
                     # 一次提交所有任務
                     future_to_args = {
-                        executor.submit(_compress_texture_worker, args): args 
+                        executor.submit(_compress_texture_worker, args): args
                         for args in worker_args
                     }
-                    
+
                     # 完成一個就立即處理（寫入 + 清理）
                     for future in as_completed(future_to_args):
                         completed_count += 1
                         args = future_to_args[future]
                         mod_filename = os.path.basename(args[0])
-                        
+                        processed_sources.add(args[0])
+
                         try:
                             result = future.result()
-                            
+
                             if result['success']:
                                 # 立即寫入 Bundle
                                 target_asset_name = result['target_asset_name']
@@ -763,55 +766,58 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                                     target_objects = _asset_objects(asset_map, target_asset_name, "Texture2D")
                                     for obj in target_objects:
                                         data = obj.read()
-                                        
+
                                         data.m_TextureFormat = 48  # ASTC_RGB_4x4
                                         data.image_data = result['compressed_data']
                                         data.m_CompleteImageSize = len(result['compressed_data'])
                                         data.m_Width = result['width']
                                         data.m_Height = result['height']
                                         data.m_MipCount = 1
-                                        
+
                                         if hasattr(data, 'm_StreamData'):
                                             data.m_StreamData.offset = 0
                                             data.m_StreamData.size = 0
                                             data.m_StreamData.path = ""
-                                        
+
                                         data.save()
                                         edited = True
                                     total_success += len(target_objects)
-                                    
+
                                 except Exception as e:
                                     total_failed += 1
+                                    processing_errors.append(f"{mod_filename}: {e}")
                                     report_progress(f"  Write error {mod_filename}: {e}")
                             else:
                                 total_failed += 1
+                                processing_errors.append(f"{mod_filename}: {result['error']}")
                                 report_progress(f"  FAILED: {mod_filename} - {result['error']}")
-                            
+
                             # 立即清理這個結果的記憶體
                             del result
-                                
+
                         except Exception as e:
                             total_failed += 1
+                            processing_errors.append(f"{mod_filename}: {e}")
                             report_progress(f"  ERROR: {mod_filename} - {str(e)}")
-                        
+
                         # 定期報告進度（每 25% 或每 10 個）
                         if total_textures <= 10 or completed_count == total_textures or completed_count % max(1, total_textures // 4) == 0:
                             report_progress(f"  Progress: {completed_count}/{total_textures} ({100*completed_count//total_textures}%)")
-                        
+
                         # 定期執行 gc（每處理 10 個紋理）
                         if completed_count % 10 == 0:
                             gc.collect()
-                            
+
             except Exception as e:
                 report_progress(f"Executor failed, falling back to sequential: {e}")
-                # 回退到序列處理
-                for args in worker_args:
+                remaining_args = [args for args in worker_args if args[0] not in processed_sources]
+                for args in remaining_args:
                     completed_count += 1
+                    mod_filename = os.path.basename(args[0])
                     result = _compress_texture_worker(args)
-                    
+
                     if result['success']:
                         target_asset_name = result['target_asset_name']
-                        mod_filename = os.path.basename(result['mod_filepath'])
                         try:
                             target_objects = _asset_objects(asset_map, target_asset_name, "Texture2D")
                             for obj in target_objects:
@@ -829,32 +835,33 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                                 data.save()
                                 edited = True
                             total_success += len(target_objects)
-                        except Exception as e:
+                        except Exception as write_err:
                             total_failed += 1
+                            processing_errors.append(f"{mod_filename}: {write_err}")
                     else:
                         total_failed += 1
-                        mod_filename = os.path.basename(args[0])
+                        processing_errors.append(f"{mod_filename}: {result['error']}")
                         report_progress(f"  FAILED (seq): {mod_filename} - {result['error']}")
-                    
+
                     del result
                     if completed_count % 10 == 0:
                         gc.collect()
-            
+
             # 最終清理
             del worker_args
             gc.collect()
-            
+
             # 最終報告
             report_progress(f"  ASTC compression complete: {total_success} success, {total_failed} failed")
-        
+
         # ========== 處理 RGBA32 紋理 (不需壓縮，序列處理) ==========
         if png_rgba_files:
             report_progress(f"Processing RGBA32 textures ({len(png_rgba_files)})...")
-            
+
             for i, (mod_filepath, target_asset_name) in enumerate(png_rgba_files):
                 mod_filename = os.path.basename(mod_filepath)
                 current_progress = f"(RGBA {i+1}/{len(png_rgba_files)}) "
-                
+
                 pil_img = None
                 try:
                     report_progress(f"{current_progress}Processing: {mod_filename}")
@@ -863,22 +870,23 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
 
                     for obj in target_objects:
                         data = obj.read()
-                        
+
                         data.m_TextureFormat = 4  # RGBA32
                         data.image = pil_img
-                        
+
                         data.m_MipCount = 1
-                        
+
                         if hasattr(data, 'm_StreamData'):
                             data.m_StreamData.offset = 0
                             data.m_StreamData.size = 0
                             data.m_StreamData.path = ""
-                        
+
                         data.save()
                         edited = True
-                    
+
                 except Exception as e:
                     import traceback
+                    processing_errors.append(f"{mod_filename}: {e}")
                     report_progress(f"Error processing {mod_filename}: {traceback.format_exc()}")
                 finally:
                     if pil_img:
@@ -886,10 +894,18 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                         del pil_img
                     if (i + 1) % 10 == 0:
                         gc.collect()
-        
+
         del asset_map
         del mod_files
         gc.collect()
+
+        if processing_errors:
+            summary = "; ".join(processing_errors[:3])
+            if len(processing_errors) > 3:
+                summary += f" (+{len(processing_errors) - 3} more)"
+            error_msg = f"Repack aborted due to {len(processing_errors)} asset error(s): {summary}"
+            report_progress(error_msg)
+            return False, error_msg, unmatched_mod_files
 
         if edited:
             report_progress("Saving modified game file...")

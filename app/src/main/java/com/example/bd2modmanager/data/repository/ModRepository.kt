@@ -4,13 +4,11 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import com.chaquo.python.Python
-import com.example.bd2modmanager.data.model.MatchStrategy
 import com.example.bd2modmanager.data.model.ModCacheInfo
 import com.example.bd2modmanager.data.model.ModDetails
 import com.example.bd2modmanager.data.model.ModFileListCacheEntry
 import com.example.bd2modmanager.data.model.ModInfo
 import com.example.bd2modmanager.data.model.ResolutionState
-import com.example.bd2modmanager.data.model.ResolvedTarget
 import com.example.bd2modmanager.service.ModdingService
 import com.example.bd2modmanager.utils.ModEntryUtils
 import com.google.gson.Gson
@@ -182,13 +180,12 @@ class ModRepository(
                 candidates.forEachIndexed { index, candidate ->
                     val resolvePayload = resultsById[index] ?: buildResolverFallback(candidate.modDetails.fileNames)
                     val resolutionState = parseResolutionState(resolvePayload)
-                    val targetHash = resolvePayload.optString("targetHash").ifBlank { null }
-                    val resolvedFamilyKey = resolvePayload.optString("resolvedFamilyKey").ifBlank { null }
+                    val targetHash = resolvePayload.optNullableString("targetHash")
+                    val resolvedFamilyKey = resolvePayload.optNullableString("resolvedFamilyKey")
                     val unresolvedFiles = jsonArrayToStringList(resolvePayload.optJSONArray("unresolvedFiles"))
-                    val errorReason = resolvePayload.optString("errorReason").ifBlank { null }
-                    val resolvedTargets = parseResolvedTargets(resolvePayload.optJSONArray("resolvedTargets"))
+                    val errorReason = resolvePayload.optNullableString("errorReason")
                     val alternativeHashes = jsonArrayToStringList(resolvePayload.optJSONArray("candidateHashes"))
-                        .filter { it != resolvedHashSafe(resolvePayload) }
+                        .filter { it != targetHash }
                     val bestMatch = characterRepository.findBestMatch(candidate.modDetails.fileId, candidate.modDetails.fileNames)
 
                     val displayCharacter: String
@@ -249,7 +246,6 @@ class ModRepository(
                             resolutionState = resolutionState,
                             targetHash = resolvedHash,
                             resolvedFamilyKey = resolvedFamilyKey,
-                            resolvedTargets = resolvedTargets,
                             unresolvedFiles = unresolvedFiles,
                             errorReason = errorReason,
                             alternativeHashes = alternativeHashes
@@ -294,8 +290,10 @@ class ModRepository(
         }
     }
 
-    private fun resolvedHashSafe(payload: JSONObject): String? =
-        payload.optString("targetHash").ifBlank { null }
+    private fun JSONObject.optNullableString(key: String): String? {
+        if (isNull(key)) return null
+        return optString(key).ifBlank { null }
+    }
 
     private fun loadModCache(): Map<String, ModCacheInfo> {
         val cacheFile = getModCacheFile()
@@ -402,7 +400,6 @@ class ModRepository(
             put("resolutionState", ResolutionState.UNKNOWN.name)
             put("errorReason", "Resolver failed")
             put("unresolvedFiles", JSONArray(fileNames))
-            put("resolvedTargets", JSONArray())
         }
     }
 
@@ -418,36 +415,8 @@ class ModRepository(
         if (array == null) return emptyList()
         return buildList {
             for (i in 0 until array.length()) {
-                add(array.optString(i))
-            }
-        }
-    }
-
-    private fun parseResolvedTargets(array: JSONArray?): List<ResolvedTarget> {
-        if (array == null) return emptyList()
-        return buildList {
-            for (i in 0 until array.length()) {
-                val obj = array.optJSONObject(i) ?: continue
-                val candidates = jsonArrayToStringList(obj.optJSONArray("normalizedCandidates"))
-                val strategy = try {
-                    MatchStrategy.valueOf(obj.optString("matchStrategy", MatchStrategy.NONE.name))
-                } catch (_: Exception) {
-                    MatchStrategy.NONE
-                }
-                add(
-                    ResolvedTarget(
-                        originalFileName = obj.optString("originalFileName"),
-                        normalizedCandidates = candidates,
-                        resolvedAssetKey = obj.optString("resolvedAssetKey").ifBlank { null },
-                        resolvedBundleName = obj.optString("resolvedBundleName").ifBlank { null },
-                        resolvedBundlePath = obj.optString("resolvedBundlePath").ifBlank { null },
-                        assetType = obj.optString("assetType").ifBlank { null },
-                        targetHash = obj.optString("targetHash").ifBlank { null },
-                        familyKey = obj.optString("familyKey").ifBlank { null },
-                        matchStrategy = strategy,
-                        confidence = obj.optDouble("confidence", 0.0).toFloat()
-                    )
-                )
+                val item = if (array.isNull(i)) "" else array.optString(i)
+                if (item.isNotBlank()) add(item)
             }
         }
     }

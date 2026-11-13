@@ -136,30 +136,36 @@ def _ensure_catalog_index(output_dir, quality, progress_callback, force):
 def update_character_data(output_dir, quality='HD'):
     """Refresh characters.json / bundle_hints.json. Returns (status, message)."""
     try:
-        index, error = ensure_catalog_index(output_dir, quality)
+        norm_quality = _normalize_quality(quality)
+        index, error = ensure_catalog_index(output_dir, norm_quality)
         if error:
             return 'FAILED', error
 
         characters_path = Path(output_dir) / 'characters.json'
         stored_version = None
+        stored_quality = None
         if characters_path.exists():
             try:
                 with open(characters_path, 'r', encoding='utf-8') as handle:
-                    stored_version = json.load(handle).get('version')
+                    payload = json.load(handle)
+                    stored_version = payload.get('version')
+                    stored_quality = payload.get('quality')
             except (OSError, ValueError):
                 stored_version = None
+                stored_quality = None
 
-        if stored_version == index.get('version'):
+        if stored_version == index.get('version') and stored_quality == norm_quality:
             hints_path = Path(output_dir) / 'bundle_hints.json'
             if hints_path.exists():
                 character_scraper.load_bundle_hints(output_dir)
                 return 'SKIPPED', 'characters.json is already up to date.'
 
         success, message = character_scraper.scrape_and_save_from_index(
-            output_dir, index.get('version'), index)
+            output_dir, index.get('version'), index, quality=norm_quality)
         if not success:
             return 'FAILED', message
-        return 'SUCCESS', 'Character data refreshed for version {}.'.format(index.get('version'))
+        return 'SUCCESS', 'Character data refreshed for version {} ({}).'.format(
+            index.get('version'), norm_quality)
     except Exception:
         import traceback
         return 'FAILED', traceback.format_exc()
@@ -183,20 +189,6 @@ def _resolve_with_index(mods, output_dir, quality, progress_callback):
     return results, None
 
 
-def resolve_mod_files(file_names_json, output_dir, quality='HD', progress_callback=None):
-    """Resolve one mod folder. Returns (success, json_result_or_error)."""
-    try:
-        file_names = json.loads(file_names_json) if isinstance(file_names_json, str) else file_names_json
-        results, error = _resolve_with_index(
-            [{'id': 0, 'fileNames': file_names}], output_dir, quality, progress_callback)
-        if error:
-            return False, error
-        return True, json.dumps(results[0]['result'])
-    except Exception:
-        import traceback
-        return False, traceback.format_exc()
-
-
 def resolve_mod_batch(mods_json, output_dir, quality='HD', progress_callback=None):
     """Resolve a batch of mods. Returns (success, json_results_or_error)."""
     try:
@@ -214,7 +206,7 @@ def resolve_mod_batch(mods_json, output_dir, quality='HD', progress_callback=Non
 # Bundle download
 # ---------------------------------------------------------------------------
 
-def download_bundle(hashed_name, quality, output_dir, cache_key=None, progress_callback=None, index_dir=None):
+def download_bundle(hashed_name, quality, output_dir, progress_callback=None, index_dir=None):
     """Download one bundle for repacking. Returns (success, path_or_error).
 
     ``index_dir`` is where the catalog index cache lives (app files dir);

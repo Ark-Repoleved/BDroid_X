@@ -1,12 +1,11 @@
 package com.example.bd2modmanager
 
 import android.annotation.SuppressLint
+import android.net.Uri
 import android.os.Bundle
-import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
 import java.io.File
-import java.net.URLEncoder
 
 class SpinePreviewActivity : ComponentActivity() {
 
@@ -43,8 +42,8 @@ class SpinePreviewActivity : ComponentActivity() {
         }
 
         // Encode paths to be safe for URL
-        val encodedSkelPath = URLEncoder.encode(skelPath, "UTF-8")
-        val encodedAtlasPath = URLEncoder.encode(atlasPath, "UTF-8")
+        val encodedSkelPath = Uri.encode(skelPath)
+        val encodedAtlasPath = Uri.encode(atlasPath)
 
         val url = "file:///android_asset/spine-viewer/preview.html?skel=$encodedSkelPath&atlas=$encodedAtlasPath"
         webView?.loadUrl(url)

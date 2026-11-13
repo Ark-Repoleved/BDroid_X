@@ -7,7 +7,6 @@ the page's own bundle column as a last-resort hint).
 """
 import json
 import re
-import sys
 from pathlib import Path
 
 import requests
@@ -132,7 +131,7 @@ def build_character_data(index, metadata_map, hint_map):
     return entries, hints
 
 
-def scrape_and_save_from_index(output_dir, version, index):
+def scrape_and_save_from_index(output_dir, version, index, quality='HD'):
     """Write characters.json and bundle_hints.json. Returns (success, message)."""
     if not version:
         return False, 'Version not provided to scraper.'
@@ -150,7 +149,7 @@ def scrape_and_save_from_index(output_dir, version, index):
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     with open(output_path / 'characters.json', 'w', encoding='utf-8') as handle:
-        json.dump({'version': version, 'characters': entries}, handle,
+        json.dump({'version': version, 'quality': quality, 'characters': entries}, handle,
                   indent=4, ensure_ascii=False)
 
     with open(output_path / 'bundle_hints.json', 'w', encoding='utf-8') as handle:
@@ -167,8 +166,3 @@ def load_bundle_hints(output_dir):
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
-
-
-def scrape_and_save(output_dir, version):
-    """Deprecated wrapper kept for backward compatibility."""
-    return False, 'scrape_and_save without an index is deprecated.'

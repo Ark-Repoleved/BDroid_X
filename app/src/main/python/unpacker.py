@@ -137,12 +137,6 @@ def decompress_astc_ctypes(image_data, width, height, block_x, block_y):
             del decompressed_buffer
 
 
-ASTC_FORMATS = {
-    47: (4, 4), 48: (4, 4), 49: (5, 5), 50: (6, 6),
-    51: (8, 8), 52: (10, 10), 53: (12, 12),
-}
-
-
 def _build_unique_export_path(output_dir, base_name, extension, path_id):
     safe_name = (base_name or 'unnamed').replace('/', '_')
     filename = f"{safe_name}{extension}"

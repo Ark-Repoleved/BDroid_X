@@ -315,20 +315,19 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 }
             }
 
-            val batchCacheKey = System.currentTimeMillis().toString()
             val downloadSemaphore = Semaphore(4)
 
             _installJobs.value.forEach { installJob ->
                 launch(Dispatchers.IO) {
                     downloadSemaphore.withPermit {
-                        processSingleJob(context, installJob, batchCacheKey)
+                        processSingleJob(context, installJob)
                     }
                 }
             }
         }
     }
 
-    private suspend fun processSingleJob(context: Context, installJob: InstallJob, cacheKey: String) {
+    private suspend fun processSingleJob(context: Context, installJob: InstallJob) {
         val job = installJob.job
         val hashedName = job.hashedName
         var originalDataCache: File? = null
@@ -395,7 +394,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     else "Trying alternative bundle (${index + 1}/${candidates.size})..."
                 ))
                 val (downloadSuccess, messageOrPath) = ModdingService.downloadBundle(
-                    candidate, selectedQuality.value, bundleCacheDir.absolutePath, cacheKey,
+                    candidate, selectedQuality.value, bundleCacheDir.absolutePath,
                     context.filesDir.absolutePath
                 ) { progress -> updateProgressThrottled({ JobStatus.Downloading(it) }, progress) }
 
@@ -452,14 +451,14 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 throw Exception("Repack failed: $detail")
             }
 
-            if (bestUnmatchedCount != Int.MAX_VALUE && bestUnmatchedCount > 0) {
-                updateJobStatus(hashedName, JobStatus.Installing("Warning: $bestUnmatchedCount file(s) did not match this bundle."))
-            }
+            val warningMessage = if (bestUnmatchedCount != Int.MAX_VALUE && bestUnmatchedCount > 0) {
+                "Finished with warning: $bestUnmatchedCount file(s) did not match this bundle."
+            } else null
 
             val publicUri = saveFileToDownloads(context, repackedOutput, repoPath, "Shared")
 
             if (publicUri != null) {
-                updateJobStatus(hashedName, JobStatus.Finished(repoPath))
+                updateJobStatus(hashedName, JobStatus.Finished(repoPath, warning = warningMessage))
             } else {
                 throw Exception("Failed to save file to Downloads folder.")
             }
@@ -553,8 +552,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                 if (!Python.isStarted()) {
                     Python.start(com.chaquo.python.android.AndroidPlatform(context))
                 }
-                val cacheKey = "uninstall_${System.currentTimeMillis()}"
-                ModdingService.downloadBundle(hashedName, selectedQuality.value, bundleCacheDir.absolutePath, cacheKey, context.filesDir.absolutePath) { progress ->
+                ModdingService.downloadBundle(hashedName, selectedQuality.value, bundleCacheDir.absolutePath, context.filesDir.absolutePath) { progress ->
                     viewModelScope.launch(Dispatchers.Main) {
                         _uninstallState.value = UninstallState.Downloading(hashedName, progress)
                     }
@@ -593,40 +591,70 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         viewModelScope.launch {
             _unpackState.value = UnpackState.Unpacking("Starting unpack...")
             val (success, message) = withContext(Dispatchers.IO) {
-                if (!Python.isStarted()) {
-                    Python.start(com.chaquo.python.android.AndroidPlatform(context))
-                }
-                val tempInputFile = File(context.cacheDir, "temp_unpack_input.bundle")
-                context.contentResolver.openInputStream(inputFile)?.use { input ->
-                    tempInputFile.outputStream().use { output ->
-                        input.copyTo(output)
+                val stamp = System.currentTimeMillis()
+                val tempInputFile = File(context.cacheDir, "temp_unpack_input_$stamp.bundle")
+                val tempOutputDir = File(context.cacheDir, "temp_unpack_output_$stamp")
+                try {
+                    if (!Python.isStarted()) {
+                        Python.start(com.chaquo.python.android.AndroidPlatform(context))
                     }
-                }
 
-                val tempOutputDir = File(context.cacheDir, "temp_unpack_output")
-                if (tempOutputDir.exists()) tempOutputDir.deleteRecursively()
-                tempOutputDir.mkdirs()
-
-                val unpackResult = ModdingService.unpackBundle(tempInputFile.absolutePath, tempOutputDir.absolutePath) { progress ->
-                    viewModelScope.launch(Dispatchers.Main) {
-                        _unpackState.value = UnpackState.Unpacking(progress)
+                    val inputStream = context.contentResolver.openInputStream(inputFile)
+                        ?: return@withContext Pair(false, "Could not open the selected file.")
+                    var copiedBytes = 0L
+                    inputStream.use { input ->
+                        tempInputFile.outputStream().use { output ->
+                            copiedBytes = input.copyTo(output)
+                        }
                     }
-                }
+                    if (copiedBytes <= 0L || !tempInputFile.exists()) {
+                        return@withContext Pair(false, "Selected file is empty or unreadable.")
+                    }
 
-                if (unpackResult.first) {
+                    if (tempOutputDir.exists()) tempOutputDir.deleteRecursively()
+                    tempOutputDir.mkdirs()
+
+                    var lastUpdateMs = 0L
+                    val unpackResult = ModdingService.unpackBundle(tempInputFile.absolutePath, tempOutputDir.absolutePath) { progress ->
+                        val now = System.currentTimeMillis()
+                        if (now - lastUpdateMs >= 150L) {
+                            lastUpdateMs = now
+                            _unpackState.value = UnpackState.Unpacking(progress)
+                        }
+                    }
+
+                    if (!unpackResult.first) {
+                        return@withContext unpackResult
+                    }
+
+                    var savedCount = 0
+                    var failedSaves = 0
                     tempOutputDir.listFiles()?.forEach { file ->
-                        saveFileToDownloads(context, file, file.name, "outputs")
+                        if (file.isFile) {
+                            if (saveFileToDownloads(context, file, file.name, "outputs") != null) {
+                                savedCount++
+                            } else {
+                                failedSaves++
+                            }
+                        }
                     }
+
+                    if (failedSaves > 0) {
+                        Pair(false, "Saved $savedCount file(s), but failed to save $failedSaves file(s) to Download/outputs.")
+                    } else {
+                        Pair(true, "Unpacked $savedCount file(s) to Download/outputs folder.")
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    Pair(false, e.message ?: "Unpack failed.")
+                } finally {
+                    try { tempInputFile.delete() } catch (_: Exception) {}
+                    try { tempOutputDir.deleteRecursively() } catch (_: Exception) {}
                 }
-
-                tempInputFile.delete()
-                tempOutputDir.deleteRecursively()
-
-                unpackResult
             }
 
             _unpackState.value = if (success) {
-                UnpackState.Finished("Unpacked files saved to Download/outputs folder.")
+                UnpackState.Finished(message)
             } else {
                 UnpackState.Failed(message)
             }
@@ -643,6 +671,11 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
         val modUri = selectedMods.value.first()
         val modInfo = _modsList.value.find { it.uri == modUri } ?: return
+        if (!modInfo.isDirectory) {
+            _showMergeDialog.value = true
+            _mergeState.value = MergeState.Failed("Spine merge only supports unzipped mod folders.")
+            return
+        }
 
         _showMergeDialog.value = true
         _mergeState.value = MergeState.Merging("Preparing files...")
@@ -650,72 +683,61 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         viewModelScope.launch {
             val tempDir = File(context.cacheDir, "temp_merge_${System.currentTimeMillis()}")
             try {
-                withContext(Dispatchers.IO) {
+                val (success, message) = withContext(Dispatchers.IO) {
+                    if (!Python.isStarted()) {
+                        Python.start(com.chaquo.python.android.AndroidPlatform(context))
+                    }
+
                     if (tempDir.exists()) tempDir.deleteRecursively()
                     tempDir.mkdirs()
 
-                    if (modInfo.isDirectory) {
-                        DocumentFile.fromTreeUri(context, modInfo.uri)?.let { 
-                            copyDirectoryToCacheNonRecursive(context, it, tempDir)
-                        }
-                    } else {
-                        context.contentResolver.openInputStream(modInfo.uri)?.use { fis ->
-                            ZipInputStream(fis).use { zis ->
-                                var entry = zis.nextEntry
-                                while (entry != null) {
-                                    val fileName = entry.name.substringAfterLast('/')
-                                    if (!entry.isDirectory && !shouldIgnoreModEntry(entry.name)) {
-                                        val newFile = ModEntryUtils.resolveZipEntrySafely(tempDir, fileName)
-                                        if (newFile != null) {
-                                            newFile.outputStream().use { fos -> zis.copyTo(fos) }
-                                        }
-                                    }
-                                    entry = zis.nextEntry
-                                }
-                            }
-                        }
-                    }
-                }
+                    val sourceDoc = DocumentFile.fromTreeUri(context, modInfo.uri)
+                        ?: return@withContext Pair(false, "Failed to access original mod directory.")
 
-                val (success, message) = withContext(Dispatchers.IO) {
-                    ModdingService.mergeSpineAssets(tempDir.absolutePath) { progress ->
-                        viewModelScope.launch(Dispatchers.Main) {
+                    copyDirectoryToCache(context, sourceDoc, tempDir, maxDepth = 0)
+
+                    var lastUpdateMs = 0L
+                    val mergeResult = ModdingService.mergeSpineAssets(tempDir.absolutePath) { progress ->
+                        val now = System.currentTimeMillis()
+                        if (now - lastUpdateMs >= 150L) {
+                            lastUpdateMs = now
                             _mergeState.value = MergeState.Merging(progress)
                         }
                     }
-                }
 
-                if (success) {
-                    val originalModDoc = DocumentFile.fromTreeUri(context, modInfo.uri)
-                    if (originalModDoc != null && originalModDoc.isDirectory) {
-                        val filesToDelete = originalModDoc.listFiles().filter {
-                            it.isFile && (it.name?.endsWith(".png") == true || it.name?.endsWith(".atlas") == true)
-                        }
-                        filesToDelete.forEach { it.delete() }
+                    if (!mergeResult.first) {
+                        return@withContext mergeResult
+                    }
 
-                        tempDir.listFiles()?.forEach { file ->
-                            if (file.isFile && (file.name.endsWith(".png") || file.name.endsWith(".atlas"))) {
-                                val newFile = originalModDoc.createFile("application/octet-stream", file.name)
-                                newFile?.let {
-                                    context.contentResolver.openOutputStream(it.uri)?.use { output ->
-                                        file.inputStream().use { input -> input.copyTo(output) }
-                                    }
-                                }
-                            } else if (file.isDirectory && file.name == ".old") {
-                                val oldDirDoc = originalModDoc.createDirectory(".old")
-                                oldDirDoc?.let {
-                                    copyDirectoryToSaf(context, file, it)
+                    val filesToDelete = sourceDoc.listFiles().filter {
+                        val n = it.name?.lowercase() ?: ""
+                        it.isFile && (n.endsWith(".png") || n.endsWith(".atlas") || n.endsWith(".atlas.txt"))
+                    }
+                    filesToDelete.forEach { it.delete() }
+
+                    tempDir.listFiles()?.forEach { file ->
+                        val lower = file.name.lowercase()
+                        if (file.isFile && (lower.endsWith(".png") || lower.endsWith(".atlas") || lower.endsWith(".atlas.txt"))) {
+                            val newFile = sourceDoc.createFile("application/octet-stream", file.name)
+                            newFile?.let {
+                                context.contentResolver.openOutputStream(it.uri)?.use { output ->
+                                    file.inputStream().use { input -> input.copyTo(output) }
                                 }
                             }
+                        } else if (file.isDirectory && file.name == ".old") {
+                            val oldDirDoc = sourceDoc.findFile(".old")?.takeIf { it.isDirectory }
+                                ?: sourceDoc.createDirectory(".old")
+                            oldDirDoc?.let { copyDirectoryToSaf(context, file, it) }
                         }
-                        _mergeState.value = MergeState.Finished("Successfully merged mod in-place!")
-                    } else {
-                        _mergeState.value = MergeState.Failed("Failed to access original mod directory.")
                     }
-                } else {
-                    _mergeState.value = MergeState.Failed(message)
+                    Pair(true, "Successfully merged mod in-place!")
                 }
 
+                _mergeState.value = if (success) {
+                    MergeState.Finished(message)
+                } else {
+                    MergeState.Failed(message)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
                 _mergeState.value = MergeState.Failed(e.message ?: "An unknown error occurred.")
@@ -730,19 +752,6 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     fun resetMergeState() {
         _mergeState.value = MergeState.Idle
         _showMergeDialog.value = false
-    }
-
-    private fun copyDirectoryToCacheNonRecursive(context: Context, sourceDir: DocumentFile, destinationDir: File) {
-        if (!destinationDir.exists()) destinationDir.mkdirs()
-        sourceDir.listFiles().forEach { file ->
-            val fileName = file.name ?: return@forEach
-            if (file.isFile && !shouldIgnoreModEntry(fileName)) {
-                val destFile = File(destinationDir, fileName)
-                try {
-                    context.contentResolver.openInputStream(file.uri)?.use { input -> destFile.outputStream().use { output -> input.copyTo(output) } }
-                } catch (e: Exception) { e.printStackTrace() }
-            }
-        }
     }
 
     private fun copyDirectoryToSaf(context: Context, sourceDir: File, destinationDoc: DocumentFile) {
@@ -872,16 +881,17 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         context: Context,
         sourceDir: DocumentFile,
         destinationDir: File,
-        depth: Int = 0
+        depth: Int = 0,
+        maxDepth: Int = 5
     ) {
-        if (depth > 5) return
+        if (depth > maxDepth) return
         if (!destinationDir.exists()) destinationDir.mkdirs()
         sourceDir.listFiles().forEach { file ->
             val fileName = file.name ?: return@forEach
             if (file.isDirectory) {
-                if (!shouldIgnoreModEntry("$fileName/placeholder")) {
+                if (depth < maxDepth && !shouldIgnoreModEntry("$fileName/placeholder")) {
                     val subDest = File(destinationDir, fileName)
-                    copyDirectoryToCache(context, file, subDest, depth + 1)
+                    copyDirectoryToCache(context, file, subDest, depth + 1, maxDepth)
                 }
             } else if (file.isFile && !shouldIgnoreModEntry(fileName)) {
                 val destFile = File(destinationDir, fileName)

@@ -4,7 +4,6 @@ import base64
 import json
 import os
 import re
-import struct
 import tempfile
 import time
 from pathlib import Path

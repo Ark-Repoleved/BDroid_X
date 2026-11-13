@@ -350,8 +350,3 @@ def save_catalog_index(output_dir, quality, index):
     tmp_path.replace(path)
     return str(path)
 
-
-def get_bundle(index, bundle_name):
-    """Look up the CDN record for a bundle name."""
-    return ((index or {}).get('bundles') or {}).get(bundle_name)
-
