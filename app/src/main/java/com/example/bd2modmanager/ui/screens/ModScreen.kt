@@ -277,7 +277,7 @@ fun ModScreen(
                                                     }
                                                 )
                                             }
-                                            IconButton(onClick = { viewModel.setSearchActive(!isSearchActive) }) {
+                                    IconButton(onClick = { viewModel.setSearchActive(!isSearchActive) }) {
                                                 Icon(
                                                     imageVector = if (isSearchActive) Icons.Default.Close else Icons.Default.Search,
                                                     contentDescription = "Toggle Search"
@@ -285,6 +285,49 @@ fun ModScreen(
                                             }
                                         }
                                     }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            var menuExpanded by remember { mutableStateOf(false) }
+                            Box {
+                                ElevatedCard(
+                                    modifier = Modifier.size(40.dp),
+                                    shape = RoundedCornerShape(20.dp),
+                                    onClick = { menuExpanded = true },
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.MoreVert,
+                                            contentDescription = "More Options"
+                                        )
+                                    }
+                                }
+                                DropdownMenu(
+                                    expanded = menuExpanded,
+                                    onDismissRequest = { menuExpanded = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Export Diagnostic Logs") },
+                                        leadingIcon = { Icon(Icons.Default.BugReport, contentDescription = null) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            viewModel.exportDiagnosticLogs(context)
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Change Mod Folder") },
+                                        leadingIcon = { Icon(Icons.Default.FolderOpen, contentDescription = null) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onSelectModSource()
+                                        }
+                                    )
                                 }
                             }
                         }

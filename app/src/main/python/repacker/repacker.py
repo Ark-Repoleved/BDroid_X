@@ -16,7 +16,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 MAX_ATLAS_PAGE_DIM = 4096
 
 _IGNORED_EXACT_NAMES = {
-    '.ds_store', 'thumbs.db', 'desktop.ini', '.modfile',
+    '.ds_store', 'thumbs.db', 'desktop.ini', '.modfile', '.nomedia',
     'mod.json', 'info.json', 'manifest.json', 'metadata.json', 'config.json',
     'readme.txt', 'readme.md', 'changelog.txt', 'changelog.md',
     'license.txt', 'license.md', 'credits.txt',
@@ -35,11 +35,21 @@ IS_ANDROID = hasattr(sys, 'getandroidapilevel') or 'ANDROID_ROOT' in os.environ
 # Android 上限制同時處理 2 張紋理，降低記憶體尖峰與執行緒競爭
 MAX_PARALLEL_TEXTURES = 2 if IS_ANDROID else min(4, max(1, (os.cpu_count() or 4) // 2))
 
+try:
+    import unpacker  # noqa: F401 Ensure decompress_astc_ctypes is registered before UnityPy import
+except Exception:
+    pass
+
 from UnityPy.helpers import TypeTreeHelper
 TypeTreeHelper.read_typetree_boost = False
 import UnityPy
 
 UnityPy.config.FALLBACK_UNITY_VERSION = '2022.3.22f1'
+
+try:
+    from resolver import SPECIAL_ILLUST_ADDRESS_TO_ASSET
+except ImportError:
+    SPECIAL_ILLUST_ADDRESS_TO_ASSET = {}
 
 _astcenc_lib = None
 _astcenc_structures = {}
@@ -173,8 +183,10 @@ def _build_file_index(working_dir: str) -> dict:
         - 'all_files': [filepath, ...]
     """
     index = {
-        'skel_json': {},   # base_name -> (type, path, directory)
-        'all_files': []    # [path]
+        'skel_json': {},      # base_name -> (type, path, directory)
+        'modfile_stems': [],  # [stem]
+        'dir_modfiles': {},   # {dir: [stem]}
+        'all_files': []       # [path]
     }
 
     for root, dirs, files in os.walk(working_dir):
@@ -182,11 +194,16 @@ def _build_file_index(working_dir: str) -> dict:
         if _is_ignored_mod_file('dummy', root):
             continue
         for f in files:
+            f_lower = f.lower()
+            if f_lower.endswith('.modfile') and f_lower != '.modfile':
+                mf_stem = os.path.splitext(f_lower)[0]
+                index['modfile_stems'].append(mf_stem)
+                index['dir_modfiles'].setdefault(os.path.abspath(root), []).append(mf_stem)
+                continue
             if _is_ignored_mod_file(f, root):
                 continue
             filepath = os.path.join(root, f)
             index['all_files'].append(filepath)
-            f_lower = f.lower()
 
             if f_lower.endswith(('.skel', '.skel.bytes', '.skel.txt', '.json')):
                 base_name = _skel_base_name(f)
@@ -195,6 +212,25 @@ def _build_file_index(working_dir: str) -> dict:
                     index['skel_json'][base_name] = (file_type, filepath, root)
 
     return index
+
+
+def _normalize_atlas_page_headers(script: str) -> str:
+    """Normalize .atlas texture page header filenames (e.g. Char000104.PNG) to lowercase."""
+    out_lines = []
+    for line in script.splitlines(keepends=True):
+        ending = ''
+        if line.endswith('\r\n'):
+            body, ending = line[:-2], '\r\n'
+        elif line.endswith('\n') or line.endswith('\r'):
+            body, ending = line[:-1], line[-1:]
+        else:
+            body = line
+        stripped = body.strip()
+        if stripped.lower().endswith('.png') and ':' not in stripped and not body.startswith((' ', '\t')):
+            out_lines.append(stripped.lower() + ending)
+        else:
+            out_lines.append(line)
+    return ''.join(out_lines)
 
 
 from utils.atlas_operations import parse_atlas_file, offset_and_scale_atlas_sprites
@@ -512,6 +548,162 @@ def _asset_objects(asset_map, target_asset_name: str, type_name: str = None):
     return objects
 
 
+UNITYFS_SIGNATURE = b"UnityFS\x00"
+_UNITYFS_HEAD_WINDOW = 256
+
+
+def _validate_unityfs_header(path: str):
+    """Verify the saved UnityFS header declares the exact file byte length."""
+    try:
+        actual_size = os.path.getsize(path)
+    except OSError as e:
+        return False, f"Cannot stat saved bundle: {e}"
+    try:
+        with open(path, "rb") as f:
+            head = f.read(_UNITYFS_HEAD_WINDOW)
+    except OSError as e:
+        return False, f"Cannot read bundle header: {e}"
+
+    if head[:8] != UNITYFS_SIGNATURE:
+        return False, 'Missing UnityFS header signature'
+
+    try:
+        pos = 8
+        int.from_bytes(head[pos:pos + 4], "big")
+        pos += 4
+        for field in ("unity version", "unity revision"):
+            end = head.find(b"\x00", pos)
+            if end < 0:
+                return False, f"Unterminated {field} string in bundle header"
+            pos = end + 1
+        if pos + 8 > len(head):
+            return False, "Truncated UnityFS size field in header"
+        declared_size = int.from_bytes(head[pos:pos + 8], "big")
+    except (ValueError, IndexError) as e:
+        return False, f"Malformed UnityFS header: {e}"
+
+    if declared_size != actual_size:
+        return False, (
+            f"UnityFS declared size ({declared_size}) does not match actual file size ({actual_size})"
+        )
+    return True, ""
+
+
+def _try_remove(path: str):
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+def _replace_sprite_atlas_entries(env, png_path, candidate_stems, use_astc, report_progress):
+    """Patch matching Sprite sub-regions inside SpriteAtlas Texture2D pages."""
+    try:
+        import unpacker  # noqa: F401
+    except Exception:
+        pass
+
+    wanted_sprites = set()
+    for stem in candidate_stems:
+        low = (stem or "").strip().lower()
+        if not low:
+            continue
+        wanted_sprites.add(low)
+        if low.endswith("_atlas_eventpackgui"):
+            wanted_sprites.add("bg_eventpack")
+
+    if not wanted_sprites:
+        return False
+
+    sprite_keys = []
+    tex_objs = {}
+    atlas_objs = []
+    for obj in env.objects:
+        tname = obj.type.name
+        if tname == "Texture2D":
+            tex_objs[obj.path_id] = obj
+        elif tname == "SpriteAtlas":
+            atlas_objs.append(obj)
+        elif tname == "Sprite":
+            try:
+                d = obj.read()
+                if getattr(d, "m_Name", "").lower() in wanted_sprites:
+                    sprite_keys.append((d.m_Name, d.m_RenderDataKey))
+            except Exception:
+                pass
+
+    if not sprite_keys or not atlas_objs:
+        return False
+
+    edited = False
+    for sprite_name, rkey in sprite_keys:
+        for atlas_obj in atlas_objs:
+            try:
+                atlas_data = atlas_obj.read()
+                for k, v in atlas_data.m_RenderDataMap:
+                    if k != rkey:
+                        continue
+                    tex_obj = tex_objs.get(v.texture.path_id)
+                    if tex_obj is None:
+                        continue
+                    rect = v.textureRect
+                    rw, rh = int(round(rect.width)), int(round(rect.height))
+                    if rw <= 0 or rh <= 0:
+                        continue
+                    tex_data = tex_obj.read()
+                    base_img = tex_data.image.convert("RGBA")
+                    if base_img.getbbox() is None:
+                        base_img.close()
+                        report_progress(
+                            f"Warning: Base SpriteAtlas texture '{tex_data.m_Name}' decoded empty; skipping."
+                        )
+                        continue
+                    with Image.open(png_path) as raw_mod:
+                        mod_img = raw_mod.convert("RGBA")
+                        if mod_img.size != (rw, rh):
+                            resample = getattr(getattr(Image, "Resampling", Image), "LANCZOS", Image.LANCZOS)
+                            mod_img = mod_img.resize((rw, rh), resample)
+                    px = int(round(rect.x))
+                    py = int(round(base_img.height - rect.y - rect.height))
+                    base_img.paste(mod_img, (px, py))
+                    mod_img.close()
+
+                    if use_astc and _load_astcenc_library() is not None:
+                        flipped = base_img.transpose(Image.FLIP_TOP_BOTTOM)
+                        compressed, err = compress_image_astc(
+                            flipped.tobytes(), base_img.width, base_img.height, 4, 4
+                        )
+                        flipped.close()
+                        if compressed and not err:
+                            tex_data.m_TextureFormat = 48
+                            tex_data.image_data = compressed
+                            tex_data.m_CompleteImageSize = len(compressed)
+                            tex_data.m_Width = base_img.width
+                            tex_data.m_Height = base_img.height
+                            tex_data.m_MipCount = 1
+                        else:
+                            tex_data.m_TextureFormat = 4
+                            tex_data.image = base_img
+                            tex_data.m_MipCount = 1
+                    else:
+                        tex_data.m_TextureFormat = 4
+                        tex_data.image = base_img
+                        tex_data.m_MipCount = 1
+
+                    if hasattr(tex_data, "m_StreamData"):
+                        tex_data.m_StreamData.offset = 0
+                        tex_data.m_StreamData.size = 0
+                        tex_data.m_StreamData.path = ""
+                    tex_data.save()
+                    edited = True
+                    base_img.close()
+                    report_progress(f"Replaced SpriteAtlas sprite '{sprite_name}' in '{tex_data.m_Name}'")
+            except Exception as e:
+                report_progress(f"Warning: SpriteAtlas replacement failed for '{sprite_name}': {e}")
+    return edited
+
+
 def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_path: str, use_astc: bool, progress_callback=None):
     """
     Repack a unity bundle with modded assets.
@@ -623,7 +815,32 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
         png_rgba_files = []  # PNG -> RGBA32 (不需壓縮)
         text_files = []      # TextAsset 替換
         unmatched_mod_files = []  # 在此 bundle 中找不到對應資產的檔案
+        unmatched_png_paths = []
 
+        modfile_stems = file_index.get('modfile_stems') or []
+        dir_modfiles = file_index.get('dir_modfiles') or {}
+
+        def _modfiles_for_path(filepath):
+            cur = os.path.abspath(os.path.dirname(filepath))
+            parent = os.path.abspath(os.path.dirname(cur))
+            local = (dir_modfiles.get(cur) or []) + (dir_modfiles.get(parent) or [])
+            return local if local else modfile_stems
+
+        def _resolve_texture_target(raw_stem, filepath):
+            if _asset_objects(asset_map, raw_stem, "Texture2D"):
+                return raw_stem
+            mapped = SPECIAL_ILLUST_ADDRESS_TO_ASSET.get(raw_stem)
+            if mapped and _asset_objects(asset_map, mapped, "Texture2D"):
+                return mapped
+            for mf_stem in _modfiles_for_path(filepath):
+                if _asset_objects(asset_map, mf_stem, "Texture2D"):
+                    return mf_stem
+                mf_mapped = SPECIAL_ILLUST_ADDRESS_TO_ASSET.get(mf_stem)
+                if mf_mapped and _asset_objects(asset_map, mf_mapped, "Texture2D"):
+                    return mf_mapped
+            return None
+
+        seen_tex_targets = set()
         for mod_filepath in mod_files:
             mod_filename = os.path.basename(mod_filepath)
             lower_name = mod_filename.lower()
@@ -637,14 +854,17 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                     unmatched_mod_files.append(mod_filename)
 
             elif lower_name.endswith('.png'):
-                target_asset_name = os.path.splitext(mod_filename)[0].lower()
-                if _asset_objects(asset_map, target_asset_name, "Texture2D"):
+                raw_stem = os.path.splitext(mod_filename)[0].lower()
+                target_asset_name = _resolve_texture_target(raw_stem, mod_filepath)
+                if target_asset_name and (target_asset_name == raw_stem or target_asset_name not in seen_tex_targets):
+                    seen_tex_targets.add(target_asset_name)
                     if use_astc:
                         png_astc_files.append((mod_filepath, target_asset_name))
                     else:
                         png_rgba_files.append((mod_filepath, target_asset_name))
                 else:
                     unmatched_mod_files.append(mod_filename)
+                    unmatched_png_paths.append(mod_filepath)
             else:
                 candidate_names = [lower_name]
                 if lower_name.endswith(('.bytes', '.txt')):
@@ -706,6 +926,8 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                 target_objects = _asset_objects(asset_map, target_asset_name, "TextAsset")
                 with open(mod_filepath, "rb") as f:
                     new_script = f.read().decode("utf-8", "surrogateescape")
+                if target_asset_name.lower().endswith((".atlas", ".atlas.txt")):
+                    new_script = _normalize_atlas_page_headers(new_script)
 
                 for obj in target_objects:
                     data = obj.read()
@@ -899,6 +1121,17 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
         del mod_files
         gc.collect()
 
+        # Fallback: patch SpriteAtlas sub-regions for unmatched PNGs (event/pack banners)
+        if not processing_errors and unmatched_png_paths:
+            for png_path in unmatched_png_paths:
+                png_name = os.path.basename(png_path)
+                png_stem = os.path.splitext(png_name)[0].lower()
+                stems = list(dict.fromkeys([png_stem] + _modfiles_for_path(png_path)))
+                if _replace_sprite_atlas_entries(env, png_path, stems, use_astc, report_progress):
+                    edited = True
+                    if png_name in unmatched_mod_files:
+                        unmatched_mod_files.remove(png_name)
+
         if processing_errors:
             summary = "; ".join(processing_errors[:3])
             if len(processing_errors) > 3:
@@ -910,15 +1143,33 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
         if edited:
             report_progress("Saving modified game file...")
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            part_path = output_path + ".part"
             try:
-                with open(output_path, "wb") as f:
+                with open(part_path, "wb") as f:
                     env.file.save(f, packer="lz4")
-                report_progress("Saved successfully!")
-                return True, "Repack completed successfully.", unmatched_mod_files
             except Exception as e:
+                _try_remove(part_path)
                 error_msg = f"Error saving bundle: {e}"
                 report_progress(error_msg)
                 return False, error_msg, unmatched_mod_files
+
+            valid, reason = _validate_unityfs_header(part_path)
+            if not valid:
+                _try_remove(part_path)
+                error_msg = f"Bundle validation failed after save: {reason}"
+                report_progress(error_msg)
+                return False, error_msg, unmatched_mod_files
+
+            try:
+                os.replace(part_path, output_path)
+            except OSError as e:
+                _try_remove(part_path)
+                error_msg = f"Error replacing bundle: {e}"
+                report_progress(error_msg)
+                return False, error_msg, unmatched_mod_files
+
+            report_progress("Saved successfully!")
+            return True, "Repack completed successfully.", unmatched_mod_files
         else:
             error_msg = "No modifications were made. Check if your mod files match any assets in the bundle."
             report_progress(error_msg)

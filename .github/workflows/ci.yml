@@ -1,0 +1,43 @@
+name: Build & Unit Test
+
+on:
+  push:
+    branches:
+      - main
+      - '2.0.0-beta'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup JDK
+        uses: actions/setup-java@v6
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.8'
+
+      - name: Check Python syntax
+        run: |
+          python -m py_compile \
+            app/src/main/python/main_script.py \
+            app/src/main/python/resolver.py \
+            app/src/main/python/unpacker.py \
+            app/src/main/python/repacker/repacker.py \
+            app/src/main/python/vendor/UnityPy/files/BundleFile.py
+
+      - name: Make Gradle executable
+        run: chmod +x ./gradlew
+
+      - name: Run Unit Tests & Build Debug APK
+        run: ./gradlew testDebugUnitTest assembleDebug

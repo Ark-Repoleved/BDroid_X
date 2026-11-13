@@ -84,6 +84,13 @@ except OSError as e:
     print(f"WARNING: Could not load libastcenc.so. ASTC decompression will not work. Error: {e}")
     astcenc = None
 
+# Cap decoded texture dimensions to prevent OOM on malformed headers (16384x16384)
+MAX_DECODE_PIXELS = 16384 * 16384
+# Cap bundle size for full unpack on Android devices (500 MB with disk spill)
+MAX_BUNDLE_BYTES = 500 * 1024 * 1024
+# Collect every 500 objects for non-texture loop; textures collect per-image
+GC_INTERVAL = 500
+
 def get_error_string(status):
     if not astcenc: return "astcenc library not loaded"
     return astcenc.astcenc_get_error_string(status).decode('utf-8')
@@ -91,6 +98,15 @@ def get_error_string(status):
 def decompress_astc_ctypes(image_data, width, height, block_x, block_y):
     if not astcenc:
         return None, "libastcenc.so not loaded."
+
+    pixels = width * height
+    if pixels <= 0 or pixels > MAX_DECODE_PIXELS:
+        return None, f"Implausible ASTC dimensions {width}x{height}"
+    if block_x <= 0 or block_y <= 0 or block_x > 16 or block_y > 16:
+        return None, f"Implausible ASTC block size {block_x}x{block_y}"
+    blocks = ((width + block_x - 1) // block_x) * ((height + block_y - 1) // block_y)
+    if len(image_data) < blocks * 16 // 2:
+        return None, f"ASTC data too short: {len(image_data)}B for {blocks} blocks"
 
     config = astcenc_config()
     quality = ASTCENC_PRE_MEDIUM
@@ -137,22 +153,53 @@ def decompress_astc_ctypes(image_data, width, height, block_x, block_y):
             del decompressed_buffer
 
 
+def _safe_export_name(base_name):
+    name = base_name or 'unnamed'
+    name = name.replace('/', '_').replace('\\', '_').replace('\x00', '_')
+    if len(name) >= 2 and name[1] == ':':
+        name = name[0] + '_' + name[2:]
+    return name or 'unnamed'
+
+
+def _require_within(output_dir, dest_path):
+    root = os.path.realpath(output_dir)
+    real = os.path.realpath(dest_path)
+    try:
+        common = os.path.commonpath([root, real])
+    except ValueError:
+        raise ValueError(f"Export path outside output root: {dest_path!r}")
+    if common != root or real == root:
+        raise ValueError(f"Export path escapes output dir: {dest_path!r}")
+    return dest_path
+
+
 def _build_unique_export_path(output_dir, base_name, extension, path_id):
-    safe_name = (base_name or 'unnamed').replace('/', '_')
-    filename = f"{safe_name}{extension}"
-    dest_path = os.path.join(output_dir, filename)
+    safe_name = _safe_export_name(base_name)
+    dest_path = os.path.join(output_dir, f"{safe_name}{extension}")
     if not os.path.exists(dest_path):
-        return dest_path
+        return _require_within(output_dir, dest_path)
 
     duplicate_filename = f"{safe_name} #{path_id}{extension}"
-    return os.path.join(output_dir, duplicate_filename)
+    return _require_within(output_dir, os.path.join(output_dir, duplicate_filename))
 
 
 def unpack_bundle(bundle_path, output_dir, progress_callback=print):
     progress_callback(f"Starting to unpack '{os.path.basename(bundle_path)}'...")
-    
+
     if not os.path.exists(bundle_path):
         return (False, f"Bundle file not found at '{bundle_path}'")
+
+    try:
+        bundle_size = os.path.getsize(bundle_path)
+        if bundle_size > MAX_BUNDLE_BYTES:
+            msg = (
+                f"Bundle too large to unpack: {bundle_size // 1048576} MB "
+                f"(cap {MAX_BUNDLE_BYTES // 1048576} MB)"
+            )
+            progress_callback(msg)
+            return (False, msg)
+    except OSError:
+        pass
 
     os.makedirs(output_dir, exist_ok=True)
     progress_callback(f"Output directory '{output_dir}' is ready.")
@@ -190,6 +237,7 @@ def unpack_bundle(bundle_path, output_dir, progress_callback=print):
                     finally:
                         if img:
                             del img
+                        gc.collect()
 
                 elif obj.type.name in ["TextAsset", "MonoBehaviour"]:
                     # Handle both TextAsset and MonoBehaviour .skel files
@@ -216,9 +264,7 @@ def unpack_bundle(bundle_path, output_dir, progress_callback=print):
                 if data:
                     del data
                 
-                # Periodic GC to prevent memory buildup while avoiding excessive overhead
-                # Collect every 10 objects to balance memory usage and performance
-                if (i + 1) % 10 == 0:
+                if (i + 1) % GC_INTERVAL == 0:
                     gc.collect()
         
         # Final garbage collection

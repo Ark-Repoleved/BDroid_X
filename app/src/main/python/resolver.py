@@ -24,7 +24,7 @@ STRATEGY_FAMILY = 'NORMALIZED'
 STRATEGY_HINT = 'FALLBACK'
 
 _IGNORED_NAMES = {
-    '.ds_store', 'thumbs.db', 'desktop.ini', '.modfile',
+    '.ds_store', 'thumbs.db', 'desktop.ini', '.modfile', '.nomedia',
     'mod.json', 'info.json', 'manifest.json', 'metadata.json', 'config.json',
     'readme.txt', 'readme.md', 'changelog.txt', 'changelog.md',
     'license.txt', 'license.md', 'credits.txt',
@@ -32,6 +32,105 @@ _IGNORED_NAMES = {
 }
 _IGNORED_DIRS = {'__macosx', '.git', '.old'}
 _IGNORED_EXTS = ('.modfile', '.md', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.url', '.lnk')
+
+# SpecialIllust_1 bundle stores several early CGs under sepcialillust_* addresses
+# while the Texture2D m_Name inside the bundle is specialillust*.
+SPECIAL_ILLUST_ADDRESS_TO_ASSET = {
+    "sepcialillust_1": "specialillust3",
+    "sepcialillust_6": "specialillust3-1",
+    "sepcialillust_7": "specialillust11",
+    "sepcialillust_8": "specialillust11-1",
+    "sepcialillust_11": "specialillust5",
+    "sepcialillust_15": "specialillust5-1",
+    "sepcialillust_16": "specialillust5-2",
+    "sepcialillust_19": "specialillust2",
+    "sepcialillust_20": "specialillust4",
+    "sepcialillust_21": "specialillust9",
+    "sepcialillust_22": "specialillust10",
+    "sepcialillust_23": "specialillust7",
+    "sepcialillust_24": "specialillust6",
+    "sepcialillust_25": "specialillust8",
+    "sepcialillust_26_1": "specialillust4-1",
+    "sepcialillust_26_2": "specialillust4-2",
+    "sepcialillust_26_3": "specialillust4-3",
+    "sepcialillust_26_4": "specialillust4-4",
+    "sepcialillust_27": "specialillust14",
+    "sepcialillust_28": "specialillust14-1",
+    "sepcialillust_29": "specialillust15",
+    "sepcialillust_30": "specialillust16",
+    "sepcialillust_31_1": "specialillust17",
+    "sepcialillust_31_3": "specialillust17-1",
+    "sepcialillust_32_1": "specialillust17-2",
+    "sepcialillust_32_2": "specialillust17-3",
+    "sepcialillust_33": "specialillust18",
+    "sepcialillust_34": "specialillust19",
+    "sepcialillust_34_1": "specialillust19-1",
+    "sepcialillust_35_1": "specialillust20",
+    "sepcialillust_35_2": "specialillust20-1",
+    "sepcialillust_35_3": "specialillust20-2",
+    "sepcialillust_36_4": "specialillust21-1",
+    "sepcialillust_37": "specialillust22-3",
+    "sepcialillust_37_1": "specialillust22-5",
+    "sepcialillust_37_2": "specialillust22-1",
+    "sepcialillust_37_6": "specialillust22-4",
+    "sepcialillust_38": "specialillust23",
+    "sepcialillust_39": "specialillust24",
+    "sepcialillust_40": "specialillust25",
+    "sepcialillust_40_2": "specialillust25-1",
+    "sepcialillust_41": "specialillust41",
+    "sepcialillust_41_1": "specialillust41-1",
+    "sepcialillust_42": "specialillust42",
+    "sepcialillust_42_2": "specialillust42-1",
+    "sepcialillust_42_3": "specialillust42-2",
+    "sepcialillust_42_5": "specialillust42-5",
+    "sepcialillust_42_6": "specialillust42-4",
+    "sepcialillust_43": "specialillust43",
+    "sepcialillust_43_1": "specialillust43-1",
+    "sepcialillust_43_2": "specialillust43-2",
+    "sepcialillust_43_3": "specialillust43-3",
+    "sepcialillust_44": "specialillust51",
+    "sepcialillust_45": "specialillust52",
+    "sepcialillust_45-1": "specialillust52-1",
+    "specialillust_46": "specialillust64",
+    "sepcialillust_50-1": "specialillust60",
+    "sepcialillust_95": "specialillust33",
+    "sepcialillust_95-2": "specialillust34",
+    "sepcialillust_95-3": "specialillust35",
+    "sepcialillust_98": "specialillust26-1",
+    "sepcialillust_98_1": "specialillust26",
+    "sepcialillust_99_1": "specialillust28",
+    "sepcialillust_99_2": "specialillust31-1",
+    "sepcialillust_99_3": "specialillust30",
+    "sepcialillust_99_4": "specialillust40",
+    "sepcialillust_99_5": "specialillust31",
+    "sepcialillust_99_6": "specialillust29",
+    "sepcialillust_100": "specialillust44-4",
+    "sepcialillust_100_1": "specialillust44-2",
+    "sepcialillust_100_2": "specialillust44-3",
+    "sepcialillust_100_3": "specialillust44",
+    "sepcialillust_100_4": "specialillust44-1",
+    "sepcialillust_101": "specialillust45",
+    "sepcialillust_102": "specialillust46",
+    "sepcialillust_103": "specialillust47",
+    "sepcialillust_103_1": "specialillust48",
+    "sepcialillust_104": "specialillust50",
+    "sepcialillust_105": "specialillust53",
+    "sepcialillust_105_1": "specialillust53-1",
+    "sepcialillust_105_2": "specialillust53-2",
+    "sepcialillust_105_3": "specialillust53-3",
+    "sepcialillust_105_4": "specialillust53-4",
+    "sepcialillust_105_5": "specialillust53-5",
+    "sepcialillust_105_6": "specialillust53-6",
+    "sepcialillust_106": "specialillust54",
+    "sepcialillust_106_1": "specialillust56",
+    "sepcialillust_106_3": "specialillust54-1",
+    "sepcialillust_107_1": "specialillust57",
+    "sepcialillust_107_2": "specialillust58",
+    "sepcialillust_108": "specialillust61",
+    "sepcialillust_108 1": "specialillust62",
+    "sepcialillust_109": "specialillust63",
+}
+SPECIAL_ILLUST_ASSET_TO_ADDRESS = {v: k for k, v in SPECIAL_ILLUST_ADDRESS_TO_ASSET.items()}
 
 
 def _is_ignored(file_name):
@@ -58,12 +157,18 @@ def _basename(file_name):
 
 
 def lookup_stems(file_name):
-    """Mod file name -> ordered lookup stems (exact first, variant stripped next)."""
+    """Mod file name -> ordered lookup stems (exact first, variant/alias next)."""
     base = _basename(file_name)
     if not base:
         return []
     stem = asset_stem(base)
     stems = [stem]
+    mapped_asset = SPECIAL_ILLUST_ADDRESS_TO_ASSET.get(stem)
+    if mapped_asset:
+        stems.append(mapped_asset)
+    mapped_addr = SPECIAL_ILLUST_ASSET_TO_ADDRESS.get(stem)
+    if mapped_addr:
+        stems.append(mapped_addr)
     base_variant = variant_stem(stem)
     if base_variant and base_variant != stem:
         stems.append(base_variant)

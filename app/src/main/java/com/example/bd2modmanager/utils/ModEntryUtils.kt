@@ -9,6 +9,7 @@ object ModEntryUtils {
         "thumbs.db",
         "desktop.ini",
         ".modfile",
+        ".nomedia",
         "mod.json",
         "info.json",
         "manifest.json",

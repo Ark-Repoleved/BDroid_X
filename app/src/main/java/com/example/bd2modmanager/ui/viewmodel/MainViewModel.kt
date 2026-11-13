@@ -20,7 +20,9 @@ import com.example.bd2modmanager.data.repository.CharacterRepository
 import com.example.bd2modmanager.data.repository.ModRepository
 import com.example.bd2modmanager.service.ModdingService
 import com.example.bd2modmanager.service.ShizukuManager
+import com.example.bd2modmanager.utils.LogExporter
 import com.example.bd2modmanager.utils.ModEntryUtils
+import com.example.bd2modmanager.utils.SafMediaExclusion
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -134,6 +136,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private var initialized = false
     private var scanJob: Job? = null
     private var pendingScanUri: Uri? = null
+    private val mediaExclusionCheckedUris = mutableSetOf<String>()
 
     fun initialize(context: Context) {
         if (initialized) return
@@ -195,7 +198,47 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             } catch (e: SecurityException) {
                 Log.w("MainViewModel", "Persistable URI permission skipped: ${e.message}")
             }
+            val appCtx = context.applicationContext
+            viewModelScope.launch(Dispatchers.IO) {
+                ensureMediaExclusionForUri(appCtx, uri, showNotice = true)
+            }
             scanModSourceDirectory(uri)
+        }
+    }
+
+    private suspend fun ensureMediaExclusionForUri(context: Context, uri: Uri, showNotice: Boolean) {
+        val key = uri.toString()
+        if (!showNotice && key in mediaExclusionCheckedUris) return
+        mediaExclusionCheckedUris.add(key)
+        val result = SafMediaExclusion.ensureMarker(context, uri)
+        val msg = SafMediaExclusion.message(result)
+        if (msg != null) {
+            Log.w("MainViewModel", "Media exclusion notice for $key: $msg")
+            if (showNotice) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    fun exportDiagnosticLogs(context: Context) {
+        val appCtx = context.applicationContext
+        viewModelScope.launch {
+            val sharedUri = withContext(Dispatchers.IO) {
+                val collected = LogExporter.collect(appCtx)
+                try {
+                    LogExporter.exportAndPrepareShareUri(appCtx, collected)
+                } finally {
+                    collected.delete()
+                }
+            }
+            if (sharedUri != null) {
+                Toast.makeText(appCtx, "Diagnostic log exported.", Toast.LENGTH_SHORT).show()
+                LogExporter.share(appCtx, sharedUri)
+            } else {
+                Toast.makeText(appCtx, "Failed to export diagnostic log.", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -789,6 +832,9 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
                 isUpdatingCharacters.first { !it } // Wait for character data to be ready
                 try {
+                    appContext?.let { ctx ->
+                        ensureMediaExclusionForUri(ctx, currentUri, showNotice = false)
+                    }
                     val mods = modRepository.scanMods(currentUri)
                     withContext(Dispatchers.Main) {
                         _modsList.value = mods
