@@ -1,7 +1,6 @@
 package com.example.bd2modmanager.ui.screens
 
 import android.net.Uri
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -215,7 +214,7 @@ fun CharacterScreen(
                     )
                 }
 
-                AnimatedVisibility(
+                androidx.compose.animation.AnimatedVisibility(
                     visible = draggingLetter != null,
                     enter = fadeIn(tween(120)) + scaleIn(initialScale = 0.85f, animationSpec = tween(120)),
                     exit = fadeOut(tween(180)) + scaleOut(targetScale = 0.85f, animationSpec = tween(180))
