@@ -107,7 +107,7 @@ fun ModScreen(
                     )
                 }
 
-                AnimatedVisibility(visible = selectedMods.isNotEmpty()) {
+                AnimatedVisibility(visible = !isInstallRunning && selectedMods.isNotEmpty()) {
                     Box {
                         ExtendedFloatingActionButton(
                             onClick = { qualityExpanded = true },
@@ -133,8 +133,9 @@ fun ModScreen(
                     }
                 }
 
-                val canMergeSelected = remember(selectedMods, allModsList) {
-                    selectedMods.size == 1 &&
+                val canMergeSelected = remember(selectedMods, allModsList, isInstallRunning) {
+                    !isInstallRunning &&
+                        selectedMods.size == 1 &&
                         allModsList.find { it.uri == selectedMods.first() }?.isDirectory == true
                 }
                 AnimatedVisibility(visible = canMergeSelected) {
@@ -144,14 +145,14 @@ fun ModScreen(
                         text = { Text("Merge Spine") }
                     )
                 }
-                AnimatedVisibility(visible = modSourceDirectoryUri != null && selectedMods.isEmpty()) {
+                AnimatedVisibility(visible = !isInstallRunning && modSourceDirectoryUri != null && selectedMods.isEmpty()) {
                     FloatingActionButton(
                         onClick = onUnpackRequest,
                     ) {
                         Icon(Icons.Default.Unarchive, contentDescription = "Unpack Bundle")
                     }
                 }
-                AnimatedVisibility(visible = selectedMods.isNotEmpty()) {
+                AnimatedVisibility(visible = !isInstallRunning && selectedMods.isNotEmpty()) {
                     ExtendedFloatingActionButton(
                         onClick = { viewModel.initiateBatchRepack(context) },
                         icon = { Icon(Icons.Default.Done, contentDescription = "Repack") },

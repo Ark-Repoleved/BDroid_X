@@ -487,6 +487,14 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         appContext?.let { checkRecoveryJournal(it) }
     }
 
+    fun cancelInstall() {
+        val ctx = appContext ?: return
+        InstallService.cancelCurrent(ctx)
+        _showInstallDialog.value = false
+        _recoveryNotices.value = emptyList()
+        Toast.makeText(ctx, "Cancelling repack...", Toast.LENGTH_SHORT).show()
+    }
+
     fun moveFilesToGame() {
         val ctx = appContext ?: return
         InstallService.startMove(ctx)

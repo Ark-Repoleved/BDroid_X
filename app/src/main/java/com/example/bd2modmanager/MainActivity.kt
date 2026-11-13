@@ -136,6 +136,7 @@ class MainActivity : ComponentActivity() {
                         finalResult = finalResult,
                         moveState = moveState,
                         onMoveToGame = { viewModel.moveFilesToGame() },
+                        onCancel = { viewModel.cancelInstall() },
                         onDismiss = { viewModel.closeInstallDialog() }
                     )
                 }

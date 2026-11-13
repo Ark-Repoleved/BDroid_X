@@ -10,7 +10,7 @@ enum class ResolutionState {
 
 enum class ModCategory(val label: String) {
     CUTSCENE("Cutscene"),
-    ILLUST("Idle / Illust"),
+    ILLUST("Idle"),
     DATING("Dating Sim"),
     OTHER("Other")
 }

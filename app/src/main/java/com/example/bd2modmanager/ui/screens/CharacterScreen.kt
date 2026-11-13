@@ -244,7 +244,7 @@ private fun CharacterRow(
 private fun CategoryBadge(category: ModCategory, count: Int) {
     val short = when (category) {
         ModCategory.CUTSCENE -> "Cut"
-        ModCategory.ILLUST -> "Illust"
+        ModCategory.ILLUST -> "Idle"
         ModCategory.DATING -> "Date"
         ModCategory.OTHER -> "Other"
     }

@@ -123,6 +123,7 @@ fun ParallelInstallDialog(
     finalResult: FinalInstallResult?,
     moveState: MoveState,
     onMoveToGame: () -> Unit,
+    onCancel: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val clipboardManager = LocalClipboardManager.current
@@ -130,26 +131,29 @@ fun ParallelInstallDialog(
 
     AlertDialog(
         onDismissRequest = { onDismiss() },
-        modifier = Modifier
-            .fillMaxHeight(0.8f)
-            .fillMaxWidth(0.95f),
+        modifier = Modifier.fillMaxWidth(0.95f),
         title = {
             Text(if (finalResult == null) "Processing Mods" else "Batch Repack Complete")
         },
         text = {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Box(modifier = Modifier.weight(1f)) {
-                    if (finalResult == null) {
-                        LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            items(installJobs, key = { it.job.hashedName }) { installJob ->
-                                InstallJobRow(installJob)
-                            }
-                        }
-                    } else {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.verticalScroll(rememberScrollState())
-                        ) {
+            if (finalResult == null) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                ) {
+                    items(installJobs, key = { it.job.hashedName }) { installJob ->
+                        InstallJobRow(installJob)
+                    }
+                }
+            } else {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 460.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
                             Text("Summary: ${finalResult.successfulJobs} succeeded, ${finalResult.failedJobs} failed.", style = MaterialTheme.typography.titleMedium)
                             
                             // 顯示總耗時
@@ -274,24 +278,25 @@ fun ParallelInstallDialog(
                                 }
                             }
                         }
-                    }
-                }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 16.dp),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    if (finalResult != null) {
-                        Button(onClick = onDismiss) { Text("OK") }
-                    } else {
-                        TextButton(onClick = onDismiss) { Text("Run in Background") }
-                    }
-                }
             }
         },
-        confirmButton = {}
+        confirmButton = {
+            if (finalResult != null) {
+                Button(onClick = onDismiss) { Text("OK") }
+            } else {
+                TextButton(onClick = onDismiss) { Text("Run in Background") }
+            }
+        },
+        dismissButton = if (finalResult == null) {
+            {
+                TextButton(
+                    onClick = onCancel,
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Cancel")
+                }
+            }
+        } else null
     )
 }
 

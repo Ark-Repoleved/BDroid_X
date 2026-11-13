@@ -27,6 +27,7 @@ import com.example.bd2modmanager.data.model.JobStatus
 import com.example.bd2modmanager.data.model.MoveState
 import com.example.bd2modmanager.data.model.RepackJob
 import com.example.bd2modmanager.utils.ModEntryUtils
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,6 +36,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -76,6 +78,12 @@ class InstallService : Service() {
         @Volatile
         private var pendingRepackRequest: RepackRequest? = null
 
+        @Volatile
+        private var activeInstance: InstallService? = null
+
+        @Volatile
+        private var cancelRequested: Boolean = false
+
         private val _installJobs = MutableStateFlow<List<InstallJob>>(emptyList())
         val installJobs: StateFlow<List<InstallJob>> = _installJobs.asStateFlow()
 
@@ -99,6 +107,7 @@ class InstallService : Service() {
             useAstc: Boolean
         ): Boolean {
             if (_isRunning.value) return false
+            cancelRequested = false
             val opId = "op-${UUID.randomUUID().toString().take(8)}"
             currentOperationId = opId
             pendingRepackRequest = RepackRequest(opId, jobs, quality, useAstc)
@@ -117,6 +126,29 @@ class InstallService : Service() {
                 _installJobs.value = emptyList()
                 Log.w(TAG, "Foreground service start rejected for repack: ${e.message}")
                 false
+            }
+        }
+
+        fun cancelCurrent(context: Context) {
+            cancelRequested = true
+            pendingRepackRequest = null
+            val instance = activeInstance
+            val activeWorker = instance?.worker
+            if (activeWorker != null && activeWorker.isActive) {
+                activeWorker.cancel()
+                instance.getSystemService(NotificationManager::class.java)?.notify(
+                    NOTIFICATION_ID,
+                    instance.buildNotification("Cancelling...", 0, 0, "Stopping repack task...")
+                )
+            } else {
+                _installJobs.value = emptyList()
+                _finalResult.value = null
+                _moveState.value = MoveState.Idle
+                _isRunning.value = false
+                cancelRequested = false
+                runCatching {
+                    OperationJournalStore(File(context.filesDir, OperationJournalStore.JOURNAL_FILENAME)).clear()
+                }
             }
         }
 
@@ -158,6 +190,7 @@ class InstallService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        activeInstance = this
         createChannel()
     }
 
@@ -270,6 +303,12 @@ class InstallService : Service() {
                 failedJobDetails = failedDetails,
                 shizukuAvailable = shizukuAvailable
             )
+        } catch (e: CancellationException) {
+            Log.i(TAG, "Batch repack cancelled by user")
+            journal.clear()
+            _installJobs.value = emptyList()
+            _finalResult.value = null
+            _moveState.value = MoveState.Idle
         } catch (e: Exception) {
             Log.e(TAG, "Batch repack execution failed", e)
             journal.clear()
@@ -282,6 +321,7 @@ class InstallService : Service() {
                 shizukuAvailable = ShizukuManager.isRunning()
             )
         } finally {
+            cancelRequested = false
             _isRunning.value = false
             stopForegroundCompat()
             stopSelf()
@@ -352,6 +392,8 @@ class InstallService : Service() {
         }
 
         try {
+            if (cancelRequested) throw CancellationException("Cancelled")
+            coroutineScope { ensureActive() }
             updateJobStatus(hashedName, JobStatus.Installing("Extracting mod files..."), totalJobs, "Extracting $hashedName...")
             if (modAssetsDir.exists()) modAssetsDir.deleteRecursively()
             modAssetsDir.mkdirs()
@@ -395,6 +437,8 @@ class InstallService : Service() {
             val bundleCacheDir = File(cacheDir, "bundle_cache").apply { mkdirs() }
 
             for ((index, candidate) in candidates.withIndex()) {
+                if (cancelRequested) throw CancellationException("Cancelled")
+                coroutineScope { ensureActive() }
                 updateJobStatus(
                     hashedName,
                     JobStatus.Downloading(
@@ -411,6 +455,7 @@ class InstallService : Service() {
                     filesDir.absolutePath
                 ) { progress -> updateProgressThrottled({ JobStatus.Downloading(it) }, progress) }
 
+                if (cancelRequested) throw CancellationException("Cancelled")
                 if (!downloadSuccess) {
                     candidateErrors.add("$candidate: $messageOrPath")
                     continue
@@ -425,6 +470,7 @@ class InstallService : Service() {
                 repackedFiles.add(repackedFile)
 
                 val (repackSuccess, repackMessage, unmatched) = repackSemaphore.withPermit {
+                    if (cancelRequested) throw CancellationException("Cancelled")
                     updateJobStatus(hashedName, JobStatus.Installing("Repacking bundle..."), totalJobs, "Repacking $candidate...")
                     ModdingService.repackBundle(
                         originalDataCache.absolutePath,
@@ -433,6 +479,8 @@ class InstallService : Service() {
                         useAstc
                     ) { progress -> updateProgressThrottled({ JobStatus.Installing(it) }, progress) }
                 }
+
+                if (cancelRequested) throw CancellationException("Cancelled")
 
                 lastMessage = repackMessage
                 if (repackSuccess) {
@@ -463,12 +511,15 @@ class InstallService : Service() {
                 "Finished with warning: $bestUnmatchedCount file(s) did not match this bundle."
             } else null
 
+            if (cancelRequested) throw CancellationException("Cancelled")
             val publicUri = saveFileToDownloads(repackedOutput, repoPath, "Shared")
             if (publicUri != null) {
                 updateJobStatus(hashedName, JobStatus.Finished(repoPath, warningMessage), totalJobs, "Completed $hashedName")
             } else {
                 throw Exception("Failed to save repacked file to Downloads/Shared.")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             val fullErrorMessage = e.message ?: "An unknown error occurred."
             val displayError = when {
@@ -577,6 +628,7 @@ class InstallService : Service() {
     }
 
     override fun onDestroy() {
+        if (activeInstance === this) activeInstance = null
         stopForegroundCompat()
         scope.cancel()
         super.onDestroy()
