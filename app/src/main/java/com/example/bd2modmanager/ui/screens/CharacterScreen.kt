@@ -92,17 +92,13 @@ fun CharacterScreen(
         }
     }
 
-    val shown = remember(filteredByChip, searchQuery, meta) {
+    val shown = remember(filteredByChip, searchQuery) {
         if (searchQuery.isBlank()) {
             filteredByChip
         } else {
             val keywords = searchQuery.split(" ").filter { it.isNotBlank() }
             filteredByChip.filter { entry ->
-                val cn = meta.forCharacter(entry.name)?.nameCn.orEmpty()
-                keywords.all { kw ->
-                    entry.name.contains(kw, ignoreCase = true) ||
-                        cn.contains(kw, ignoreCase = true)
-                }
+                keywords.all { kw -> entry.name.contains(kw, ignoreCase = true) }
             }
         }
     }
@@ -150,7 +146,7 @@ fun CharacterScreen(
                 Row(Modifier.fillMaxSize()) {
                     LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
                         items(playable, key = { "playable:${it.name}" }) { entry ->
-                            CharacterRow(entry = entry, meta = meta, onClick = { onPickCharacter(entry.name) })
+                            CharacterRow(entry = entry, onClick = { onPickCharacter(entry.name) })
                             HorizontalDivider()
                         }
                         if (npc.isNotEmpty()) {
@@ -163,7 +159,7 @@ fun CharacterScreen(
                                 )
                             }
                             items(npc, key = { "npc:${it.name}" }) { entry ->
-                                CharacterRow(entry = entry, meta = meta, onClick = { onPickCharacter(entry.name) })
+                                CharacterRow(entry = entry, onClick = { onPickCharacter(entry.name) })
                                 HorizontalDivider()
                             }
                         }
@@ -229,11 +225,8 @@ private fun initialOf(name: String): Char {
 @Composable
 private fun CharacterRow(
     entry: CharacterEntry,
-    meta: CharacterMetaRepository,
     onClick: () -> Unit
 ) {
-    val nameCn = remember(entry.name) { meta.forCharacter(entry.name)?.nameCn.orEmpty() }
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -246,26 +239,14 @@ private fun CharacterRow(
         Spacer(Modifier.width(14.dp))
 
         Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    entry.name,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (entry.hasMods) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (entry.hasMods) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (nameCn.isNotBlank()) {
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        nameCn,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
+            Text(
+                entry.name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (entry.hasMods) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (entry.hasMods) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
             if (entry.hasMods) {
                 Spacer(Modifier.height(3.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

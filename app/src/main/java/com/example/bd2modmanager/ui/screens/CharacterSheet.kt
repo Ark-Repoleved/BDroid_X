@@ -32,7 +32,6 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -41,7 +40,6 @@ import com.example.bd2modmanager.data.model.ModCategory
 import com.example.bd2modmanager.data.model.ModInfo
 import com.example.bd2modmanager.data.model.ResolutionState
 import com.example.bd2modmanager.data.model.categoryOf
-import com.example.bd2modmanager.data.repository.CharacterMetaRepository
 import com.example.bd2modmanager.ui.components.CharacterAvatar
 import com.example.bd2modmanager.ui.components.SkinThumbnail
 
@@ -56,9 +54,6 @@ fun CharacterSheet(
     onUninstallBundle: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val context = LocalContext.current
-    val meta = remember(context) { CharacterMetaRepository.getInstance(context) }
-
     val entries = remember(characterName, mods) {
         mods.filter {
             it.character.trim() == characterName && it.resolutionState == ResolutionState.KNOWN
@@ -69,7 +64,6 @@ fun CharacterSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
-        val nameCn = remember(characterName) { meta.forCharacter(characterName)?.nameCn.orEmpty() }
         val selected = remember(characterName) { mutableStateListOf<String>() }
         val chosen = remember(entries, selected.size) {
             entries.filter { it.uri.toString() in selected }
@@ -89,20 +83,12 @@ fun CharacterSheet(
             ) {
                 CharacterAvatar(characterName = characterName, size = 44.dp, cornerRadius = 10.dp)
                 Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        characterName,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    if (nameCn.isNotBlank()) {
-                        Text(
-                            nameCn,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                Text(
+                    characterName,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
                 if (entries.isNotEmpty()) {
                     Text(
                         "${entries.size} mod(s)",
@@ -188,7 +174,6 @@ fun CharacterSheet(
                             val key = mod.uri.toString()
                             CharacterSkinRow(
                                 mod = mod,
-                                meta = meta,
                                 checked = key in selected,
                                 onCheckedChange = { on ->
                                     if (on) {
@@ -220,7 +205,6 @@ fun CharacterSheet(
 @Composable
 private fun CharacterSkinRow(
     mod: ModInfo,
-    meta: CharacterMetaRepository,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     onPreview: () -> Unit,
@@ -228,9 +212,6 @@ private fun CharacterSkinRow(
     onUninstall: () -> Unit
 ) {
     val fileId = mod.resolvedFamilyKey
-    val costumeCn = remember(fileId) {
-        (meta.forFileId(fileId) ?: meta.forDatingId(fileId))?.costumeCn.orEmpty()
-    }
     val title = mod.costume.trim().ifBlank { mod.name }
 
     Row(
@@ -247,7 +228,7 @@ private fun CharacterSkinRow(
 
         Column(Modifier.weight(1f)) {
             Text(
-                if (costumeCn.isBlank()) title else "$title  $costumeCn",
+                title,
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
