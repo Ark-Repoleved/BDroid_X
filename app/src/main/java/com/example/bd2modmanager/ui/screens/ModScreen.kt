@@ -70,7 +70,6 @@ fun ModScreen(
     val avatarSyncState by viewModel.avatarSyncState.collectAsState()
     val recoveryNotices by viewModel.recoveryNotices.collectAsState()
     val isInstallRunning by viewModel.isInstallServiceRunning.collectAsState()
-    val betaChannel by updateViewModel.betaChannel.collectAsState()
     val updateChecking by updateViewModel.updateChecking.collectAsState()
 
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
@@ -346,18 +345,6 @@ fun ModScreen(
                                         onClick = {
                                             menuExpanded = false
                                             updateViewModel.checkForUpdates(auto = false)
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Beta Update Channel") },
-                                        leadingIcon = {
-                                            Icon(
-                                                if (betaChannel) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
-                                                contentDescription = null
-                                            )
-                                        },
-                                        onClick = {
-                                            updateViewModel.setBetaChannel(!betaChannel)
                                         }
                                     )
                                     HorizontalDivider()

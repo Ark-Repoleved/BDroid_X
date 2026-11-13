@@ -25,6 +25,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.bd2modmanager.data.model.*
 import com.example.bd2modmanager.ui.components.InstallJobRow
 import com.example.bd2modmanager.ui.components.SelectionRow
@@ -129,31 +131,44 @@ fun ParallelInstallDialog(
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = { onDismiss() },
-        modifier = Modifier.fillMaxWidth(0.95f),
-        title = {
-            Text(if (finalResult == null) "Processing Mods" else "Batch Repack Complete")
-        },
-        text = {
-            if (finalResult == null) {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 420.dp)
-                ) {
-                    items(installJobs, key = { it.job.hashedName }) { installJob ->
-                        InstallJobRow(installJob)
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = AlertDialogDefaults.shape,
+            color = AlertDialogDefaults.containerColor,
+            tonalElevation = AlertDialogDefaults.TonalElevation,
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .padding(vertical = 24.dp)
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
+                Text(
+                    text = if (finalResult == null) "Processing Mods" else "Batch Repack Complete",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = AlertDialogDefaults.titleContentColor
+                )
+                Spacer(Modifier.height(12.dp))
+
+                if (finalResult == null) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 460.dp)
+                    ) {
+                        items(installJobs, key = { it.job.hashedName }) { installJob ->
+                            InstallJobRow(installJob)
+                        }
                     }
-                }
-            } else {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 460.dp)
-                        .verticalScroll(rememberScrollState())
-                ) {
+                } else {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 460.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
                             Text("Summary: ${finalResult.successfulJobs} succeeded, ${finalResult.failedJobs} failed.", style = MaterialTheme.typography.titleMedium)
                             
                             // 顯示總耗時
@@ -278,26 +293,32 @@ fun ParallelInstallDialog(
                                 }
                             }
                         }
-            }
-        },
-        confirmButton = {
-            if (finalResult != null) {
-                Button(onClick = onDismiss) { Text("OK") }
-            } else {
-                TextButton(onClick = onDismiss) { Text("Run in Background") }
-            }
-        },
-        dismissButton = if (finalResult == null) {
-            {
-                TextButton(
-                    onClick = onCancel,
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Cancel")
+                    if (finalResult != null) {
+                        Button(onClick = onDismiss) { Text("OK") }
+                    } else {
+                        TextButton(
+                            onClick = onCancel,
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("Cancel")
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Button(onClick = onDismiss) {
+                            Text("Run in Background")
+                        }
+                    }
                 }
             }
-        } else null
-    )
+        }
+    }
 }
 
 @Composable

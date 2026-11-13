@@ -29,14 +29,6 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
     private val _updateChecking = MutableStateFlow(false)
     val updateChecking: StateFlow<Boolean> = _updateChecking.asStateFlow()
 
-    private val _betaChannel = MutableStateFlow(repository.isBetaChannelEnabled())
-    val betaChannel: StateFlow<Boolean> = _betaChannel.asStateFlow()
-
-    fun setBetaChannel(enabled: Boolean) {
-        repository.setBetaChannelEnabled(enabled)
-        _betaChannel.value = enabled
-    }
-
     fun checkForUpdates(auto: Boolean = false) {
         if (_updateChecking.value) return
         _updateChecking.value = true

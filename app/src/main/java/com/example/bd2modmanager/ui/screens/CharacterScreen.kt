@@ -3,19 +3,24 @@ package com.example.bd2modmanager.ui.screens
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -23,11 +28,19 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -39,6 +52,7 @@ import com.example.bd2modmanager.data.model.ResolutionState
 import com.example.bd2modmanager.data.model.categoryOf
 import com.example.bd2modmanager.data.model.isUnknownCharacter
 import com.example.bd2modmanager.ui.components.CharacterAvatar
+import kotlinx.coroutines.launch
 
 data class CharacterEntry(
     val name: String,
@@ -93,42 +107,31 @@ fun CharacterScreen(
             }
         } else {
             val listState = rememberLazyListState()
+            val scope = rememberCoroutineScope()
             val playable = remember(shown) { shown.filterNot { it.isNpc } }
             val npc = remember(shown) { shown.filter { it.isNpc } }
+            val letters = remember(playable, npc) {
+                (playable + npc).map { initialOf(it.name) }.distinct()
+            }
+            val visibleInitial by remember(playable, npc) {
+                derivedStateOf {
+                    val idx = listState.firstVisibleItemIndex
+                    when {
+                        idx < playable.size -> initialOf(playable[idx].name)
+                        npc.isNotEmpty() -> {
+                            val npcIdx = (idx - playable.size - 1).coerceIn(0, npc.lastIndex)
+                            initialOf(npc[npcIdx].name)
+                        }
+                        else -> null
+                    }
+                }
+            }
+            var draggingLetter by remember { mutableStateOf<Char?>(null) }
 
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-                    items(playable, key = { "playable:${it.name}" }) { entry ->
-                        val knownUris = remember(entry.name, modsByCharacter) {
-                            modsByCharacter[entry.name].orEmpty()
-                                .filter { it.resolutionState == ResolutionState.KNOWN }
-                                .map { it.uri }
-                                .toSet()
-                        }
-                        val selectedCount = knownUris.count { it in selectedMods }
-                        val checkboxState = when {
-                            selectedCount == 0 -> ToggleableState.Off
-                            selectedCount == knownUris.size && knownUris.isNotEmpty() -> ToggleableState.On
-                            else -> ToggleableState.Indeterminate
-                        }
-                        CharacterRow(
-                            entry = entry,
-                            checkboxState = checkboxState,
-                            onToggleSelect = { onToggleSelectCharacter(entry.name) },
-                            onClick = { onPickCharacter(entry.name) }
-                        )
-                        HorizontalDivider()
-                    }
-                    if (npc.isNotEmpty()) {
-                        item(key = "npc-header") {
-                            Text(
-                                "NPC",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
-                            )
-                        }
-                        items(npc, key = { "npc:${it.name}" }) { entry ->
+                Row(Modifier.fillMaxSize()) {
+                    LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
+                        items(playable, key = { "playable:${it.name}" }) { entry ->
                             val knownUris = remember(entry.name, modsByCharacter) {
                                 modsByCharacter[entry.name].orEmpty()
                                     .filter { it.resolutionState == ResolutionState.KNOWN }
@@ -149,12 +152,157 @@ fun CharacterScreen(
                             )
                             HorizontalDivider()
                         }
+                        if (npc.isNotEmpty()) {
+                            item(key = "npc-header") {
+                                Text(
+                                    "NPC",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
+                                )
+                            }
+                            items(npc, key = { "npc:${it.name}" }) { entry ->
+                                val knownUris = remember(entry.name, modsByCharacter) {
+                                    modsByCharacter[entry.name].orEmpty()
+                                        .filter { it.resolutionState == ResolutionState.KNOWN }
+                                        .map { it.uri }
+                                        .toSet()
+                                }
+                                val selectedCount = knownUris.count { it in selectedMods }
+                                val checkboxState = when {
+                                    selectedCount == 0 -> ToggleableState.Off
+                                    selectedCount == knownUris.size && knownUris.isNotEmpty() -> ToggleableState.On
+                                    else -> ToggleableState.Indeterminate
+                                }
+                                CharacterRow(
+                                    entry = entry,
+                                    checkboxState = checkboxState,
+                                    onToggleSelect = { onToggleSelectCharacter(entry.name) },
+                                    onClick = { onPickCharacter(entry.name) }
+                                )
+                                HorizontalDivider()
+                            }
+                        }
+                    }
+
+                    AlphabetIndex(
+                        letters = letters,
+                        activeLetter = draggingLetter ?: visibleInitial,
+                        onPick = { letter ->
+                            draggingLetter = letter
+                            var target = playable.indexOfFirst { initialOf(it.name) == letter }
+                            if (target < 0) {
+                                val i = npc.indexOfFirst { initialOf(it.name) == letter }
+                                if (i >= 0) target = playable.size + 1 + i
+                            }
+                            if (target >= 0) {
+                                scope.launch { listState.scrollToItem(target) }
+                            }
+                        },
+                        onDragEnd = { draggingLetter = null }
+                    )
+                }
+
+                draggingLetter?.let { letter ->
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary,
+                        shadowElevation = 6.dp,
+                        modifier = Modifier.size(64.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = letter.toString(),
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
                     }
                 }
 
                 if (avatarSyncFailed) {
                     AvatarSyncHint(onRetry = onRetryAvatarSync)
                 }
+            }
+        }
+    }
+}
+
+private fun initialOf(name: String): Char {
+    val c = name.trim().firstOrNull() ?: '#'
+    return if (c.isLetter()) c.uppercaseChar() else '#'
+}
+
+@Composable
+private fun AlphabetIndex(
+    letters: List<Char>,
+    activeLetter: Char?,
+    onPick: (Char) -> Unit,
+    onDragEnd: () -> Unit
+) {
+    if (letters.size < 2) return
+    var height by remember { mutableIntStateOf(1) }
+    var lastPicked by remember { mutableStateOf<Char?>(null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(28.dp)
+            .padding(vertical = 8.dp)
+            .onSizeChanged { height = it.height.coerceAtLeast(1) }
+            .pointerInput(letters) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    fun pickAtY(y: Float) {
+                        val idx = ((y / height) * letters.size)
+                            .toInt()
+                            .coerceIn(0, letters.lastIndex)
+                        val ch = letters[idx]
+                        if (ch != lastPicked) {
+                            lastPicked = ch
+                            onPick(ch)
+                        }
+                    }
+                    pickAtY(down.position.y)
+                    down.consume()
+
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull() ?: break
+                        if (!change.pressed) {
+                            change.consume()
+                            break
+                        }
+                        pickAtY(change.position.y)
+                        change.consume()
+                    }
+                    lastPicked = null
+                    onDragEnd()
+                }
+            },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceEvenly
+    ) {
+        letters.forEach { ch ->
+            val isActive = ch == activeLetter
+            Box(
+                modifier = Modifier
+                    .size(20.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isActive) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.surface.copy(alpha = 0f)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    ch.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                    color = if (isActive) MaterialTheme.colorScheme.onPrimary
+                    else MaterialTheme.colorScheme.primary
+                )
             }
         }
     }
@@ -202,7 +350,7 @@ private fun CharacterRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
+            .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         CharacterAvatar(characterName = entry.name, size = 40.dp)

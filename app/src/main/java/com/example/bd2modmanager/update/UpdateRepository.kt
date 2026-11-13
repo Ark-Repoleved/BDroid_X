@@ -23,8 +23,6 @@ class UpdateRepository(private val appContext: Context) {
         private const val TAG = "UpdateRepository"
         private const val ENDPOINT_LATEST =
             "https://api.github.com/repos/Ark-Repoleved/BDroid_X/releases/latest"
-        private const val ENDPOINT_LIST =
-            "https://api.github.com/repos/Ark-Repoleved/BDroid_X/releases?per_page=10"
         private const val RELEASES_PAGE =
             "https://github.com/Ark-Repoleved/BDroid_X/releases"
         private const val UA = "Mozilla/5.0 (Linux; Android) BDroid_X"
@@ -32,7 +30,6 @@ class UpdateRepository(private val appContext: Context) {
         private const val KEY_DL_ID = "download_id"
         private const val KEY_DL_EXPECTED_BYTES = "download_expected_bytes"
         private const val KEY_DL_FILE_NAME = "download_file_name"
-        private const val KEY_BETA_CHANNEL = "beta_channel_enabled"
 
         fun compare(a: String, b: String): Int {
             val cleanA = a.trim().removePrefix("v").removePrefix("V").trim()
@@ -87,24 +84,8 @@ class UpdateRepository(private val appContext: Context) {
 
     fun isNewerThanInstalled(version: String): Boolean = compare(version, installedVersion()) > 0
 
-    fun isBetaChannelEnabled(): Boolean {
-        val current = installedVersion()
-        val defaultBeta = current.contains("-beta", ignoreCase = true) ||
-            current.contains("-preview", ignoreCase = true)
-        return dlPrefs().getBoolean(KEY_BETA_CHANNEL, defaultBeta)
-    }
-
-    fun setBetaChannelEnabled(enabled: Boolean) {
-        dlPrefs().edit().putBoolean(KEY_BETA_CHANNEL, enabled).apply()
-    }
-
-    suspend fun fetchLatest(includeBeta: Boolean = isBetaChannelEnabled()): Release? =
+    suspend fun fetchLatest(): Release? =
         withContext(Dispatchers.IO) {
-            if (includeBeta) {
-                val listBody = httpGet(ENDPOINT_LIST)
-                val newest = listBody?.let { parseReleaseList(it) }
-                if (newest != null) return@withContext newest
-            }
             val body = httpGet(ENDPOINT_LATEST) ?: return@withContext null
             parseRelease(body)
         }
