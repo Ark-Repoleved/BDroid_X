@@ -1,15 +1,13 @@
 package com.example.bd2modmanager.ui.screens
 
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,27 +16,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,9 +38,7 @@ import com.example.bd2modmanager.data.model.ModInfo
 import com.example.bd2modmanager.data.model.ResolutionState
 import com.example.bd2modmanager.data.model.categoryOf
 import com.example.bd2modmanager.data.model.isUnknownCharacter
-import com.example.bd2modmanager.data.repository.CharacterMetaRepository
 import com.example.bd2modmanager.ui.components.CharacterAvatar
-import kotlinx.coroutines.launch
 
 data class CharacterEntry(
     val name: String,
@@ -61,76 +49,43 @@ data class CharacterEntry(
     val hasMods: Boolean get() = total > 0
 }
 
-enum class CharacterFilter(val label: String) {
-    ALL("All"),
-    HAS_MODS("Has Mods"),
-    MALE("Male"),
-    FEMALE("Female"),
-    COLLAB("Collab")
-}
-
 @Composable
 fun CharacterScreen(
     entries: List<CharacterEntry>,
-    filter: CharacterFilter,
+    modsByCharacter: Map<String, List<ModInfo>>,
+    selectedMods: Set<Uri>,
     searchQuery: String,
-    onSelectFilter: (CharacterFilter) -> Unit,
+    onToggleSelectCharacter: (String) -> Unit,
     onPickCharacter: (String) -> Unit,
     avatarSyncFailed: Boolean = false,
     onRetryAvatarSync: () -> Unit = {}
 ) {
-    val context = LocalContext.current
-    val meta = remember(context) { CharacterMetaRepository.getInstance(context) }
+    val withMods = remember(entries) { entries.filter { it.hasMods } }
 
-    val filteredByChip = remember(entries, filter, meta) {
-        when (filter) {
-            CharacterFilter.HAS_MODS -> entries.filter { it.hasMods }
-            CharacterFilter.MALE -> entries.filter { meta.forCharacter(it.name)?.isMale == true }
-            CharacterFilter.FEMALE -> entries.filter { meta.forCharacter(it.name)?.isFemale == true }
-            CharacterFilter.COLLAB -> entries.filter { meta.forCharacter(it.name)?.isCollab == true }
-            CharacterFilter.ALL -> entries
-        }
-    }
-
-    val shown = remember(filteredByChip, searchQuery) {
+    val shown = remember(withMods, modsByCharacter, searchQuery) {
         if (searchQuery.isBlank()) {
-            filteredByChip
+            withMods
         } else {
             val keywords = searchQuery.split(" ").filter { it.isNotBlank() }
-            filteredByChip.filter { entry ->
-                keywords.all { kw -> entry.name.contains(kw, ignoreCase = true) }
+            withMods.filter { entry ->
+                val charMods = modsByCharacter[entry.name].orEmpty()
+                keywords.all { kw ->
+                    entry.name.contains(kw, ignoreCase = true) ||
+                        charMods.any {
+                            it.name.contains(kw, ignoreCase = true) ||
+                                it.costume.contains(kw, ignoreCase = true)
+                        }
+                }
             }
         }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            CharacterFilter.entries.forEach { f ->
-                FilterChip(
-                    selected = filter == f,
-                    onClick = { onSelectFilter(f) },
-                    label = { Text(f.label) }
-                )
-            }
-        }
-
         if (shown.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    when {
-                        searchQuery.isNotBlank() -> "No characters match \"$searchQuery\"."
-                        filter == CharacterFilter.HAS_MODS -> "No mods matched to characters yet."
-                        filter == CharacterFilter.MALE -> "No matching male characters."
-                        filter == CharacterFilter.FEMALE -> "No matching female characters."
-                        filter == CharacterFilter.COLLAB -> "No matching collab characters."
-                        else -> "Character table not loaded yet."
-                    },
+                    if (searchQuery.isNotBlank()) "No characters match \"$searchQuery\"."
+                    else "No mods matched to characters yet.",
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(24.dp)
@@ -138,44 +93,63 @@ fun CharacterScreen(
             }
         } else {
             val listState = rememberLazyListState()
-            val scope = rememberCoroutineScope()
             val playable = remember(shown) { shown.filterNot { it.isNpc } }
             val npc = remember(shown) { shown.filter { it.isNpc } }
 
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Row(Modifier.fillMaxSize()) {
-                    LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
-                        items(playable, key = { "playable:${it.name}" }) { entry ->
-                            CharacterRow(entry = entry, onClick = { onPickCharacter(entry.name) })
+                LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                    items(playable, key = { "playable:${it.name}" }) { entry ->
+                        val knownUris = remember(entry.name, modsByCharacter) {
+                            modsByCharacter[entry.name].orEmpty()
+                                .filter { it.resolutionState == ResolutionState.KNOWN }
+                                .map { it.uri }
+                                .toSet()
+                        }
+                        val selectedCount = knownUris.count { it in selectedMods }
+                        val checkboxState = when {
+                            selectedCount == 0 -> ToggleableState.Off
+                            selectedCount == knownUris.size && knownUris.isNotEmpty() -> ToggleableState.On
+                            else -> ToggleableState.Indeterminate
+                        }
+                        CharacterRow(
+                            entry = entry,
+                            checkboxState = checkboxState,
+                            onToggleSelect = { onToggleSelectCharacter(entry.name) },
+                            onClick = { onPickCharacter(entry.name) }
+                        )
+                        HorizontalDivider()
+                    }
+                    if (npc.isNotEmpty()) {
+                        item(key = "npc-header") {
+                            Text(
+                                "NPC",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
+                            )
+                        }
+                        items(npc, key = { "npc:${it.name}" }) { entry ->
+                            val knownUris = remember(entry.name, modsByCharacter) {
+                                modsByCharacter[entry.name].orEmpty()
+                                    .filter { it.resolutionState == ResolutionState.KNOWN }
+                                    .map { it.uri }
+                                    .toSet()
+                            }
+                            val selectedCount = knownUris.count { it in selectedMods }
+                            val checkboxState = when {
+                                selectedCount == 0 -> ToggleableState.Off
+                                selectedCount == knownUris.size && knownUris.isNotEmpty() -> ToggleableState.On
+                                else -> ToggleableState.Indeterminate
+                            }
+                            CharacterRow(
+                                entry = entry,
+                                checkboxState = checkboxState,
+                                onToggleSelect = { onToggleSelectCharacter(entry.name) },
+                                onClick = { onPickCharacter(entry.name) }
+                            )
                             HorizontalDivider()
                         }
-                        if (npc.isNotEmpty()) {
-                            item(key = "npc-header") {
-                                Text(
-                                    "NPC",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
-                                )
-                            }
-                            items(npc, key = { "npc:${it.name}" }) { entry ->
-                                CharacterRow(entry = entry, onClick = { onPickCharacter(entry.name) })
-                                HorizontalDivider()
-                            }
-                        }
                     }
-
-                    AlphabetIndex(
-                        letters = remember(shown) { shown.map { initialOf(it.name) }.distinct() },
-                        onPick = { letter ->
-                            var target = playable.indexOfFirst { initialOf(it.name) == letter }
-                            if (target < 0) {
-                                val i = npc.indexOfFirst { initialOf(it.name) == letter }
-                                if (i >= 0) target = playable.size + 1 + i
-                            }
-                            if (target >= 0) scope.launch { listState.animateScrollToItem(target) }
-                        }
-                    )
                 }
 
                 if (avatarSyncFailed) {
@@ -217,21 +191,18 @@ private fun AvatarSyncHint(onRetry: () -> Unit) {
     }
 }
 
-private fun initialOf(name: String): Char {
-    val c = name.trim().firstOrNull() ?: '#'
-    return if (c.isLetter()) c.uppercaseChar() else '#'
-}
-
 @Composable
 private fun CharacterRow(
     entry: CharacterEntry,
+    checkboxState: ToggleableState,
+    onToggleSelect: () -> Unit,
     onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         CharacterAvatar(characterName = entry.name, size = 40.dp)
@@ -242,30 +213,30 @@ private fun CharacterRow(
             Text(
                 entry.name,
                 style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (entry.hasMods) FontWeight.SemiBold else FontWeight.Normal,
-                color = if (entry.hasMods) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            if (entry.hasMods) {
-                Spacer(Modifier.height(3.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    ModCategory.entries.forEach { cat ->
-                        val n = entry.counts[cat] ?: 0
-                        if (n > 0) CategoryBadge(cat, n)
-                    }
+            Spacer(Modifier.height(3.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ModCategory.entries.forEach { cat ->
+                    val n = entry.counts[cat] ?: 0
+                    if (n > 0) CategoryBadge(cat, n)
                 }
             }
         }
 
-        if (entry.hasMods) {
-            Text(
-                "${entry.total}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold
-            )
-        }
+        Text(
+            "${entry.total}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(Modifier.width(4.dp))
+        TriStateCheckbox(
+            state = checkboxState,
+            onClick = onToggleSelect
+        )
     }
 }
 
@@ -287,37 +258,6 @@ private fun CategoryBadge(category: ModCategory, count: Int) {
             color = MaterialTheme.colorScheme.onSecondaryContainer,
             modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
         )
-    }
-}
-
-@Composable
-private fun AlphabetIndex(letters: List<Char>, onPick: (Char) -> Unit) {
-    if (letters.size < 2) return
-    var height by remember { mutableIntStateOf(1) }
-    Column(
-        modifier = Modifier
-            .fillMaxHeight()
-            .width(26.dp)
-            .padding(vertical = 6.dp)
-            .onSizeChanged { height = it.height.coerceAtLeast(1) }
-            .pointerInput(letters) {
-                detectVerticalDragGestures { change, _ ->
-                    val i = ((change.position.y / height) * letters.size)
-                        .toInt().coerceIn(0, letters.size - 1)
-                    onPick(letters[i])
-                }
-            },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceEvenly
-    ) {
-        letters.forEach { ch ->
-            Text(
-                ch.toString(),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.clickable { onPick(ch) }
-            )
-        }
     }
 }
 

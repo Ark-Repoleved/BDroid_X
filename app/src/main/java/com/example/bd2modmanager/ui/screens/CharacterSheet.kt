@@ -1,5 +1,6 @@
 package com.example.bd2modmanager.ui.screens
 
+import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -8,7 +9,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,7 +28,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +47,9 @@ import com.example.bd2modmanager.ui.components.SkinThumbnail
 fun CharacterSheet(
     characterName: String,
     mods: List<ModInfo>,
+    selectedMods: Set<Uri>,
+    onToggleModSelection: (Uri) -> Unit,
+    onSelectAllForCharacter: (Boolean) -> Unit,
     onPreview: (ModInfo) -> Unit,
     onRepackSingle: (ModInfo) -> Unit,
     onRepackBatch: (List<ModInfo>) -> Unit,
@@ -64,9 +66,8 @@ fun CharacterSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
-        val selected = remember(characterName) { mutableStateListOf<String>() }
-        val chosen = remember(entries, selected.size) {
-            entries.filter { it.uri.toString() in selected }
+        val chosen = remember(entries, selectedMods) {
+            entries.filter { it.uri in selectedMods }
         }
 
         Column(
@@ -118,7 +119,7 @@ fun CharacterSheet(
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { selected.clear() }) { Text("Clear") }
+                        TextButton(onClick = { onSelectAllForCharacter(false) }) { Text("Clear") }
                         Button(onClick = {
                             onRepackBatch(chosen)
                             onDismiss()
@@ -129,12 +130,7 @@ fun CharacterSheet(
                 }
             } else if (entries.size > 1) {
                 TextButton(
-                    onClick = {
-                        entries.forEach {
-                            val k = it.uri.toString()
-                            if (k !in selected) selected.add(k)
-                        }
-                    },
+                    onClick = { onSelectAllForCharacter(true) },
                     modifier = Modifier.padding(start = 12.dp)
                 ) {
                     Text("Select All (${entries.size})", style = MaterialTheme.typography.labelMedium)
@@ -171,17 +167,10 @@ fun CharacterSheet(
                         }
 
                         inCat.forEach { mod ->
-                            val key = mod.uri.toString()
                             CharacterSkinRow(
                                 mod = mod,
-                                checked = key in selected,
-                                onCheckedChange = { on ->
-                                    if (on) {
-                                        if (key !in selected) selected.add(key)
-                                    } else {
-                                        selected.remove(key)
-                                    }
-                                },
+                                checked = mod.uri in selectedMods,
+                                onCheckedChange = { onToggleModSelection(mod.uri) },
                                 onPreview = { onPreview(mod) },
                                 onRepack = {
                                     onRepackSingle(mod)

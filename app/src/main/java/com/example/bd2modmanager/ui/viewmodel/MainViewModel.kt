@@ -402,6 +402,39 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         }
     }
 
+    fun toggleSelectAllForCharacter(characterName: String) {
+        val modsForChar = filteredModsList.value
+            .filter {
+                it.character.trim() == characterName &&
+                    it.resolutionState == ResolutionState.KNOWN
+            }
+            .map { it.uri }
+            .toSet()
+        val currentSelections = _selectedMods.value
+        val charSelections = currentSelections.intersect(modsForChar)
+
+        _selectedMods.value = if (charSelections.size == modsForChar.size && modsForChar.isNotEmpty()) {
+            currentSelections - modsForChar
+        } else {
+            currentSelections + modsForChar
+        }
+    }
+
+    fun selectAllForCharacter(characterName: String, select: Boolean) {
+        val modsForChar = _modsList.value
+            .filter {
+                it.character.trim() == characterName &&
+                    it.resolutionState == ResolutionState.KNOWN
+            }
+            .map { it.uri }
+            .toSet()
+        _selectedMods.value = if (select) {
+            _selectedMods.value + modsForChar
+        } else {
+            _selectedMods.value - modsForChar
+        }
+    }
+
     fun initiateBatchRepack(context: Context) {
         val allMods = _modsList.value
         val selectedList = _selectedMods.value.mapNotNull { uri -> allMods.find { it.uri == uri } }

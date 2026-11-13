@@ -74,8 +74,8 @@ fun ModScreen(
     val updateChecking by updateViewModel.updateChecking.collectAsState()
 
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
-    var characterFilter by remember { mutableStateOf(CharacterFilter.ALL) }
     var pickedCharacter by remember { mutableStateOf<String?>(null) }
+    val modsByCharacter = remember(allModsList) { allModsList.groupBy { it.character.trim() } }
 
 
     val pullToRefreshState = rememberPullToRefreshState()
@@ -107,10 +107,7 @@ fun ModScreen(
                     )
                 }
 
-                AnimatedVisibility(
-                    visible = modSourceDirectoryUri != null &&
-                        (selectedTab == 0 || selectedMods.isNotEmpty())
-                ) {
+                AnimatedVisibility(visible = selectedMods.isNotEmpty()) {
                     Box {
                         ExtendedFloatingActionButton(
                             onClick = { qualityExpanded = true },
@@ -136,9 +133,8 @@ fun ModScreen(
                     }
                 }
 
-                val canMergeSelected = remember(selectedMods, allModsList, selectedTab) {
-                    selectedTab == 1 &&
-                        selectedMods.size == 1 &&
+                val canMergeSelected = remember(selectedMods, allModsList) {
+                    selectedMods.size == 1 &&
                         allModsList.find { it.uri == selectedMods.first() }?.isDirectory == true
                 }
                 AnimatedVisibility(visible = canMergeSelected) {
@@ -148,17 +144,14 @@ fun ModScreen(
                         text = { Text("Merge Spine") }
                     )
                 }
-                AnimatedVisibility(
-                    visible = modSourceDirectoryUri != null &&
-                        (selectedTab == 0 || selectedMods.isEmpty())
-                ) {
+                AnimatedVisibility(visible = modSourceDirectoryUri != null && selectedMods.isEmpty()) {
                     FloatingActionButton(
                         onClick = onUnpackRequest,
                     ) {
                         Icon(Icons.Default.Unarchive, contentDescription = "Unpack Bundle")
                     }
                 }
-                AnimatedVisibility(visible = selectedTab == 1 && selectedMods.isNotEmpty()) {
+                AnimatedVisibility(visible = selectedMods.isNotEmpty()) {
                     ExtendedFloatingActionButton(
                         onClick = { viewModel.initiateBatchRepack(context) },
                         icon = { Icon(Icons.Default.Done, contentDescription = "Repack") },
@@ -185,33 +178,31 @@ fun ModScreen(
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (selectedTab == 1) {
-                                Card(
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background)
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background)
+                            ) {
+                                Box(
+                                    modifier = Modifier.size(width = 48.dp, height = 40.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Box(
-                                        modifier = Modifier.size(width = 48.dp, height = 40.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        val allModsCount = allModsList.count {
-                                            it.resolutionState == ResolutionState.KNOWN
-                                        }
-                                        val selectedModsCount = selectedMods.size
-                                        val checkboxState = when {
-                                            selectedModsCount == 0 -> ToggleableState.Off
-                                            selectedModsCount == allModsCount && allModsCount > 0 -> ToggleableState.On
-                                            selectedModsCount > 0 -> ToggleableState.Indeterminate
-                                            else -> ToggleableState.Off
-                                        }
-                                        TriStateCheckbox(
-                                            state = checkboxState,
-                                            onClick = { viewModel.toggleSelectAll() }
-                                        )
+                                    val allModsCount = allModsList.count {
+                                        it.resolutionState == ResolutionState.KNOWN
                                     }
+                                    val selectedModsCount = selectedMods.size
+                                    val checkboxState = when {
+                                        selectedModsCount == 0 -> ToggleableState.Off
+                                        selectedModsCount == allModsCount && allModsCount > 0 -> ToggleableState.On
+                                        selectedModsCount > 0 -> ToggleableState.Indeterminate
+                                        else -> ToggleableState.Off
+                                    }
+                                    TriStateCheckbox(
+                                        state = checkboxState,
+                                        onClick = { viewModel.toggleSelectAll() }
+                                    )
                                 }
-                                Spacer(modifier = Modifier.width(8.dp))
                             }
+                            Spacer(modifier = Modifier.width(8.dp))
 
                             BoxWithConstraints(
                                 modifier = Modifier
@@ -413,9 +404,10 @@ fun ModScreen(
                         } else if (selectedTab == 0) {
                             CharacterScreen(
                                 entries = characterEntries,
-                                filter = characterFilter,
+                                modsByCharacter = modsByCharacter,
+                                selectedMods = selectedMods,
                                 searchQuery = searchQuery,
-                                onSelectFilter = { characterFilter = it },
+                                onToggleSelectCharacter = { viewModel.toggleSelectAllForCharacter(it) },
                                 onPickCharacter = { pickedCharacter = it },
                                 avatarSyncFailed = avatarSyncState == AvatarRepository.SyncState.FAILED,
                                 onRetryAvatarSync = { viewModel.retryAvatarSync(context) }
@@ -538,6 +530,9 @@ fun ModScreen(
                     CharacterSheet(
                         characterName = charName,
                         mods = allModsList,
+                        selectedMods = selectedMods,
+                        onToggleModSelection = { viewModel.toggleModSelection(it) },
+                        onSelectAllForCharacter = { select -> viewModel.selectAllForCharacter(charName, select) },
                         onPreview = { mod -> viewModel.prepareAndShowPreview(context, mod) },
                         onRepackSingle = { mod -> viewModel.initiateBatchRepackMods(context, listOf(mod)) },
                         onRepackBatch = { mods -> viewModel.initiateBatchRepackMods(context, mods) },
