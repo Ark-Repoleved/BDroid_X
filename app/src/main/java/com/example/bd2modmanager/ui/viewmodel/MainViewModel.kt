@@ -148,15 +148,31 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
         modRepository = ModRepository(context, characterRepository)
 
         viewModelScope.launch {
-            try {
-                _isUpdatingCharacters.value = true
-                // Refreshes characters.json and the catalog index (the single source
-                // of truth for mod resolution) for the current game version.
-                characterRepository.updateCharacterData(_selectedQuality.value)
-            } catch (e: Exception) {
-                Log.e("MainViewModel", "Error during initialization", e)
+            val hasLocalData = characterRepository.hasLocalCharactersJson() &&
+                characterRepository.hasLocalCatalogIndex(_selectedQuality.value)
+
+            if (hasLocalData) {
+                characterRepository.loadLocalCharacterData()
+                modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
+                try {
+                    val status = characterRepository.updateCharacterData(_selectedQuality.value)
+                    if (status == "SUCCESS") {
+                        modSourceDirectoryUri.value?.let { scanModSourceDirectory(it) }
+                    }
+                } catch (e: Exception) {
+                    Log.e("MainViewModel", "Background character/catalog update failed", e)
+                }
+            } else {
+                try {
+                    _isUpdatingCharacters.value = true
+                    // Refreshes characters.json and the catalog index (the single source
+                    // of truth for mod resolution) for the current game version.
+                    characterRepository.updateCharacterData(_selectedQuality.value)
+                } catch (e: Exception) {
+                    Log.e("MainViewModel", "Error during initialization", e)
+                }
+                finishInitialization()
             }
-            finishInitialization()
         }
 
         viewModelScope.launch {
@@ -371,13 +387,15 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             var lastMessage: String? = null
             val candidateErrors = mutableListOf<String>()
 
+            val bundleCacheDir = File(context.cacheDir, "bundle_cache").apply { mkdirs() }
+
             for ((index, candidate) in candidates.withIndex()) {
                 updateJobStatus(hashedName, JobStatus.Downloading(
                     if (index == 0) "Downloading bundle..."
                     else "Trying alternative bundle (${index + 1}/${candidates.size})..."
                 ))
                 val (downloadSuccess, messageOrPath) = ModdingService.downloadBundle(
-                    candidate, selectedQuality.value, context.cacheDir.absolutePath, cacheKey,
+                    candidate, selectedQuality.value, bundleCacheDir.absolutePath, cacheKey,
                     context.filesDir.absolutePath
                 ) { progress -> updateProgressThrottled({ JobStatus.Downloading(it) }, progress) }
 
@@ -386,7 +404,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     continue
                 }
                 originalDataCache = File(messageOrPath)
-                val relativePath = originalDataCache.relativeTo(context.cacheDir)
+                val relativePath = originalDataCache.relativeTo(bundleCacheDir)
 
                 updateJobStatus(hashedName, JobStatus.Installing("Waiting to repack..."))
                 val repackedFile = File(context.cacheDir, "repacked/${relativePath.path}")
@@ -418,11 +436,12 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     }
                 } else {
                     candidateErrors.add("$candidate: $repackMessage")
+                    // Evict possibly corrupt cached original bundle so retry fetches fresh
+                    try {
+                        originalDataCache.takeIf { it.exists() }?.delete()
+                    } catch (_: Exception) {}
                 }
 
-                try {
-                    originalDataCache.takeIf { it.exists() }?.delete()
-                } catch (_: Exception) {}
                 originalDataCache = null
             }
 
@@ -450,9 +469,6 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
             val fullError = e.message ?: "An unknown error occurred."
             updateJobStatus(hashedName, JobStatus.Failed(displayMessage = fullError, detailedLog = fullError))
         } finally {
-            try {
-                originalDataCache?.takeIf { it.exists() }?.delete()
-            } catch (_: Exception) {}
             repackedFiles.forEach { file ->
                 try {
                     if (file.exists()) file.delete()
@@ -532,12 +548,13 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
         viewModelScope.launch {
             _uninstallState.value = UninstallState.Downloading(hashedName, "Starting download...")
+            val bundleCacheDir = File(context.cacheDir, "bundle_cache").apply { mkdirs() }
             val (success, messageOrPath) = withContext(Dispatchers.IO) {
                 if (!Python.isStarted()) {
                     Python.start(com.chaquo.python.android.AndroidPlatform(context))
                 }
                 val cacheKey = "uninstall_${System.currentTimeMillis()}"
-                ModdingService.downloadBundle(hashedName, selectedQuality.value, context.cacheDir.absolutePath, cacheKey, context.filesDir.absolutePath) { progress ->
+                ModdingService.downloadBundle(hashedName, selectedQuality.value, bundleCacheDir.absolutePath, cacheKey, context.filesDir.absolutePath) { progress ->
                     viewModelScope.launch(Dispatchers.Main) {
                         _uninstallState.value = UninstallState.Downloading(hashedName, progress)
                     }
@@ -546,9 +563,8 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
             if (success) {
                 val downloadedFile = File(messageOrPath)
-                val relativePath = downloadedFile.relativeTo(context.cacheDir)
+                val relativePath = downloadedFile.relativeTo(bundleCacheDir)
                 val publicUri = saveFileToDownloads(context, downloadedFile, relativePath.path, "Shared")
-                downloadedFile.delete()
 
                 if (publicUri != null) {
                     val shizukuAvailable = ShizukuManager.isRunning()

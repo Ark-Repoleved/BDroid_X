@@ -7,6 +7,7 @@ import com.chaquo.python.Python
 import com.example.bd2modmanager.data.model.MatchStrategy
 import com.example.bd2modmanager.data.model.ModCacheInfo
 import com.example.bd2modmanager.data.model.ModDetails
+import com.example.bd2modmanager.data.model.ModFileListCacheEntry
 import com.example.bd2modmanager.data.model.ModInfo
 import com.example.bd2modmanager.data.model.ResolutionState
 import com.example.bd2modmanager.data.model.ResolvedTarget
@@ -29,6 +30,7 @@ class ModRepository(
     companion object {
         // Bumped when the cached ModCacheInfo schema changes.
         private const val MOD_CACHE_FILENAME = "mod_cache_v2.json"
+        private const val MOD_FILELIST_CACHE_FILENAME = "mod_filelist_cache_v1.json"
     }
 
     private fun shouldIgnoreModEntry(entryName: String?): Boolean {
@@ -49,7 +51,9 @@ class ModRepository(
     suspend fun scanMods(dirUri: Uri): List<ModInfo> {
         return withContext(Dispatchers.IO) {
             val existingCache = loadModCache()
+            val existingFileListCache = loadFileListCache()
             val newCache = mutableMapOf<String, ModCacheInfo>()
+            val newFileListCache = mutableMapOf<String, ModFileListCacheEntry>()
             val tempModsList = mutableListOf<ModInfo>()
             val candidates = mutableListOf<ScannedModCandidate>()
 
@@ -82,6 +86,11 @@ class ModRepository(
 
                     val fileUri = DocumentsContract.buildDocumentUriUsingTree(dirUri, documentId)
                     val uriString = fileUri.toString()
+                    val cachedFileList = existingFileListCache[uriString]
+                    if (cachedFileList != null && cachedFileList.lastModified == lastModified) {
+                        newFileListCache[uriString] = cachedFileList
+                    }
+
                     val cachedInfo = existingCache[uriString]
 
                     if (cachedInfo != null && cachedInfo.lastModified == lastModified) {
@@ -106,10 +115,22 @@ class ModRepository(
                         )
                     } else {
                         val modName = displayName.replace(Regex("\\.zip$", RegexOption.IGNORE_CASE), "")
-                        val modDetails = if (isDirectory) {
-                            extractModDetailsFromDirectory(dirUri, fileUri)
+                        val modDetails = if (cachedFileList != null && cachedFileList.lastModified == lastModified) {
+                            ModDetails(cachedFileList.fileId, cachedFileList.fileNames)
                         } else {
-                            extractModDetailsFromUri(fileUri)
+                            val extracted = if (isDirectory) {
+                                extractModDetailsFromDirectory(dirUri, fileUri)
+                            } else {
+                                extractModDetailsFromUri(fileUri)
+                            }
+                            newFileListCache[uriString] = ModFileListCacheEntry(
+                                lastModified = lastModified,
+                                name = modName,
+                                isDirectory = isDirectory,
+                                fileId = extracted.fileId,
+                                fileNames = extracted.fileNames
+                            )
+                            extracted
                         }
                         candidates.add(
                             ScannedModCandidate(
@@ -238,12 +259,39 @@ class ModRepository(
             }
 
             saveModCache(newCache)
+            saveFileListCache(newFileListCache)
             tempModsList.sortedBy { it.name }
         }
     }
 
     private fun getModCacheFile(): File {
         return File(context.filesDir, MOD_CACHE_FILENAME)
+    }
+
+    private fun getFileListCacheFile(): File {
+        return File(context.filesDir, MOD_FILELIST_CACHE_FILENAME)
+    }
+
+    private fun loadFileListCache(): Map<String, ModFileListCacheEntry> {
+        val cacheFile = getFileListCacheFile()
+        if (!cacheFile.exists()) return emptyMap()
+        return try {
+            val json = cacheFile.readText()
+            val type = object : TypeToken<Map<String, ModFileListCacheEntry>>() {}.type
+            gson.fromJson(json, type) ?: emptyMap()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            emptyMap()
+        }
+    }
+
+    private fun saveFileListCache(cache: Map<String, ModFileListCacheEntry>) {
+        try {
+            val cacheFile = getFileListCacheFile()
+            cacheFile.writeText(gson.toJson(cache))
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun resolvedHashSafe(payload: JSONObject): String? =

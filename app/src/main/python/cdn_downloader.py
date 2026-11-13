@@ -16,6 +16,8 @@ import maintenance_info_pb2
 MAINTENANCE_URL = 'https://mt.bd2.pmang.cloud/MaintenanceInfo'
 CDN_ROOT = 'https://cdn.bd2.pmang.cloud/ServerData'
 MAX_DOWNLOAD_RETRIES = 3
+BUNDLE_CACHE_MAX_BYTES = 1024 * 1024 * 1024  # 1 GB LRU cap
+BUNDLE_CACHE_IN_FLIGHT_GRACE_SEC = 600
 
 
 def _fetch_maintenance_info():
@@ -281,8 +283,52 @@ def generate_download_urls(base_url, internal_id, download_name, bundle_hash):
     return ordered
 
 
+def _prune_bundle_cache(cache_root, max_bytes=BUNDLE_CACHE_MAX_BYTES, keep_path=None):
+    """Prune oldest cached __data files when total size exceeds max_bytes."""
+    try:
+        root = Path(cache_root)
+        if not root.is_dir():
+            return
+        keep_resolved = Path(keep_path).resolve() if keep_path else None
+        now = time.time()
+        entries = []
+        total_size = 0
+        for data_file in root.glob('*/*/__data'):
+            try:
+                st = data_file.stat()
+                total_size += st.st_size
+                entries.append((st.st_mtime, st.st_size, data_file))
+            except OSError:
+                continue
+
+        if total_size <= max_bytes:
+            return
+
+        entries.sort(key=lambda item: item[0])
+        for mtime, size, path in entries:
+            if total_size <= max_bytes:
+                break
+            if keep_resolved and path.resolve() == keep_resolved:
+                continue
+            if now - mtime < BUNDLE_CACHE_IN_FLIGHT_GRACE_SEC:
+                continue
+            try:
+                path.unlink()
+                total_size -= size
+                # Clean empty hash / bundle directories
+                for parent in (path.parent, path.parent.parent):
+                    try:
+                        parent.rmdir()
+                    except OSError:
+                        break
+            except OSError:
+                continue
+    except Exception:
+        pass
+
+
 def download_bundle(index, bundle_name, quality, version, output_dir, progress_callback=None):
-    """Download one bundle using its catalog record.
+    """Download one bundle using its catalog record, reusing valid cached copies.
 
     Returns (path_to___data, error).
     """
@@ -301,6 +347,19 @@ def download_bundle(index, bundle_name, quality, version, output_dir, progress_c
     output_file_path = Path(output_dir) / bundle_name / bundle_hash / '__data'
     output_file_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Reuse valid cached bundle matching exact (bundle_name, bundle_hash)
+    if output_file_path.is_file():
+        try:
+            cached_size = output_file_path.stat().st_size
+            if cached_size > 0:
+                os.utime(str(output_file_path), None)
+                if progress_callback:
+                    progress_callback('Using cached bundle {} ({:.1f} MB)...'.format(
+                        bundle_name, cached_size / 1048576.0))
+                return str(output_file_path), None
+        except OSError:
+            pass
+
     last_error = None
     for i, url in enumerate(urls):
         if progress_callback:
@@ -312,6 +371,7 @@ def download_bundle(index, bundle_name, quality, version, output_dir, progress_c
         success, error = _try_download_bundle(
             url, str(output_file_path), record.get('size'), progress_callback)
         if success:
+            _prune_bundle_cache(output_dir, BUNDLE_CACHE_MAX_BYTES, keep_path=output_file_path)
             return str(output_file_path), None
         last_error = error
         try:

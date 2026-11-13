@@ -27,13 +27,13 @@ _IGNORED_EXTENSIONS = (
     '.modfile', '.md', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.url', '.lnk',
 )
 
-# 平行處理設定
-# 限制同時處理的紋理數量，避免記憶體過載
-MAX_PARALLEL_TEXTURES = min(4, max(1, (os.cpu_count() or 4) // 2))
-
 # 檢測是否在 Android 環境 (Chaquopy)
 # Android 上 ProcessPoolExecutor 可能無法正常工作，改用 ThreadPoolExecutor
 IS_ANDROID = hasattr(sys, 'getandroidapilevel') or 'ANDROID_ROOT' in os.environ
+
+# 平行處理設定
+# Android 上限制同時處理 2 張紋理，降低記憶體尖峰與執行緒競爭
+MAX_PARALLEL_TEXTURES = 2 if IS_ANDROID else min(4, max(1, (os.cpu_count() or 4) // 2))
 
 from UnityPy.helpers import TypeTreeHelper
 TypeTreeHelper.read_typetree_boost = False
@@ -884,6 +884,8 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                     if pil_img:
                         pil_img.close()
                         del pil_img
+                    if (i + 1) % 10 == 0:
+                        gc.collect()
         
         del asset_map
         del mod_files

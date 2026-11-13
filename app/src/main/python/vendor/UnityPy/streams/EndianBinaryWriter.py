@@ -46,7 +46,7 @@ class EndianBinaryWriter:
         return ret
 
     def write_stream(self, source: IOBase, length: int):
-        chunk_size = 4096
+        chunk_size = 262144
         while length > 0:
             read_size = min(length, chunk_size)
             chunk = source.read(read_size)

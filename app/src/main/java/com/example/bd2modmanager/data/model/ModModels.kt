@@ -70,6 +70,14 @@ data class CharacterInfo(val character: String, val costume: String, val type: S
 
 data class ModDetails(val fileId: String?, val fileNames: List<String>)
 
+data class ModFileListCacheEntry(
+    val lastModified: Long,
+    val name: String,
+    val isDirectory: Boolean,
+    val fileId: String?,
+    val fileNames: List<String>
+)
+
 data class RepackJob(val hashedName: String, val modsToInstall: List<ModInfo>)
 sealed class JobStatus {
     object Pending : JobStatus()

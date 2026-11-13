@@ -251,9 +251,38 @@ class BundleFile(File.File):
         uncompressed_data_file = tempfile.TemporaryFile()
         try:
             for name, f in self.files.items():
-                file_data = f.bytes if isinstance(f, (EndianBinaryReader, EndianBinaryWriter)) else f.save()
-                file_len = len(file_data)
-                uncompressed_data_file.write(file_data)
+                start_pos = uncompressed_data_file.tell()
+                if isinstance(f, EndianBinaryReader):
+                    f.Position = 0
+                    remaining = f.Length
+                    while remaining > 0:
+                        chunk = f.read(min(1048576, remaining))
+                        if not chunk:
+                            break
+                        uncompressed_data_file.write(chunk)
+                        remaining -= len(chunk)
+                elif isinstance(f, EndianBinaryWriter):
+                    f.stream.seek(0)
+                    while True:
+                        chunk = f.stream.read(1048576)
+                        if not chunk:
+                            break
+                        uncompressed_data_file.write(chunk)
+                else:
+                    # Stream SerializedFile into its own TemporaryFile (so offset 0 alignment holds)
+                    # then copy in chunks, avoiding huge in-memory BytesIO + bytes duplicates.
+                    sf_tmp = tempfile.TemporaryFile()
+                    try:
+                        f.save(sf_tmp)
+                        sf_tmp.seek(0)
+                        while True:
+                            chunk = sf_tmp.read(1048576)
+                            if not chunk:
+                                break
+                            uncompressed_data_file.write(chunk)
+                    finally:
+                        sf_tmp.close()
+                file_len = uncompressed_data_file.tell() - start_pos
                 files.append((name, f.flags, file_len))
             uncompressed_data_size = uncompressed_data_file.tell()
             uncompressed_data_file.seek(0)

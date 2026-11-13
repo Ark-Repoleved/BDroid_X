@@ -15,7 +15,19 @@ class CharacterRepository(private val context: Context) {
         private const val MOD_CACHE_FILENAME = "mod_cache_v2.json"
     }
 
+    @Volatile
     private var characterLut: Map<String, List<CharacterInfo>> = emptyMap()
+
+    suspend fun loadLocalCharacterData() {
+        if (characterLut.isEmpty()) {
+            characterLut = parseCharacterJson()
+        }
+    }
+
+    fun hasLocalCatalogIndex(quality: String): Boolean {
+        val normalized = if (quality.equals("SD", ignoreCase = true)) "sd" else "hd"
+        return File(context.filesDir, "catalog_index_${normalized}.json").exists()
+    }
 
     /**
      * Returns the update status: "SUCCESS", "SKIPPED", or "FAILED".
