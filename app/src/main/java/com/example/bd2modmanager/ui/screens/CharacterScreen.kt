@@ -1,6 +1,14 @@
 package com.example.bd2modmanager.ui.screens
 
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -20,7 +28,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -39,6 +46,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.state.ToggleableState
@@ -46,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.bd2modmanager.data.model.ModCategory
 import com.example.bd2modmanager.data.model.ModInfo
 import com.example.bd2modmanager.data.model.ResolutionState
@@ -53,6 +63,7 @@ import com.example.bd2modmanager.data.model.categoryOf
 import com.example.bd2modmanager.data.model.isUnknownCharacter
 import com.example.bd2modmanager.ui.components.CharacterAvatar
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 data class CharacterEntry(
     val name: String,
@@ -188,6 +199,7 @@ fun CharacterScreen(
                     AlphabetIndex(
                         letters = letters,
                         activeLetter = draggingLetter ?: visibleInitial,
+                        isDragging = draggingLetter != null,
                         onPick = { letter ->
                             draggingLetter = letter
                             var target = playable.indexOfFirst { initialOf(it.name) == letter }
@@ -203,19 +215,24 @@ fun CharacterScreen(
                     )
                 }
 
-                draggingLetter?.let { letter ->
+                AnimatedVisibility(
+                    visible = draggingLetter != null,
+                    enter = fadeIn(tween(120)) + scaleIn(initialScale = 0.85f, animationSpec = tween(120)),
+                    exit = fadeOut(tween(180)) + scaleOut(targetScale = 0.85f, animationSpec = tween(180))
+                ) {
                     Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primary,
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.94f),
+                        tonalElevation = 4.dp,
                         shadowElevation = 6.dp,
                         modifier = Modifier.size(64.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Text(
-                                text = letter.toString(),
+                                text = (draggingLetter ?: ' ').toString(),
                                 style = MaterialTheme.typography.headlineMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimary
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
                     }
@@ -238,18 +255,24 @@ private fun initialOf(name: String): Char {
 private fun AlphabetIndex(
     letters: List<Char>,
     activeLetter: Char?,
+    isDragging: Boolean,
     onPick: (Char) -> Unit,
     onDragEnd: () -> Unit
 ) {
     if (letters.size < 2) return
     var height by remember { mutableIntStateOf(1) }
     var lastPicked by remember { mutableStateOf<Char?>(null) }
+    val activeIdx = remember(letters, activeLetter) {
+        letters.indexOf(activeLetter)
+    }
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val mutedColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.48f)
 
     Column(
         modifier = Modifier
             .fillMaxHeight()
-            .width(28.dp)
-            .padding(vertical = 8.dp)
+            .width(32.dp)
+            .padding(vertical = 10.dp)
             .onSizeChanged { height = it.height.coerceAtLeast(1) }
             .pointerInput(letters) {
                 awaitEachGesture {
@@ -284,24 +307,49 @@ private fun AlphabetIndex(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceEvenly
     ) {
-        letters.forEach { ch ->
-            val isActive = ch == activeLetter
+        letters.forEachIndexed { index, ch ->
+            val distance = if (activeIdx >= 0) abs(index - activeIdx) else Int.MAX_VALUE
+            val proximity = when (distance) {
+                0 -> 1f
+                1 -> 0.55f
+                2 -> 0.25f
+                else -> 0f
+            }
+            val targetScale = 1f + proximity * (if (isDragging) 0.45f else 0.25f)
+            val targetOffsetX = if (isDragging) -proximity * 10f else -proximity * 3f
+            val targetColor = lerp(mutedColor, primaryColor, proximity)
+
+            val animScale by animateFloatAsState(
+                targetValue = targetScale,
+                animationSpec = tween(140),
+                label = "alpha_scale"
+            )
+            val animOffsetX by animateFloatAsState(
+                targetValue = targetOffsetX,
+                animationSpec = tween(140),
+                label = "alpha_offset"
+            )
+            val animColor by animateColorAsState(
+                targetValue = targetColor,
+                animationSpec = tween(140),
+                label = "alpha_color"
+            )
+
             Box(
                 modifier = Modifier
-                    .size(20.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (isActive) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.surface.copy(alpha = 0f)
-                    ),
+                    .size(22.dp)
+                    .graphicsLayer {
+                        scaleX = animScale
+                        scaleY = animScale
+                        translationX = animOffsetX
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    ch.toString(),
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
-                    color = if (isActive) MaterialTheme.colorScheme.onPrimary
-                    else MaterialTheme.colorScheme.primary
+                    text = ch.toString(),
+                    fontSize = 11.sp,
+                    fontWeight = if (distance == 0) FontWeight.Bold else FontWeight.Medium,
+                    color = animColor
                 )
             }
         }

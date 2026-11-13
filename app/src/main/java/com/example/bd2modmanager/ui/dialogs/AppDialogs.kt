@@ -26,7 +26,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.example.bd2modmanager.data.model.*
 import com.example.bd2modmanager.ui.components.InstallJobRow
 import com.example.bd2modmanager.ui.components.SelectionRow
@@ -132,15 +131,14 @@ fun ParallelInstallDialog(
     val context = LocalContext.current
 
     Dialog(
-        onDismissRequest = { onDismiss() },
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        onDismissRequest = { onDismiss() }
     ) {
         Surface(
             shape = AlertDialogDefaults.shape,
             color = AlertDialogDefaults.containerColor,
             tonalElevation = AlertDialogDefaults.TonalElevation,
             modifier = Modifier
-                .fillMaxWidth(0.92f)
+                .fillMaxWidth()
                 .padding(vertical = 24.dp)
         ) {
             Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
