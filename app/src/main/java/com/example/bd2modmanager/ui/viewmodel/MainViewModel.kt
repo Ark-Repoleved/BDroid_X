@@ -330,7 +330,6 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
     private suspend fun processSingleJob(context: Context, installJob: InstallJob) {
         val job = installJob.job
         val hashedName = job.hashedName
-        var originalDataCache: File? = null
         val repackedFiles = mutableListOf<File>()
         val modAssetsDir = File(context.cacheDir, "temp_mod_assets_${hashedName}")
         var lastProgressUpdateMs = 0L
@@ -402,7 +401,7 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     candidateErrors.add("$candidate: $messageOrPath")
                     continue
                 }
-                originalDataCache = File(messageOrPath)
+                val originalDataCache = File(messageOrPath)
                 val relativePath = originalDataCache.relativeTo(bundleCacheDir)
 
                 updateJobStatus(hashedName, JobStatus.Installing("Waiting to repack..."))
@@ -440,8 +439,6 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                         originalDataCache.takeIf { it.exists() }?.delete()
                     } catch (_: Exception) {}
                 }
-
-                originalDataCache = null
             }
 
             val repoPath = chosenRepoPath
