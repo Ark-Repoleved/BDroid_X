@@ -100,8 +100,9 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
                         delay(POLL_INTERVAL_MS)
                         val id = repository.currentDownloadId()
                         if (id != -1L && repository.isDownloadSuccessful(id)) {
-                            repository.downloadedApkFile()?.let { f ->
-                                _updateApkReady.value = f.name
+                            val downloadedFile = repository.downloadedApkFile()
+                            if (downloadedFile != null) {
+                                _updateApkReady.value = downloadedFile.name
                                 break
                             }
                         }

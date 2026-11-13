@@ -146,21 +146,23 @@ class UpdateRepository(private val appContext: Context) {
         )
     }
 
-    private fun parseApkAssets(root: JSONObject): List<ApkAsset> = try {
-        val arr = root.optJSONArray("assets") ?: return emptyList()
-        buildList {
-            for (i in 0 until arr.length()) {
-                val obj = arr.optJSONObject(i) ?: continue
-                val name = obj.optString("name").takeIf { it.endsWith(".apk", ignoreCase = true) }
-                    ?: continue
-                val url = obj.optString("browser_download_url").takeIf { it.isNotBlank() }
-                    ?: continue
-                add(ApkAsset(name, url, obj.optLong("size", 0L)))
+    private fun parseApkAssets(root: JSONObject): List<ApkAsset> {
+        return try {
+            val arr = root.optJSONArray("assets") ?: return emptyList()
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val obj = arr.optJSONObject(i) ?: continue
+                    val name = obj.optString("name").takeIf { it.endsWith(".apk", ignoreCase = true) }
+                        ?: continue
+                    val url = obj.optString("browser_download_url").takeIf { it.isNotBlank() }
+                        ?: continue
+                    add(ApkAsset(name, url, obj.optLong("size", 0L)))
+                }
             }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse APK assets", e)
+            emptyList()
         }
-    } catch (e: Exception) {
-        Log.w(TAG, "Failed to parse APK assets", e)
-        emptyList()
     }
 
     private fun httpGet(url: String): String? {
