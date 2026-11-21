@@ -47,8 +47,6 @@ For the app to recognize your mods, they must follow a specific structure. Each 
 
 > **⚠️ Warning:** All filenames must be **lowercase** (e.g., `char000104.png`, not `Char000104.png`). Additionally, the image filename referenced inside the `.atlas` file must also be **lowercase**. Otherwise, the game might **crash**.
 
-> **ℹ️ Spine version:** The game now uses **Spine 4.2**. Mods made with Spine 4.1 (`.json` or `.skel`) are converted to 4.2 automatically while installing; your mod files are not changed. Mods made with Spine 4.0 or older are not supported.
-
 **Example Folder Structure:**
 ```
 📁 .BD2_Mods/
