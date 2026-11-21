@@ -17,6 +17,12 @@ object, so we bridge from those stems to the mod file stems:
 
 Everything else is matched by the exact asset file stem.
 
+Since the 2026-11 game update (Spine 4.2) each skeleton's .skel/.atlas/.png
+live in their own bundle, e.g.
+``.../char000104/skeletondata/char000104_<hash>.bundle``.  Most of those are
+addressable, but some are only reachable as dependencies, so skeleton bundles
+are also indexed by their bundle path.
+
 The resulting index is a few MB of JSON (vs. a 60+ MB catalog) and is rebuilt
 automatically whenever the game's bundle version changes.
 """
@@ -26,7 +32,7 @@ import re
 import struct
 from pathlib import Path
 
-INDEX_SCHEMA_VERSION = 2
+INDEX_SCHEMA_VERSION = 3
 BUNDLE_PROVIDER = "UnityEngine.ResourceManagement.ResourceProviders.AssetBundleProvider"
 
 _COMPOUND_EXTS = ('.skel.bytes', '.atlas.txt', '.skel.txt')
@@ -130,6 +136,15 @@ def family_aliases(stem):
         if m:
             out.append('cutscene_char' + m.group(1))
     return list(dict.fromkeys(x for x in out if x))
+
+
+_SKELETON_BUNDLE_RE = re.compile(r'skeletondata/([^/]+?)(?:_[0-9a-f]{32})?\.bundle$', re.IGNORECASE)
+
+
+def skeleton_bundle_stem(bundle_path):
+    """Family stem of a dedicated Spine skeleton bundle, from its CDN path."""
+    m = _SKELETON_BUNDLE_RE.search(bundle_path or '')
+    return m.group(1).lower() if m else ''
 
 
 _SECONDARY_PATH_HINTS = ('/lastnight/', '/story/', '/event/', '/minigame/', '/tutorial/')
@@ -296,6 +311,15 @@ def build_catalog_index(catalog_content, version=None):
         elif basename.endswith(('.prefab', '.playable', '.asset')):
             for alias in family_aliases(stem):
                 _add_candidate(family, alias, bundle_name, score, censor_target)
+
+    for info in bundles.values():
+        path = info.get('internal_id') or info.get('download_name') or ''
+        stem = skeleton_bundle_stem(path)
+        if not stem:
+            continue
+        bundle_names.setdefault(info['name'], info)
+        censor_target = censored if 'censorship' in path.lower() else None
+        _add_candidate(exact, stem, info['name'], SCORE_SKELETON, censor_target)
 
     return {
         'schemaVersion': INDEX_SCHEMA_VERSION,

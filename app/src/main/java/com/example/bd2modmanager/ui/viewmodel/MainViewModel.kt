@@ -986,10 +986,29 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
                     }
                 }
 
-                if (skelPath != null && atlasPath != null) {
+                val sourceSkelPath = skelPath
+                if (sourceSkelPath != null && atlasPath != null) {
+                    // The preview runs the Spine 4.2 runtime, so show the skeleton exactly as
+                    // it will be installed: 4.1 mods are converted the same way as on repack.
+                    if (!Python.isStarted()) {
+                        Python.start(com.chaquo.python.android.AndroidPlatform(context))
+                    }
+                    val previewSkel = File(tempDir, "__preview_spine42.skel")
+                    val (prepared, detail) = ModdingService.prepareSkeletonForPreview(
+                        sourceSkelPath, previewSkel.absolutePath
+                    )
+                    if (!prepared) {
+                        tempDir.deleteRecursively()
+                        withContext(Dispatchers.Main) {
+                            // A Python traceback ends with the exception message.
+                            val reason = detail.lineSequence().lastOrNull { it.isNotBlank() } ?: detail
+                            Toast.makeText(context, "Cannot preview: $reason", Toast.LENGTH_LONG).show()
+                        }
+                        return@launch
+                    }
                     withContext(Dispatchers.Main) {
                         val intent = Intent(context, SpinePreviewActivity::class.java).apply {
-                            putExtra("skelPath", skelPath)
+                            putExtra("skelPath", previewSkel.absolutePath)
                             putExtra("atlasPath", atlasPath)
                             putExtra("tempDirPath", tempDir.absolutePath)
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK

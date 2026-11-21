@@ -6,20 +6,27 @@ let speedInput = getById('speed');
 let mixInput = getById('default-mix');
 let skinList = getById('skins');
 let animationList = getById('animations');
-let alphaMode = 1; // Default to UNPACK
 let availableAnimations = [];
 let currentSpeed = 1;
 
-// PIXI.js app setup
+// PIXI.js app setup (PixiJS 7)
 const app = new PIXI.Application({
     resizeTo: scene,
     antialias: true,
     autoDensity: true,
-    transparent: true,
+    backgroundAlpha: 0,
     preserveDrawingBuffer: true,
     resolution: window.devicePixelRatio || 1,
 });
 scene.appendChild(app.view);
+
+const showError = (message) => {
+    console.error(message);
+    const box = createTag('div');
+    box.style.cssText = 'color: #ff6b6b; padding: 20px; white-space: pre-wrap; word-break: break-word;';
+    box.textContent = message;
+    scene.replaceChildren(box);
+};
 
 // --- Operator Functions (from operator.js) ---
 const setZoom = (scale) => {
@@ -94,37 +101,71 @@ const pauseAnimation = () => {
 };
 
 // --- Core Loading and Rendering Logic ---
-function onLoaded(loader, res) {
+
+// Android WebView cannot fetch() file:// URLs, so files are read with XHR
+// (status 0 is what a successful file:// request reports).
+const requestFile = (url, responseType) => new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open('GET', url);
+    request.responseType = responseType;
+    request.onload = () => {
+        if ((request.status === 200 || request.status === 0) && request.response) {
+            resolve(request.response);
+        } else {
+            reject(new Error(`Could not read ${decodeURIComponent(url)} (status ${request.status})`));
+        }
+    };
+    request.onerror = () => reject(new Error(`Could not read ${decodeURIComponent(url)}`));
+    request.send();
+});
+
+const loadImage = (url) => new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`Could not load texture ${decodeURIComponent(url)}`));
+    image.src = url;
+});
+
+const toUrl = (path) => {
+    // Absolute device paths come from the app; anything else is a relative URL.
+    if (!path.startsWith('/')) return path;
+    return 'file://' + path.split('/').map(encodeURIComponent).join('/');
+};
+
+async function loadSkeletonData(skelUrl, atlasUrl) {
+    const atlasText = await requestFile(atlasUrl, 'text');
+    const atlas = new spine.TextureAtlas(atlasText);
+    const baseUrl = atlasUrl.substring(0, atlasUrl.lastIndexOf('/') + 1);
+
+    // Same texture setup as spine-pixi's own atlas loader.
+    await Promise.all(atlas.pages.map(async (page) => {
+        const image = await loadImage(baseUrl + page.name.split('/').map(encodeURIComponent).join('/'));
+        const baseTexture = new PIXI.BaseTexture(image, {
+            alphaMode: page.pma ? PIXI.ALPHA_MODES.PMA : PIXI.ALPHA_MODES.UNPACK,
+        });
+        page.setTexture(spine.SpineTexture.from(baseTexture));
+    }));
+
+    const attachmentLoader = new spine.AtlasAttachmentLoader(atlas);
+    if (skelUrl.toLowerCase().endsWith('.json')) {
+        const json = await requestFile(skelUrl, 'text');
+        return new spine.SkeletonJson(attachmentLoader).readSkeletonData(json);
+    }
+    const bytes = new Uint8Array(await requestFile(skelUrl, 'arraybuffer'));
+    return new spine.SkeletonBinary(attachmentLoader).readSkeletonData(bytes);
+}
+
+function showSkeleton(skeletonData) {
     app.stage.removeChildren();
     availableAnimations = [];
     skinList.innerHTML = '';
     animationList.innerHTML = '';
 
-    let spineResource = null;
-    for (const key in res) {
-        if (res[key] && res[key].spineData) {
-            spineResource = res[key];
-            break;
-        }
-    }
-
-    if (!spineResource) {
-        console.error("Spine data not found in loaded resources.");
-        scene.innerHTML = '<div style="color: red; padding: 20px;">Error: Failed to load spine data.</div>';
-        return;
-    }
-
-    for (const key in res) {
-        if (res[key] && res[key].spineAtlas) {
-            res[key].spineAtlas.pages.forEach(p => p.baseTexture.alphaMode = alphaMode);
-        }
-    }
-
-    const skeleton = new PIXI.spine.Spine(spineResource.spineData);
+    const skeleton = new spine.Spine({ skeletonData, autoUpdate: true });
     app.stage.addChild(skeleton);
 
     // Populate skins
-    skeleton.spineData.skins.forEach((s, index) => {
+    skeletonData.skins.forEach((s, index) => {
         const li = createTag('li');
         const label = createTag('label');
         const input = createTag('input');
@@ -142,7 +183,7 @@ function onLoaded(loader, res) {
     });
 
     // Populate animations
-    availableAnimations = skeleton.spineData.animations.map(a => ({ name: a.name, duration: a.duration.toFixed(3) }));
+    availableAnimations = skeletonData.animations.map(a => ({ name: a.name, duration: a.duration.toFixed(3) }));
     availableAnimations.forEach((a, index) => {
         const li = createTag('li');
         const label = createTag('label');
@@ -172,7 +213,8 @@ function onLoaded(loader, res) {
 function setupEventListeners() {
     // Listen for background color changes
     colorInput.addEventListener('input', () => {
-        app.renderer.backgroundColor = parseInt(colorInput.value.slice(1), 16);
+        app.renderer.background.color = parseInt(colorInput.value.slice(1), 16);
+        app.renderer.background.alpha = 1;
     });
 
     // Listen for zoom slider changes
@@ -293,18 +335,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const atlasPath = params.get('atlas') || '';
 
     if (!skelPath || !atlasPath) {
-        console.error('Missing skel or atlas path in URL parameters.');
-        scene.innerHTML = '<div style="color: red; padding: 20px;">Error: Missing file paths. Cannot load model.</div>';
+        showError('Error: Missing file paths. Cannot load model.');
         return;
     }
 
     setupEventListeners();
 
-    const atlasUrl = `file://${atlasPath}`;
-    const skelUrl = `file://${skelPath}`;
-
-    app.loader
-        .add(atlasUrl) // Let PIXI use the URL as the key
-        .add(skelUrl)
-        .load(onLoaded);
+    loadSkeletonData(toUrl(skelPath), toUrl(atlasPath))
+        .then(showSkeleton)
+        .catch((e) => showError(`Error: Failed to load spine data.\n${e && e.message ? e.message : e}`));
 });

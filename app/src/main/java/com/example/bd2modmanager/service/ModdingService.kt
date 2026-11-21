@@ -101,6 +101,25 @@ object ModdingService {
         }
     }
 
+    /** Converts a mod skeleton (.json / .skel, Spine 4.1 or 4.2) to the Spine 4.2 binary the game loads. */
+    fun prepareSkeletonForPreview(skeletonPath: String, outputPath: String): Pair<Boolean, String> {
+        return try {
+            val py = Python.getInstance()
+            val mainScript = py.getModule("main_script")
+
+            val result = mainScript.callAttr(
+                "prepare_preview_skeleton",
+                skeletonPath,
+                outputPath
+            ).asList()
+
+            Pair(result[0].toBoolean(), result[1].toString())
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Pair(false, e.message ?: "An unknown error occurred while preparing the preview.")
+        }
+    }
+
     fun mergeSpineAssets(modPath: String, onProgress: (String) -> Unit): Pair<Boolean, String> {
         return try {
             val py = Python.getInstance()

@@ -2,7 +2,7 @@ from PIL import Image, ImageFile
 import os
 import ctypes
 from ctypes import *
-from .json_to_skel import json_to_skel_bytes
+from .spine_skeleton import convert_skeleton_file, SpineFormatError
 import tempfile
 import gc
 import re
@@ -618,7 +618,7 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
         # ========== 階段一：分類所有 mod 檔案 ==========
         report_progress("Phase 1: Categorizing mod files...")
 
-        json_files = []      # JSON -> SKEL 轉換
+        skeleton_files = []  # .json / .skel -> Spine 4.2 binary
         png_astc_files = []  # PNG -> ASTC 壓縮 (需平行處理)
         png_rgba_files = []  # PNG -> RGBA32 (不需壓縮)
         text_files = []      # TextAsset 替換
@@ -632,7 +632,7 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                 base_name, _ = os.path.splitext(mod_filename)
                 target_asset_name = (base_name + ".skel").lower()
                 if _asset_objects(asset_map, target_asset_name, "TextAsset"):
-                    json_files.append((mod_filepath, target_asset_name))
+                    skeleton_files.append((mod_filepath, target_asset_name))
                 else:
                     unmatched_mod_files.append(mod_filename)
 
@@ -656,7 +656,9 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                     if _asset_objects(asset_map, cand, "TextAsset"):
                         matched_target = cand
                         break
-                if matched_target:
+                if matched_target and matched_target.endswith('.skel'):
+                    skeleton_files.append((mod_filepath, matched_target))
+                elif matched_target:
                     text_files.append((mod_filepath, matched_target))
                 else:
                     unmatched_mod_files.append(mod_filename)
@@ -665,24 +667,31 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
             report_progress("WARNING: {} file(s) did not match any asset in this bundle: {}".format(
                 len(unmatched_mod_files), ', '.join(sorted(unmatched_mod_files)[:8])))
 
-        report_progress(f"  - JSON animations: {len(json_files)}")
+        report_progress(f"  - Spine skeletons: {len(skeleton_files)}")
         report_progress(f"  - ASTC textures: {len(png_astc_files)}")
         report_progress(f"  - RGBA32 textures: {len(png_rgba_files)}")
         report_progress(f"  - Text assets: {len(text_files)}")
 
         # ========== 階段二：處理 JSON 和 TextAsset (序列) ==========
-        report_progress("Phase 2: Processing JSON and TextAsset files...")
+        report_progress("Phase 2: Processing Spine skeletons and TextAsset files...")
         processing_errors = []
 
-        # 處理 JSON -> SKEL
-        for i, (mod_filepath, target_asset_name) in enumerate(json_files):
+        # The game loads Spine 4.2 binary skeletons only; 4.1 mods are converted here.
+        for i, (mod_filepath, target_asset_name) in enumerate(skeleton_files):
             mod_filename = os.path.basename(mod_filepath)
-            current_progress = f"(JSON {i+1}/{len(json_files)}) "
+            current_progress = f"(Skeleton {i+1}/{len(skeleton_files)}) "
 
             try:
-                report_progress(f"{current_progress}Converting animation: {mod_filename}")
+                report_progress(f"{current_progress}Preparing skeleton: {mod_filename}")
                 target_objects = _asset_objects(asset_map, target_asset_name, "TextAsset")
-                skel_binary_data = json_to_skel_bytes(mod_filepath)
+                warnings = []
+                skel_binary_data, source_version, converted = convert_skeleton_file(mod_filepath, warnings)
+                if converted:
+                    report_progress(f"{current_progress}Converted Spine {source_version} -> 4.2 ({len(skel_binary_data)} bytes)")
+                else:
+                    report_progress(f"{current_progress}Already Spine {source_version}, copied as-is")
+                for warning in warnings[:5]:
+                    report_progress(f"{current_progress}Note: {warning}")
 
                 for obj in target_objects:
                     data = obj.read()
@@ -691,6 +700,9 @@ def repack_bundle(original_bundle_path: str, modded_assets_folder: str, output_p
                     edited = True
                 report_progress(f"{current_progress}Successfully replaced: {mod_filename} -> {len(target_objects)} object(s)")
 
+            except SpineFormatError as e:
+                processing_errors.append(f"{mod_filename}: {e}")
+                report_progress(f"Error processing {mod_filename}: {e}")
             except Exception as e:
                 import traceback
                 processing_errors.append(f"{mod_filename}: {e}")
