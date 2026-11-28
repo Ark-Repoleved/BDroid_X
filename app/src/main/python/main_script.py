@@ -19,7 +19,6 @@ import character_scraper
 import resolver
 import spine_merger
 from repacker.repacker import repack_bundle
-from repacker.spine_skeleton import convert_skeleton_file, SpineFormatError
 from unpacker import unpack_bundle as unpacker_main
 
 # In-memory state for the active catalog index.
@@ -274,23 +273,6 @@ def main(original_bundle_path, modded_assets_folder, output_path, use_astc, prog
         error_message = traceback.format_exc()
         print('An error occurred: {}'.format(error_message))
         return False, error_message, json.dumps([])
-
-
-def prepare_preview_skeleton(skeleton_path, output_path):
-    """Write the Spine 4.2 binary the game would receive, for the preview.
-
-    Returns (success, source_version_or_error).
-    """
-    try:
-        data, version, _converted = convert_skeleton_file(skeleton_path)
-        with open(output_path, 'wb') as handle:
-            handle.write(data)
-        return True, version
-    except SpineFormatError as e:
-        return False, str(e)
-    except Exception:
-        import traceback
-        return False, traceback.format_exc()
 
 
 def merge_spine_assets(mod_dir_path, progress_callback=None):

@@ -19,6 +19,7 @@ class SpinePreviewActivity : ComponentActivity() {
         val skelPath = intent.getStringExtra("skelPath")
         val atlasPath = intent.getStringExtra("atlasPath")
         val tempDirPath = intent.getStringExtra("tempDirPath")
+        val useSpine42 = intent.getBooleanExtra("useSpine42", true)
 
         if (tempDirPath != null) {
             tempDir = File(tempDirPath)
@@ -45,7 +46,8 @@ class SpinePreviewActivity : ComponentActivity() {
         val encodedSkelPath = Uri.encode(skelPath)
         val encodedAtlasPath = Uri.encode(atlasPath)
 
-        val url = "file:///android_asset/spine-viewer/preview.html?skel=$encodedSkelPath&atlas=$encodedAtlasPath"
+        val htmlFile = if (useSpine42) "preview.html" else "preview_legacy.html"
+        val url = "file:///android_asset/spine-viewer/$htmlFile?skel=$encodedSkelPath&atlas=$encodedAtlasPath"
         webView?.loadUrl(url)
     }
 

@@ -988,29 +988,23 @@ class MainViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel(
 
                 val sourceSkelPath = skelPath
                 if (sourceSkelPath != null && atlasPath != null) {
-                    // The preview runs the Spine 4.2 runtime, so show the skeleton exactly as
-                    // it will be installed: 4.1 mods are converted the same way as on repack.
-                    if (!Python.isStarted()) {
-                        Python.start(com.chaquo.python.android.AndroidPlatform(context))
-                    }
-                    val previewSkel = File(tempDir, "__preview_spine42.skel")
-                    val (prepared, detail) = ModdingService.prepareSkeletonForPreview(
-                        sourceSkelPath, previewSkel.absolutePath
-                    )
-                    if (!prepared) {
-                        tempDir.deleteRecursively()
-                        withContext(Dispatchers.Main) {
-                            // A Python traceback ends with the exception message.
-                            val reason = detail.lineSequence().lastOrNull { it.isNotBlank() } ?: detail
-                            Toast.makeText(context, "Cannot preview: $reason", Toast.LENGTH_LONG).show()
+                    val sourceSkelFile = File(sourceSkelPath)
+                    val inspection = com.example.bd2modmanager.utils.SpineVersionUtils.inspectSkeleton(sourceSkelFile)
+                    val previewSkelFile = if (inspection.isJson && !sourceSkelFile.name.endsWith(".json", ignoreCase = true)) {
+                        val jsonAlias = File(tempDir, "${sourceSkelFile.nameWithoutExtension}.json")
+                        if (!sourceSkelFile.renameTo(jsonAlias)) {
+                            sourceSkelFile.copyTo(jsonAlias, overwrite = true)
                         }
-                        return@launch
+                        jsonAlias
+                    } else {
+                        sourceSkelFile
                     }
                     withContext(Dispatchers.Main) {
                         val intent = Intent(context, SpinePreviewActivity::class.java).apply {
-                            putExtra("skelPath", previewSkel.absolutePath)
+                            putExtra("skelPath", previewSkelFile.absolutePath)
                             putExtra("atlasPath", atlasPath)
                             putExtra("tempDirPath", tempDir.absolutePath)
+                            putExtra("useSpine42", inspection.isSpine42)
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK
                         }
                         context.startActivity(intent)

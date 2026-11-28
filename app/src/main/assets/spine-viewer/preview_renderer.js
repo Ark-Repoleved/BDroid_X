@@ -132,26 +132,41 @@ const toUrl = (path) => {
     return 'file://' + path.split('/').map(encodeURIComponent).join('/');
 };
 
+const isJsonBytes = (bytes) => {
+    let i = 0;
+    if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+        i = 3;
+    }
+    while (i < bytes.length && (bytes[i] === 0x20 || bytes[i] === 0x09 || bytes[i] === 0x0D || bytes[i] === 0x0A)) {
+        i++;
+    }
+    return i < bytes.length && bytes[i] === 0x7B; // '{'
+};
+
 async function loadSkeletonData(skelUrl, atlasUrl) {
+    const skelPromise = requestFile(skelUrl, 'arraybuffer');
     const atlasText = await requestFile(atlasUrl, 'text');
     const atlas = new spine.TextureAtlas(atlasText);
     const baseUrl = atlasUrl.substring(0, atlasUrl.lastIndexOf('/') + 1);
 
-    // Same texture setup as spine-pixi's own atlas loader.
-    await Promise.all(atlas.pages.map(async (page) => {
-        const image = await loadImage(baseUrl + page.name.split('/').map(encodeURIComponent).join('/'));
-        const baseTexture = new PIXI.BaseTexture(image, {
-            alphaMode: page.pma ? PIXI.ALPHA_MODES.PMA : PIXI.ALPHA_MODES.UNPACK,
-        });
-        page.setTexture(spine.SpineTexture.from(baseTexture));
-    }));
+    // Load textures and skeleton bytes in parallel.
+    const [, skelBuffer] = await Promise.all([
+        Promise.all(atlas.pages.map(async (page) => {
+            const image = await loadImage(baseUrl + page.name.split('/').map(encodeURIComponent).join('/'));
+            const baseTexture = new PIXI.BaseTexture(image, {
+                alphaMode: page.pma ? PIXI.ALPHA_MODES.PMA : PIXI.ALPHA_MODES.UNPACK,
+            });
+            page.setTexture(spine.SpineTexture.from(baseTexture));
+        })),
+        skelPromise,
+    ]);
 
+    const bytes = new Uint8Array(skelBuffer);
     const attachmentLoader = new spine.AtlasAttachmentLoader(atlas);
-    if (skelUrl.toLowerCase().endsWith('.json')) {
-        const json = await requestFile(skelUrl, 'text');
+    if (skelUrl.toLowerCase().endsWith('.json') || isJsonBytes(bytes)) {
+        const json = new TextDecoder('utf-8').decode(bytes);
         return new spine.SkeletonJson(attachmentLoader).readSkeletonData(json);
     }
-    const bytes = new Uint8Array(await requestFile(skelUrl, 'arraybuffer'));
     return new spine.SkeletonBinary(attachmentLoader).readSkeletonData(bytes);
 }
 
